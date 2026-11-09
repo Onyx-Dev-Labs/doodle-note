@@ -1120,10 +1120,19 @@ namespace DoodleNote.DictationHelper
             string deliveryId = Delivery.CurrentRequestId;
             Thread thread = new Thread(delegate ()
             {
-                ClipboardOwnership ours;
+                // Round 22 (Opus S2): the ownership object exists BEFORE the write and is the one Write fills in, so a
+                // throw never replaces it: what the write did (Emptied above all) survives the exception.
+                ClipboardOwnership ours = new ClipboardOwnership();
                 bool ok = false;
-                try { ok = Write(text, out ours, saved.Sequence, job, saved, false); }
-                catch (Exception) { ours = new ClipboardOwnership(); }
+                try { ok = Write(text, ours, saved.Sequence, job, saved, false); }
+                catch (Exception error)
+                {
+                    ok = false;
+                    Wire.Log("ERROR: the clipboard write threw (" + error.GetType().Name + ")" + (ours.Emptied ? " after emptying the clipboard: the transaction may not write on its own any more; its record is kept, as an offer" : "; nothing was emptied"));
+                    // Emptied, then thrown: what is on the clipboard now is no proof of anything (ours, part of ours, or
+                    // nothing). No automatic put-back: the record is kept and offered (the user decides).
+                    if (ours.Emptied) { try { saved.LoseAuthority("the clipboard write threw after emptying the clipboard"); } catch (Exception) { } }
+                }
                 job.Ours = ours;
                 job.Result = ok;
                 if (Interlocked.CompareExchange(ref job.State, 1, 0) == 2)
@@ -1187,9 +1196,8 @@ namespace DoodleNote.DictationHelper
         /// is set as soon as EmptyClipboard succeeds, even if the text could not be set, so the caller
         /// can still put the user's content back. Only through WriteBounded (a transaction's record).
         /// </summary>
-        static bool Write(string text, out ClipboardOwnership ownership, uint expectSequence, LateWrite job, SavedClipboard saved, bool confirm)
+        static bool Write(string text, ClipboardOwnership ownership, uint expectSequence, LateWrite job, SavedClipboard saved, bool confirm)
         {
-            ownership = new ClipboardOwnership();
             PendingRecord record = saved != null ? saved.Record : null;
             // Test build only: this write thread uses another input language (KLID, e.g. 00000419), as a user with several has.
             // CI-only: on a real desktop with one input method for all apps this could switch the user's input language, so
@@ -1249,6 +1257,8 @@ namespace DoodleNote.DictationHelper
                         return false;
                     }
                     ownership.Emptied = true;
+                    // Test build only: the write throws right after emptying the clipboard (round 22, Opus S2).
+                    if (TestMode.Env("DICTATION_HELPER_TEST_THROW_AFTER_EMPTY") == "1") throw new InvalidOperationException("test: thrown after EmptyClipboard");
                     // Test build only: simulate SetClipboardData failing after the clipboard was emptied.
                     ok = TestMode.Env("DICTATION_HELPER_TEST_FAIL_SET") != "1"
                         && SetBytes(CF_UNICODETEXT, System.Text.Encoding.Unicode.GetBytes(text + "\0"));
