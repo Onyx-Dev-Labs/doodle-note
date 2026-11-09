@@ -159,7 +159,7 @@ function textLines(text: string, perLine: number): number {
 }
 
 /** Window size the page needs for a view; the overlay docks a window of this size. */
-export function overlaySize(view: OverlayView): Size {
+export function overlaySize(view: OverlayView, platform: string = process.platform): Size {
   if (view.mode === 'message' && view.diff) {
     // Room for the words, about 55 to a line, up to a fixed height.
     const chars = view.diff.reduce((total, part) => total + part.text.length, 0)
@@ -168,6 +168,14 @@ export function overlaySize(view: OverlayView): Size {
       width: WINDOW.diff.width,
       height: Math.max(WINDOW.message.height, Math.min(WINDOW.diff.height, 110 + lines * 19))
     }
+  }
+  // Round 25 (macOS parity): the growth below is Windows-only (the long clipboard warnings that needed it exist only
+  // there); every other platform keeps the sizes it had before round 24, exactly.
+  if (view.mode === 'message' && platform !== 'win32') {
+    if (view.controls.offerRestore || view.controls.offerDelete) return { ...WINDOW.offer }
+    return view.warning
+      ? { width: WINDOW.message.width, height: WINDOW.message.height + WINDOW.warningLine }
+      : { ...WINDOW.message }
   }
   if (view.mode === 'message') {
     // Round 24: room for the title, the warning and at least ONE line of the text (an offer card: its whole

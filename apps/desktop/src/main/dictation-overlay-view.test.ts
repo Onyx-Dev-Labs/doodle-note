@@ -1,16 +1,23 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { initialSessionState, reduce, type SessionEvent } from '../shared/dictation-session'
+import {
+  initialSessionState,
+  reduce,
+  type RecoveryReason,
+  type SessionEvent
+} from '../shared/dictation-session'
 import type { SessionState } from '../shared/dictation-session'
 import {
   CLIPBOARD_OFFER_COPY,
+  RECOVERY_MESSAGES,
   WARNINGS,
   describeClipboardSize,
   overlaySize,
   listMissing,
   overlayView,
   panelView,
-  type OverlayContext
+  type OverlayContext,
+  type OverlayView
 } from './dictation-overlay-view'
 
 const ctx = (over: Partial<OverlayContext> = {}): OverlayContext => ({
@@ -362,6 +369,119 @@ test('Windows (round 24): "+N more" counts every name (or the reported total), a
   const cut = listMissing([emoji])
   assert.equal(Array.from(cut).length, 61)
   assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(cut), 'no lone high surrogate')
+})
+
+/**
+ * Round 25 (macOS parity): overlaySize as it was at 0c1e0b2 (before round 24), copied verbatim for the
+ * pin below. On every platform but Windows the card sizes must equal it exactly.
+ */
+function sizeAt0c1e0b2(view: OverlayView): { width: number; height: number } {
+  const WINDOW = {
+    restLong: 92,
+    restShort: 40,
+    sessionWidth: 320,
+    sessionWithTargetWidth: 372,
+    sessionBase: 56,
+    sideWidth: 58,
+    sideHeight: 224,
+    sideTargetHeight: 36,
+    sideCaptionWidth: 250,
+    warningLine: 26,
+    detailBlock: 64,
+    message: { width: 380, height: 132 },
+    offer: { width: 460, height: 236 },
+    diff: { width: 480, height: 300 }
+  }
+  if (view.mode === 'message' && view.diff) {
+    const chars = view.diff.reduce((total, part) => total + part.text.length, 0)
+    const lines = Math.ceil(chars / 55)
+    return {
+      width: WINDOW.diff.width,
+      height: Math.max(WINDOW.message.height, Math.min(WINDOW.diff.height, 110 + lines * 19))
+    }
+  }
+  if (view.mode === 'message' && (view.controls.offerRestore || view.controls.offerDelete))
+    return { ...WINDOW.offer }
+  if (view.mode === 'message')
+    return view.warning
+      ? { width: WINDOW.message.width, height: WINDOW.message.height + WINDOW.warningLine }
+      : { ...WINDOW.message }
+  if (view.mode === 'session') {
+    if (view.edge !== 'bottom') {
+      const status = view.showStatus && !(view.tone === 'active' && view.title === 'Listening')
+      return {
+        width:
+          WINDOW.sideWidth + (view.warning || view.detail || status ? WINDOW.sideCaptionWidth : 0),
+        height: WINDOW.sideHeight + (view.target ? WINDOW.sideTargetHeight : 0)
+      }
+    }
+    return {
+      width: view.target ? WINDOW.sessionWithTargetWidth : WINDOW.sessionWidth,
+      height:
+        WINDOW.sessionBase +
+        (view.warning ? WINDOW.warningLine : 0) +
+        (view.detail ? WINDOW.detailBlock : 0)
+    }
+  }
+  return view.edge === 'bottom'
+    ? { width: WINDOW.restLong, height: WINDOW.restShort }
+    : { width: WINDOW.restShort, height: WINDOW.restLong }
+}
+
+test('macOS (round 25): every card keeps its exact size from before round 24 (the growth rule is Windows-only)', () => {
+  const longText = 'A transcript that runs on for a while. '.repeat(12)
+  const views: Array<[string, OverlayView]> = []
+  for (const reason of Object.keys(RECOVERY_MESSAGES) as RecoveryReason[]) {
+    const state: SessionState = {
+      ...initialSessionState(),
+      phase: 'recovery',
+      resting: { kind: 'recovery', gen: 1, text: longText, rawText: longText, reason }
+    }
+    views.push([`recovery ${reason}`, overlayView(state, ctx())])
+  }
+  const notices = [
+    'Inserted.',
+    'Bark needs the microphone. Allow it in System Settings, then try again.',
+    'x'.repeat(121),
+    'A notice long enough to wrap onto several lines of the card, as some of the longer errors do. '.repeat(
+      3
+    ),
+    'y'.repeat(400)
+  ]
+  for (const level of ['success', 'info', 'error'] as const)
+    for (const message of notices) {
+      const state: SessionState = {
+        ...initialSessionState(),
+        phase: 'notice',
+        resting: { kind: 'notice', level, message }
+      }
+      views.push([`notice ${level} ${message.length}`, overlayView(state, ctx())])
+    }
+  const base = overlayView(initialSessionState(), ctx())
+  views.push(['changed panel', panelView({ kind: 'changed', name: 'Fix grammar' }, base)])
+  views.push([
+    'learned panel',
+    panelView({ kind: 'learned', pairs: [{ from: 'a', to: 'b' }] }, base)
+  ])
+  views.push(['working panel', panelView({ kind: 'working', name: 'Fix grammar' }, base)])
+  views.push([
+    'diff panel',
+    panelView(
+      { kind: 'diff', name: 'Fix grammar', segments: [{ op: 'same', text: longText }] },
+      base
+    )
+  ])
+  let compared = 0
+  for (const platform of ['darwin', 'linux']) {
+    for (const [name, view] of views) {
+      assert.deepEqual(overlaySize(view, platform), sizeAt0c1e0b2(view), `${platform}: ${name}`)
+      compared++
+    }
+  }
+  console.log(`# macOS size pin: ${compared} views on darwin and linux equal 0c1e0b2's overlaySize`)
+  // And Windows does grow a long card (the round-24 fix stays where it is needed).
+  const [, card] = views[0]!
+  assert.ok(overlaySize({ ...card, warning: 'w '.repeat(200) }, 'win32').height > 158)
 })
 
 test('Windows: the clipboard offer card names formats and size only, with Restore and Dismiss', () => {
