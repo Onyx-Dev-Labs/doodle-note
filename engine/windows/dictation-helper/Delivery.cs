@@ -385,10 +385,13 @@ namespace DoodleNote.DictationHelper
             {
                 uint seen;
                 SavedClipboard.Inspection look = saved.InspectOurWrite(ours, out seen);
-                if (look == SavedClipboard.Inspection.Foreign) { saved.KeepAsOffer(); return "user-changed|" + savedFormats; }
+                if (look == SavedClipboard.Inspection.Foreign) { saved.KeepAsOffer("the clipboard changed hands"); return "user-changed|" + savedFormats; }
                 if (look == SavedClipboard.Inspection.Uninspectable) return "uninspectable/" + saved.Restore(ours) + "|" + savedFormats;
-                if (look == SavedClipboard.Inspection.OwnedButChanged) { saved.KeepAsOffer(); return "owned-but-changed/unrestored|" + savedFormats; }
+                if (look == SavedClipboard.Inspection.OwnedButChanged) { saved.KeepAsOffer("owned but not exactly our write"); return "owned-but-changed/unrestored|" + savedFormats; }
             }
+            // Test build only: be killed after the "paste" and before the restore.
+            int beforeRestore = TestMode.Int("DICTATION_HELPER_TEST_STALL_BEFORE_RESTORE_MS", 0);
+            if (beforeRestore > 0) Thread.Sleep(beforeRestore);
             // Test build only: a target that pastes by reading the synthesized ANSI text formats (an ANSI or
             // RichEdit app does), on another thread right after "Ctrl+V", as a real target would.
             if (TestMode.Env("DICTATION_HELPER_TEST_TARGET_READ") == "ansi") SimulateAnsiTargetRead();
@@ -561,7 +564,7 @@ namespace DoodleNote.DictationHelper
                     // clipboard is kept as an offer, never deleted on that guess.
                     Wire.Log("the clipboard changed hands before Ctrl+V; not pasting (the saved clipboard is kept as an offer)");
                     clipboardAfterFailedWrite = "user-changed";
-                    saved.KeepAsOffer();
+                    saved.KeepAsOffer("the clipboard changed hands before Ctrl+V");
                     return null;
                 }
                 if (look == SavedClipboard.Inspection.Uninspectable)
@@ -574,7 +577,7 @@ namespace DoodleNote.DictationHelper
                 if (look == SavedClipboard.Inspection.OwnedButChanged)
                 {
                     Wire.Log("our window still owns the clipboard but our write is not all there; not pasting (kept, as an offer)");
-                    saved.KeepAsOffer();
+                    saved.KeepAsOffer("owned but not exactly our write, before Ctrl+V");
                     clipboardAfterFailedWrite = "unrestored";
                     holdsAfterFailedWrite = "unknown";
                     return null;
@@ -1083,7 +1086,7 @@ namespace DoodleNote.DictationHelper
                     string outcome;
                     if (ours.Emptied)
                     {
-                        ConfirmWritten(ours, saved.Record);
+                        ConfirmWritten(ours, saved);
                         outcome = saved.Restore(ours);
                         Wire.Log("the late clipboard write was undone: " + outcome);
                     }
@@ -1114,7 +1117,7 @@ namespace DoodleNote.DictationHelper
             ownership = job.Ours ?? new ClipboardOwnership();
             // The confirmation re-opens the clipboard while we own it (nothing waits on another app),
             // so it runs here, outside the write's bound ("written" is already journaled inside Write).
-            if (ownership.Emptied) ConfirmWritten(ownership, saved.Record);
+            if (ownership.Emptied) ConfirmWritten(ownership, saved);
             return job.Result;
         }
 
@@ -1168,6 +1171,7 @@ namespace DoodleNote.DictationHelper
                         PendingClipboard.Stage(record, "restore-emptied", emptiedAt);
                         ownership.PutBack = saved.PutBackResult(saved.PutBackOpen());
                         if (job != null) job.PutBack = ownership.PutBack;
+                        saved.LoseAuthority("the write put the saved content back itself (" + ownership.PutBack + ")");
                         Wire.Log((abandoned ? "the late clipboard write" : "the unjournaled clipboard write") + " put the user's saved content back: " + ownership.PutBack);
                         return false;
                     }
@@ -1201,19 +1205,19 @@ namespace DoodleNote.DictationHelper
                 // Journaled right after the close (before any confirmation), on the normal and the late path.
                 int beforeWritten = TestMode.Int("DICTATION_HELPER_TEST_STALL_BEFORE_WRITTEN_MS", 0);
                 if (beforeWritten > 0) Thread.Sleep(beforeWritten); // test build only: die before "written" is journaled
-                PendingClipboard.Stage(record, "written", ownership.SequenceInside, ownership.SequenceInside);
+                if (!PendingClipboard.Stage(record, "written", ownership.SequenceInside, ownership.SequenceInside) && saved != null)
+                    saved.LoseAuthority("the written stage could not be journaled");
             }
-            if (confirm && ownership.Emptied) ConfirmWritten(ownership, record);
+            if (confirm && ownership.Emptied) ConfirmWritten(ownership, saved);
             return ok;
         }
 
         /// <summary>Confirm our write, and journal the sequence confirmed after the close (Windows moves it at the close).</summary>
-        public static void ConfirmWritten(ClipboardOwnership ownership, PendingRecord record)
+        public static void ConfirmWritten(ClipboardOwnership ownership, SavedClipboard saved)
         {
-            ownership.Confirm(record);
-            if (ownership.Confirmed) PendingClipboard.StageClosed(record, ownership.SequenceFinal);
-            // A rejection is durable (round 17): the record is offer-only from now on, in this helper and in any later one.
-            if (ownership.ContentChanged) PendingClipboard.MarkOfferOnly(record, "our write's confirmation rejected it");
+            ownership.Confirm(saved != null ? saved.Record : null);
+            // A rejection ends this transaction's authority (the one guard, SavedClipboard.LoseAuthority).
+            if (ownership.Rejected && saved != null) saved.LoseAuthority("our write's confirmation rejected it (" + ownership.RejectedWhy + ")");
         }
 
         public static readonly string[] MarkerNames =
@@ -1463,8 +1467,9 @@ namespace DoodleNote.DictationHelper
         public uint SequenceInside;
         public uint SequenceFinal;
         public IntPtr Owner;
-        /// <summary>The confirmation found our window owning the clipboard with something added to our write.</summary>
-        public bool ContentChanged;
+        /// <summary>The confirmation rejected our write (not exactly ours, the sequence beyond our close, or a read that failed).</summary>
+        public bool Rejected;
+        public string RejectedWhy = "";
         /// <summary>The CF_LOCALE Windows states for our write (this write thread's input language; also in the sentinel).</summary>
         public int TextLocale;
         /// <summary>Windows' text forms as read back inside our write's own open (when Windows rendered them there).</summary>
@@ -1515,7 +1520,7 @@ namespace DoodleNote.DictationHelper
             try
             {
                 if (Native.GetClipboardOwner() != window) { ForeignAtConfirm = true; return; }
-                if (record == null || record.DictatedHash == null) { ContentChanged = true; return; } // nothing to compare against
+                if (record == null || record.DictatedHash == null) { Rejected = true; RejectedWhy = "nothing to compare against"; return; }
                 List<uint> present = new List<uint>();
                 for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
                 int synthesized = 0;
@@ -1539,7 +1544,8 @@ namespace DoodleNote.DictationHelper
                 {
                     // Final for this transaction: no later look may treat it as ours (see OurWriteStillThere); only an offer remains.
                     Wire.Log("our write's confirmation: our window owns the clipboard but it is not exactly our write (" + (content ? "the sequence moved further" : "something was changed") + "); not confirmed, kept as an offer");
-                    ContentChanged = true;
+                    Rejected = true;
+                    RejectedWhy = content ? "the sequence moved further" : "not exactly our write, or a read failed";
                     return;
                 }
                 SequenceFinal = now;
@@ -1901,18 +1907,39 @@ namespace DoodleNote.DictationHelper
 #endif
         static int testFailPutBacks = TestMode.Int("DICTATION_HELPER_TEST_FAIL_PUTBACKS", 0);
         /// <summary>Clipboard operations a put-back performs after its EmptyClipboard (Decide's bound for a restore cut short).</summary>
-        public int RestoreOps { get { return items.Count + (metafile != IntPtr.Zero ? 1 : 0) + (forceMarkers ? ClipboardText.MarkerNames.Length : 0); } }
         /// <summary>The clipboard carried a privacy marker: the saved content must never be written to disk.</summary>
         public bool PrivacyMarked;
         /// <summary>This paste's clipboard transaction (PendingClipboard), until it is settled.</summary>
         public PendingRecord Record;
 
-        /// <summary>The transaction is over (restore ran, or nothing was emptied): finish its record once.</summary>
+        /// <summary>The transaction is over (restore ran, or nothing was emptied): finish its record once. Nothing more is written.</summary>
         public void Settle(string restoreResult)
         {
             PendingRecord record = Record;
             Record = null;
+            LoseAuthority("settled (" + restoreResult + ")");
             PendingClipboard.Finish(record, restoreResult);
+        }
+
+        /// <summary>
+        /// THE GUARD (round 18). Automatic restore authority exists only here, in this live, in-memory transaction, in the
+        /// process that wrote; nothing read from disk ever carries it (PendingClipboard.Decide). One flag, set once by
+        /// LoseAuthority and never cleared, checked at the top of RestoreInner (the only in-process path that writes the
+        /// clipboard after our write) and of OurWriteStillThere. Set on: a confirmation rejection or failed read, every
+        /// keep-as-offer, an incomplete put-back, a stage that could not be journaled, the write's own put-back, and
+        /// settlement (the transaction leaving in-flight). The record, if any, is marked offer-only too (informational).
+        /// </summary>
+        public bool OfferOnly { get { return offerOnly; } }
+        bool offerOnly;
+
+        public void LoseAuthority(string why)
+        {
+            if (!offerOnly)
+            {
+                offerOnly = true;
+                Wire.Log("this transaction may no longer write the clipboard on its own: " + why);
+            }
+            if (Record != null) PendingClipboard.MarkOfferOnly(Record, why);
         }
 
         /// <summary>Tests: a saved clipboard with these items (and a privacy marker or not).</summary>
@@ -2042,7 +2069,9 @@ namespace DoodleNote.DictationHelper
             keepRecord = false;
             string result = RestoreInner(ours);
             // Someone else's content now (an owner change): left alone, and the saved clipboard kept as an offer.
-            if (result == "user-changed" && Record != null) { KeepAsOffer(); return result; }
+            if (result == "user-changed" && Record != null) { KeepAsOffer("the clipboard's owner changed"); return result; }
+            // Anything short of a completed put-back ends this transaction's authority before the record is kept.
+            if (result == "unrestored" || keepRecord) LoseAuthority("an incomplete put-back (" + result + ")");
             if (keepRecord && Record != null && Record.Persisted)
             {
                 // Put back, but an interruption could not have been proven ours (its stage was not journaled):
@@ -2058,9 +2087,8 @@ namespace DoodleNote.DictationHelper
         /// <summary>Under the lock: our window owns the clipboard and our complete write (this transaction's) is on it.</summary>
         bool OurWriteStillThere(ClipboardOwnership ours)
         {
-            // A confirmation that rejected this write (something added, or the sequence moved too far) is final: no later
-            // look upgrades the transaction to "ours" again.
-            if (ours.ContentChanged) return false;
+            // The one guard: a transaction that lost its authority (a rejection, a keep, ...) is never "ours" again.
+            if (offerOnly) return false;
             if (Record == null || Record.DictatedHash == null || ours.Owner == IntPtr.Zero || Native.GetClipboardOwner() != ours.Owner) return false;
             List<uint> present = new List<uint>();
             for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
@@ -2098,9 +2126,10 @@ namespace DoodleNote.DictationHelper
             finally { Native.CloseClipboard(); }
         }
 
-        /// <summary>Keep this transaction's record as an offer: no proof by ownership may apply to it any more.</summary>
-        public void KeepAsOffer()
+        /// <summary>Keep this transaction's record as an offer: this transaction may never write on its own again.</summary>
+        public void KeepAsOffer(string why)
         {
+            LoseAuthority(why);
             PendingRecord record = Record;
             Record = null;
             if (record == null) return;
@@ -2115,19 +2144,19 @@ namespace DoodleNote.DictationHelper
         {
             Holds = null;
             if (ours == null || !ours.Emptied) return "untouched";
-            // Someone else emptied the clipboard right after our write: their copy is newer and wins.
-            if (ours.ForeignAtConfirm) return "user-changed";
-            // An offer-only record is never restored on its own (whatever the clipboard looks like now): kept, offered.
-            if (PendingClipboard.IsOfferOnly(Record))
+            // THE GUARD: this transaction lost its authority (whether or not it still has a record): it never writes again.
+            if (offerOnly)
             {
-                Wire.Log("the record is offer-only: not restored on its own (kept as an offer)");
+                Wire.Log("this transaction may not write on its own any more: not restored (kept as an offer)");
                 Holds = ours.Holds();
                 keepRecord = true;
                 return "unrestored";
             }
+            // Someone else emptied the clipboard right after our write: their copy is newer and wins.
+            if (ours.ForeignAtConfirm) return "user-changed";
             if (!ClipboardText.Open())
             {
-                // Not looked at: a later retry must find fresh proof (content), never ownership alone (proof c off).
+                // Not looked at: the record is kept and only ever offered (nothing on disk is proof).
                 Holds = ours.Holds();
                 return "unrestored";
             }
@@ -2202,7 +2231,6 @@ namespace DoodleNote.DictationHelper
             string result = RestoreResult(ok, complete, reportedSkip);
             if (result == "unrestored") Holds = "unknown";
             // A kept record: the sequence after our close, confirmed with our window still the owner.
-            if (result == "unrestored" || keepRecord) PendingClipboard.ConfirmClosed(Record);
             return result;
         }
 

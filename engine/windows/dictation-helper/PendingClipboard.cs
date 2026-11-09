@@ -283,14 +283,6 @@ namespace DoodleNote.DictationHelper
             return Journal(record);
         }
 
-        /// <summary>The current stage's sequence, read again after our close (Windows moves it at the close).</summary>
-        public static bool StageClosed(PendingRecord record, uint sequenceClosed)
-        {
-            if (record == null || sequenceClosed == 0) return true;
-            record.SequenceClosed = sequenceClosed;
-            return Journal(record);
-        }
-
         static bool Journal(PendingRecord record)
         {
             if (!record.Persisted) return true;
@@ -313,21 +305,6 @@ namespace DoodleNote.DictationHelper
                 }
             }
         }
-
-        /// <summary>
-        /// Re-open the clipboard after our close: when our window still owns it, the sequence then is the
-        /// confirmed value for the current stage (journaled). Never while another app owns it.
-        /// </summary>
-        public static void ConfirmClosed(PendingRecord record)
-        {
-            if (record == null || !record.Persisted) return;
-            if (!ClipboardText.Open()) return;
-            uint now = 0;
-            try { if (Native.GetClipboardOwner() == Ui.ClipboardWindow && Ui.ClipboardWindow != IntPtr.Zero) now = Native.GetClipboardSequenceNumber(); }
-            finally { Native.CloseClipboard(); }
-            if (now != 0) StageClosed(record, now);
-        }
-
 
         /// <summary>The record is kept, as an offer only (offer-only is persisted first): checked again later.</summary>
         public static void Keep(PendingRecord record, string why)
@@ -357,13 +334,6 @@ namespace DoodleNote.DictationHelper
             record.OfferOnlyWhy = why ?? "";
             Wire.Log("clipboard record " + record.Id.Substring(0, 8) + ": offer-only from now on (" + why + ")");
             if (record.Persisted && !Journal(record)) Wire.Log("ERROR: the offer-only fact could not be written down; this helper keeps it in memory");
-        }
-
-        /// <summary>Whether this record may only be offered (persisted or in memory).</summary>
-        public static bool IsOfferOnly(PendingRecord record)
-        {
-            if (record == null) return false;
-            lock (gate) return record.OfferOnly || offerOnly.Contains(record.Id);
         }
 
         /// <summary>Under gate: the offer-only fact for a record on disk (its state file is rewritten with it).</summary>
