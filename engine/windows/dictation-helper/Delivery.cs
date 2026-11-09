@@ -1723,6 +1723,10 @@ namespace DoodleNote.DictationHelper
         const int MaxMarkerBytes = 64;
         readonly List<KeyValuePair<uint, byte[]>> items = new List<KeyValuePair<uint, byte[]>>();
         IntPtr metafile = IntPtr.Zero;
+        /// <summary>The saved EMF's bytes as validated by the capture (or read from a record): what WriteTo writes down.</summary>
+        byte[] metafileBits;
+        /// <summary>Tests: a save that had an EMF whose bytes are not available (WriteTo must then write it as lost).</summary>
+        internal bool metafileExpected;
         /// <summary>Saved content that cannot go back (ReadFrom): a metafile that could not be rebuilt, a registered format with no usable name.</summary>
         bool contentLost;
         bool complete = true;
@@ -1933,6 +1937,7 @@ namespace DoodleNote.DictationHelper
                         IntPtr copy = Native.SetEnhMetaFileBits((uint)bytes.Length, bytes);
                         if (copy == IntPtr.Zero) { saved.Discard(); line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " EMF not rebuilt]); not pasting"; return null; }
                         saved.metafile = copy;
+                        saved.metafileBits = bytes; // the validated bytes are what is written down (round 22: never re-extracted)
                     }
                     else saved.items.Add(new KeyValuePair<uint, byte[]>(format, bytes));
                     total += bytes.Length;
@@ -1993,14 +1998,19 @@ namespace DoodleNote.DictationHelper
                 writer.Write(item.Value.Length);
                 writer.Write(item.Value);
             }
-            byte[] bits = null;
-            if (metafile != IntPtr.Zero)
+            // Round 22: the EMF bytes the capture validated (or read back from a record) are written as they are. Only a
+            // metafile without them is extracted here, and a failed extraction is written as LOST (-1), never as absent
+            // (0): a record that had an EMF must never read back as a complete record without one.
+            byte[] bits = metafileBits;
+            if (bits == null && metafile != IntPtr.Zero)
             {
                 uint size = Native.GetEnhMetaFileBits(metafile, 0, null);
-                bits = new byte[size];
-                if (size == 0 || Native.GetEnhMetaFileBits(metafile, size, bits) != size) bits = null;
+                bits = size > 0 ? new byte[size] : null;
+                if (bits != null && Native.GetEnhMetaFileBits(metafile, size, bits) != size) bits = null;
+                if (bits == null) Wire.Log("ERROR: the saved metafile could not be written down; the record is marked incomplete");
             }
-            writer.Write(bits != null ? bits.Length : 0);
+            bool lost = bits == null && (metafile != IntPtr.Zero || metafileExpected);
+            writer.Write(lost ? -1 : bits != null ? bits.Length : 0);
             if (bits != null) writer.Write(bits);
             writer.Write(forceMarkers);
             // How complete the save was, so a recovery reports what an ordinary restore would.
@@ -2024,9 +2034,11 @@ namespace DoodleNote.DictationHelper
                 else saved.contentLost = true;
             }
             int metaLength = reader.ReadInt32();
+            if (metaLength < 0) saved.contentLost = true; // round 22: an EMF that could not be written down: incomplete, never absent
             if (metaLength > 0)
             {
                 byte[] bits = reader.ReadBytes(metaLength);
+                saved.metafileBits = bits;
                 saved.metafile = Native.SetEnhMetaFileBits((uint)bits.Length, bits);
                 // A metafile that cannot be rebuilt is part of the save that cannot go back: never "restored", never
                 // "already on the clipboard" (so such a record is never dropped as untouched).
