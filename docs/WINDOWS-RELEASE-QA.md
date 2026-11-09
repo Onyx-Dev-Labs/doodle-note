@@ -469,9 +469,24 @@ is kept, and a delayed-render text owner that renders nothing for its text while
 empty clipboard is not this case. Stated plainly: a clipboard holding only an oversize image (a 4K screenshot's DIB
 is about 31.6 MiB, over the 16 MiB cap) now refuses to dictate by paste instead of destroying the screenshot; raising
 the cap is the alternative. The user is told why: "Your clipboard holds something too large to save (such as a large
-screenshot), so DoodleNote did not paste with it and left your clipboard as it was. Copy something smaller first, or
-copy the dictated text from DoodleNote and paste it yourself." Every other path that does not paste with the
-clipboard says why too (the owner did not provide it, the owner is not responding, and the rest).
+screenshot), so DoodleNote did not paste with it and left your clipboard as it was." When the text was NOT inserted,
+it adds "Copy something smaller first, or copy the dictated text from DoodleNote and paste it yourself."; after a
+typing fallback that put the text in it does not (round 24: no double paste). Every path that does not paste with
+the clipboard gives the app a reason, and each has its own sentence (round 24): too-large, unrendered,
+nothing-savable, owner-unresponsive, zero-sequence, clipboard-changed (it changed during the save), no-record (the
+transaction, or the write's own first journal, could not be written down), deadline, no-window, unreadable; an
+unknown reason falls back to the plain sentence. The one rule applies at the user's Restore too (round 24): an
+incomplete record with no user content (an all-skipped record of an earlier build, or one whose only content format
+was lost on read-back) is never restored: the helper answers "nothing-to-restore" before emptying anything, the offer
+counts the user content it holds (`content`, not `formats`, which also counts flags and CF_LOCALE), and its card
+offers no Restore, only Dismiss.
+
+The overlay card (round 24, Astra): its window grows to fit the title, the warning and at least one line of the
+dictated text (an estimate, at most 300 px), and the page bounds every block: the buttons never shrink, the text
+keeps one line, and a long warning scrolls inside the card. CI renders every notice variant in Electron's Chromium
+with the bundled font at the size the app gives it and checks that the buttons and a line of the text are in view.
+An offer card's buttons name the record the page shows, and the app acts only on that record (a click never reaches
+an offer that became current since).
 
 | Class | What | The save | The put-back | What the user is told |
 | --- | --- | --- | --- | --- |
@@ -517,9 +532,12 @@ Native gates (not runnable in CI; the owner's list, round 22): Excel (a saved an
 PowerPoint shapes, an Outlook message and an attachment, Explorer files (a normal folder and inside a zip), an image
 copied in a browser, Teams, Snipping Tool, KeePass and Bitwarden, a Remote Desktop session, a slow or modal renderer
 with the clipboard lockout measured, and a third-party app that opens the clipboard with a NULL window. Round 23
-(Opus): copy a column in Notepad++, dictate, restart the helper, paste in Notepad++ (whether presence-only flags
-survive the helper's window going away is not established; it fails safe: the record is offered, never taken as
-already there).
+(Opus), corrected in round 24 (Astra): copy a column in Notepad++, dictate, let the helper exit or restart, then
+paste in Notepad++. NOT ESTABLISHED: whether the presence-only flags the put-back set (as delayed rendering from the
+helper's window) survive that window being destroyed. Windows documents that unrendered formats are removed when
+their owner goes (WM_RENDERALLFORMATS); after a completed put-back the record is settled and deleted, so nothing
+would be offered: the editor would lose its column or line paste mode (the text itself stays). No mitigation in this
+PR (a window cannot re-set formats after it is destroyed).
 
 EmptyClipboard audit, stated exactly: three sites in the RELEASE build (our write, the live transaction's restore,
 the user's Restore); the test build has a fourth (the __seed op).
