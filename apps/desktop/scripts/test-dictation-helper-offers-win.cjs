@@ -36,6 +36,9 @@ const GetClipboardFormatNameW = user32.func(
 )
 const GetClipboardSequenceNumber = user32.func('uint32 __stdcall GetClipboardSequenceNumber()')
 const CountClipboardFormats = user32.func('int __stdcall CountClipboardFormats()')
+const IsClipboardFormatAvailable = user32.func(
+  'bool __stdcall IsClipboardFormatAvailable(uint32 f)'
+)
 const GetLastError = kernel32.func('uint32 __stdcall GetLastError()')
 const GlobalAlloc = kernel32.func('void* __stdcall GlobalAlloc(uint32 f, uintptr n)')
 const GlobalLock = kernel32.func('void* __stdcall GlobalLock(void* h)')
@@ -207,6 +210,24 @@ function readBytes(format) {
   return out
 }
 const EXTRA = 'DoodleNote.CI.Extra'
+/**
+ * Round 22 (S8): what a save of the clipboard as it is now must hold, read by THIS process (every format in the
+ * enumeration order, GDI-handle formats aside, each by GlobalSize): "count|id:length,...|bytes", the __save-only shape.
+ */
+function seededShape() {
+  if (!open()) return null
+  const parts = []
+  let bytes = 0
+  for (let f = EnumClipboardFormats(0); f !== 0; f = EnumClipboardFormats(f)) {
+    if ([2, 3, 9, 14].includes(f)) continue
+    const h = GetClipboardData(f)
+    const size = h ? Number(GlobalSize(h)) : -1
+    parts.push(`${f}:${size}`)
+    bytes += size
+  }
+  CloseClipboard()
+  return `${parts.length}|${parts.join(',')}|${bytes}`
+}
 function copyMulti(text) {
   return seed('the user copy', [
     [13, Buffer.from(text + '\0', 'utf16le')],
@@ -314,8 +335,11 @@ const GlobalLock = kernel32.func('void* __stdcall GlobalLock(void* h)')
 const GlobalUnlock = kernel32.func('bool __stdcall GlobalUnlock(void* h)')
 const RtlMoveMemory = kernel32.func('void __stdcall RtlMoveMemory(void* dst, const uint8_t* src, uintptr n)')
 const block = (t) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, t)
+// Round 22 (Opus): this process opens with a window of its own too (a NULL-window open can be taken over).
+const CreateWindowExW = user32.func('void* __stdcall CreateWindowExW(uint32 ex, str16 cls, str16 name, uint32 style, int x, int y, int w, int h, void* parent, void* menu, void* inst, void* param)')
+const own = CreateWindowExW(0, 'STATIC', 'DoodleNote CI holder', 0, 0, 0, 0, 0, null, null, null, null)
 let opened = false
-for (let i = 0; i < 150 && !(opened = OpenClipboard(null)); i++) block(20)
+for (let i = 0; i < 150 && !(opened = OpenClipboard(own)); i++) block(20)
 if (opened) {
   const bytes = Buffer.from('held')
   const g = GlobalAlloc(2, bytes.length); const p = GlobalLock(g); RtlMoveMemory(p, bytes, bytes.length); GlobalUnlock(g)
@@ -340,8 +364,11 @@ const GlobalLock = kernel32.func('void* __stdcall GlobalLock(void* h)')
 const GlobalUnlock = kernel32.func('bool __stdcall GlobalUnlock(void* h)')
 const RtlMoveMemory = kernel32.func('void __stdcall RtlMoveMemory(void* dst, const uint8_t* src, uintptr n)')
 const block = (t) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, t)
+// Round 22 (Opus): this process opens with a window of its own too (a NULL-window open can be taken over).
+const CreateWindowExW = user32.func('void* __stdcall CreateWindowExW(uint32 ex, str16 cls, str16 name, uint32 style, int x, int y, int w, int h, void* parent, void* menu, void* inst, void* param)')
+const own = CreateWindowExW(0, 'STATIC', 'DoodleNote CI holder', 0, 0, 0, 0, 0, null, null, null, null)
 let opened = false
-for (let i = 0; i < 150 && !(opened = OpenClipboard(null)); i++) block(20)
+for (let i = 0; i < 150 && !(opened = OpenClipboard(own)); i++) block(20)
 if (opened) {
   block(${ms})
   const bytes = Buffer.from('held')
@@ -1588,37 +1615,384 @@ async function main() {
     'lose-hold-get',
     'size-zero',
     'fragment-list',
-    'zero-sequence'
+    // Round 22: the reader without its window (B1), a reply with nothing between the id and the end (F9), an owner
+    // that does not answer before a render (F4); the helper without its window (B1); a zero sequence before the
+    // transaction (S2/S8: no record is ever created) and at the write's own open.
+    'no-window',
+    'empty-reply',
+    'unresponsive',
+    'helper-no-window',
+    'zero-sequence',
+    'zero-sequence-write'
   ]) {
     const seeded = copyMulti(user)
     const before = observe()
-    const a = start(
-      testops,
+    const env =
       fault === 'zero-sequence'
-        ? { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_EXPECT_ZERO_SEQUENCE: '1' }
-        : { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_READER: fault }
-    )
+        ? { DICTATION_HELPER_TEST_ZERO_SEQUENCE: 'begin' }
+        : fault === 'zero-sequence-write'
+          ? { DICTATION_HELPER_TEST_EXPECT_ZERO_SEQUENCE: '1' }
+          : fault === 'helper-no-window'
+            ? { DICTATION_HELPER_TEST_NO_WINDOW: '1' }
+            : { DICTATION_HELPER_TEST_READER: fault }
+    const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
     await a.ready
+    // Round 22 (S8): records are watched DURING the transaction, so "no record" means none was ever created.
+    let everRecord = false
+    const watch = setInterval(() => {
+      if (recordFiles().length > 0) everRecord = true
+    }, 5)
     const result = await a.req('__clipboard-txn', { text: 'dictated text H', holdMs: 300 })
+    clearInterval(watch)
     const after = observe()
     const lines = a.logs.filter((l) => /saving the clipboard \(attempt/.test(l))
     await a.stop()
+    const expected =
+      fault === 'zero-sequence-write'
+        ? /^write-failed\/untouched\|/.test(String(result && result.result))
+        : fault === 'zero-sequence'
+          ? result && result.result === 'zero-sequence'
+          : result && result.result === 'no-save'
     check(
-      `reader fault "${fault}": not established, the delivery never touches the clipboard (byte-identical, sequence unchanged, no record)`,
+      `reader fault "${fault}": not established, the delivery never touches the clipboard (byte-identical, sequence unchanged, no record${fault === 'zero-sequence-write' ? ' left' : ' ever'})`,
       seeded &&
-        !!result &&
-        (fault === 'zero-sequence'
-          ? /^write-failed\/untouched\|/.test(String(result.result))
-          : result.result === 'no-save') &&
+        !!expected &&
         after.text === user &&
         after.extra === 'extra bytes for ' + user &&
         after.sequence === before.sequence &&
         after.count === before.count &&
-        recordFiles().length === 0,
-      `${JSON.stringify(result)}; sequence ${before.sequence} -> ${after.sequence}; ${recordFiles()}; ${lines.join(' / ')}`
+        recordFiles().length === 0 &&
+        (fault === 'zero-sequence-write' || !everRecord),
+      `${JSON.stringify(result)}; sequence ${before.sequence} -> ${after.sequence}; ${recordFiles()}; a record seen during it: ${everRecord}; ${lines.join(' / ')}`
     )
     console.log(
-      `# 32 ${fault}: ${lines[0] || '(no save line)'}${fault === 'zero-sequence' ? ' | ' + (a.logs.find((l) => /not usable evidence/.test(l)) || '(no refusal line)') : ''}`
+      `# 32 ${fault}: ${lines[0] || '(no save line)'}${/zero-sequence|no-window/.test(fault) ? ' | ' + (a.logs.find((l) => /not usable evidence|no clipboard window/.test(l)) || '(no refusal line)') : ''}`
+    )
+    cleanup()
+  }
+
+  // 35. Round 22, the owner decision for formats a save cannot read (three classes). The clipboard is seeded by a
+  // test-ops helper's own window, which pumps messages: a render request it gets is answered with nothing (as Explorer's
+  // or Outlook's FileContents can be), never waited on. Presence-only formats are offered with no data at all.
+  const b64 = (t) => Buffer.from(t).toString('base64')
+  const u16 = (t) => Buffer.from(t + '\0', 'utf16le').toString('base64')
+  const MARKERS = [
+    'ExcludeClipboardContentFromMonitorProcessing',
+    'CanIncludeInClipboardHistory',
+    'CanUploadToCloudClipboard'
+  ]
+  const available = (name) => IsClipboardFormatAvailable(RegisterClipboardFormatW(name))
+  const saveLines = (h) => h.logs.filter((l) => /saving the clipboard \(attempt/.test(l))
+  async function seededBy(env, items) {
+    const h = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
+    await h.ready
+    const s = await h.req('__seed', { items })
+    return { h, ok: !!(s && s.seeded), seed: s }
+  }
+  {
+    const PRESENCE = [
+      'Clipboard Viewer Ignore',
+      'MSDEVColumnSelect',
+      'MSDEVLineSelect',
+      'VisualStudioEditorOperationsLineCutCopyClipboardTag'
+    ]
+    const words = 'presence-only ' + identity
+    const {
+      h,
+      ok,
+      seed: s
+    } = await seededBy({}, [`#13|${u16(words)}`, ...PRESENCE.map((n) => `${n}|-`)])
+    const before = PRESENCE.map(available)
+    const live = await h.req('__clipboard-txn', { text: 'dictated text P', holdMs: 300 })
+    const after = PRESENCE.map(available)
+    const now = text()
+    const saving = saveLines(h)
+    await h.stop()
+    check(
+      'class 1 (Clipboard Viewer Ignore and the three Scintilla / Visual Studio flags, offered with no data): saved as presence only and established at once; the put-back is "restored", every flag present again, the text back',
+      ok &&
+        before.every(Boolean) &&
+        !!live &&
+        /^restored\|/.test(String(live.result)) &&
+        after.every(Boolean) &&
+        now === words &&
+        saving.length === 1 &&
+        /: ESTABLISHED/.test(saving[0]) &&
+        recordFiles().length === 0,
+      `${JSON.stringify(s)}; before ${before}; ${JSON.stringify(live)}; after ${after}; text ${now}; ${saving.join(' / ')}`
+    )
+    console.log(`# 35 class 1: ${saving[0] || '(no save line)'}`)
+    cleanup()
+  }
+  {
+    const words = 'marker unread ' + identity
+    const { h, ok, seed: s } = await seededBy({}, [`#13|${u16(words)}`, `${MARKERS[0]}|-`])
+    let everRecord = false
+    const watch = setInterval(() => {
+      if (recordFiles().length > 0) everRecord = true
+    }, 5)
+    const live = await h.req('__clipboard-txn', { text: 'dictated text M', holdMs: 300 })
+    clearInterval(watch)
+    const markers = MARKERS.map(available)
+    const exclude = readFormat(RegisterClipboardFormatW(MARKERS[0]))
+    const now = text()
+    const saving = saveLines(h)
+    await h.stop()
+    check(
+      'class 2 (a privacy marker its owner does not render): established; the conservative exclusion markers go back with the text; never written down',
+      ok &&
+        !!live &&
+        /^(restored|skipped)\|/.test(String(live.result)) &&
+        markers.every(Boolean) &&
+        !!exclude &&
+        exclude[0] === 0 &&
+        now === words &&
+        !everRecord,
+      `${JSON.stringify(s)}; ${JSON.stringify(live)}; markers ${markers}; exclude ${exclude && exclude.toString('hex')}; text ${now}; a record seen: ${everRecord}; ${saving.join(' / ')}`
+    )
+    console.log(`# 35 class 2: ${saving.join(' / ') || '(no save line)'}`)
+    cleanup()
+  }
+  {
+    // B3: a privacy marker over its cap (64 bytes) is skipped, and forces the conservative markers on the put-back.
+    const words = 'oversize marker ' + identity
+    const seededOk = seed('an oversize privacy marker', [
+      [13, Buffer.from(words + '\0', 'utf16le')],
+      [RegisterClipboardFormatW(MARKERS[0]), Buffer.alloc(200, 1)]
+    ])
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const live = await a.req('__clipboard-txn', { text: 'dictated text O', holdMs: 300 })
+    const markers = MARKERS.map(available)
+    const exclude = readFormat(RegisterClipboardFormatW(MARKERS[0]))
+    const now = text()
+    const saving = saveLines(a)
+    await a.stop()
+    check(
+      'B3: a privacy marker over its cap: the put-back carries the conservative exclusion markers (all three, the exclusion set), and the text',
+      seededOk &&
+        !!live &&
+        /^(skipped|restored)\|/.test(String(live.result)) &&
+        markers.every(Boolean) &&
+        !!exclude &&
+        exclude.length >= 1 &&
+        exclude[0] === 0 &&
+        now === words,
+      `${JSON.stringify(live)}; markers ${markers}; exclude ${exclude && exclude.toString('hex').slice(0, 16)}; text ${now}; ${saving.join(' / ')}`
+    )
+    cleanup()
+  }
+  for (const name of ['FileContents', 'DoodleNote.CI.Unrendered']) {
+    const words = 'owner-unrendered ' + identity
+    const {
+      h,
+      ok,
+      seed: s
+    } = await seededBy({}, [
+      `#13|${u16(words)}`,
+      `${EXTRA}|${b64('extra bytes for ' + words)}`,
+      `${name}|-`
+    ])
+    const live = await h.req('__clipboard-txn', { text: 'dictated text F', holdMs: 300 })
+    const after = observe()
+    const saving = saveLines(h)
+    await h.stop()
+    const missing = /\|missing=(.*)$/.exec(String(live && live.result))
+    check(
+      `class 3 (${name}, not rendered by its owner, under a proven hold): the first attempt is not established, the second a named reported skip; the paste proceeds, the put-back restores the rest and names ${name}`,
+      ok &&
+        !!live &&
+        /^skipped\|/.test(String(live.result)) &&
+        !!missing &&
+        missing[1] === `${name} (not provided by the app that copied it)` &&
+        after.text === words &&
+        after.extra === 'extra bytes for ' + words &&
+        saving.length === 2 &&
+        /NOT ESTABLISHED/.test(saving[0]) &&
+        /: ESTABLISHED/.test(saving[1]) &&
+        recordFiles().length === 0,
+      `${JSON.stringify(s)}; ${JSON.stringify(live)}; text ${after.text}; extra ${after.extra}; ${saving.join(' / ')}`
+    )
+    console.log(
+      `# 35 class 3 ${name}: ${saving.join(' / ') || '(no save line)'} -> ${live && live.result}`
+    )
+    cleanup()
+  }
+  {
+    const { h, ok, seed: s } = await seededBy({}, ['FileContents|-'])
+    const live = await h.req('__clipboard-txn', { text: 'dictated text L', holdMs: 300 })
+    const still = available('FileContents')
+    const saving = saveLines(h)
+    await h.stop()
+    check(
+      'class 3, its limit (only an owner-unrendered format, nothing with data): not established, no paste, the clipboard left as it was',
+      ok && !!live && live.result === 'no-save' && still && recordFiles().length === 0,
+      `${JSON.stringify(s)}; ${JSON.stringify(live)}; still offered ${still}; ${saving.join(' / ')}`
+    )
+    console.log(`# 35 class 3 limit: ${saving.join(' / ') || '(no save line)'}`)
+    cleanup()
+  }
+
+  // 36. Round 22 (S2/F8): a zero sequence at each proof site. Never a match: a zero inside the write or at the
+  // confirmation rejects it (kept, as an offer, which the user's Restore then puts back); a zero at a quick look falls
+  // back to the content proof; zeros at both proofs of the restore keep the record.
+  for (const [sites, expect, kept] of [
+    ['inside', /^owned-but-changed\/unrestored\|/, true],
+    ['confirm', /^owned-but-changed\/unrestored\|/, true],
+    ['looks-ours', /^restored\|/, false],
+    ['still-ours', /^restored\|/, false],
+    ['still-ours,still-there', /^unrestored\|/, true]
+  ]) {
+    copyMulti(user)
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_ZERO_SEQUENCE: sites
+    })
+    await a.ready
+    const live = await a.req('__clipboard-txn', { text: 'dictated text S', holdMs: 300 })
+    await a.stop()
+    const files = recordFiles().length
+    let done = null
+    if (kept) {
+      const r = start(release)
+      await r.ready
+      await sleep(1000)
+      const listed = await r.req('clipboard-offers')
+      const offer = listed && listed.offers[0]
+      done = offer ? await restoreConfirming(r, offer) : null
+      await r.stop()
+    }
+    const back = observe()
+    check(
+      `a zero sequence at ${sites}: ${kept ? "never taken as proof (kept, offered; the user's Restore puts it back)" : 'the content proof decides (restored)'}`,
+      !!live &&
+        expect.test(String(live.result)) &&
+        (kept ? files > 0 && !!done && done.result === 'restored' : files === 0) &&
+        back.text === user &&
+        back.extra === 'extra bytes for ' + user &&
+        recordFiles().length === 0,
+      `${JSON.stringify(live)}; ${files} files; ${JSON.stringify(done)}; text ${back.text}`
+    )
+    cleanup()
+  }
+  {
+    copyMulti(user)
+    const kept = await keptRecord('dictated text Z')
+    const z = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_ZERO_SEQUENCE: 'view'
+    })
+    await z.ready
+    await sleep(1000)
+    const listed = await z.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const before = observe()
+    const answer = offer
+      ? await z.req('clipboard-restore', { record: offer.record, sequence: offer.sequence })
+      : null
+    const after = observe()
+    await z.stop()
+    const files = recordFiles().length
+    const r = start(release)
+    await r.ready
+    await sleep(1000)
+    const again = await r.req('clipboard-offers')
+    const o2 = again && again.offers[0]
+    const done = o2 ? await restoreConfirming(r, o2) : null
+    await r.stop()
+    check(
+      "the user's Restore with a zero sequence: nothing emptied (busy), the clipboard unchanged, the record kept; a helper without the hook then restores it",
+      kept &&
+        !!offer &&
+        !!answer &&
+        answer.result === 'busy' &&
+        after.sequence === before.sequence &&
+        files > 0 &&
+        !!done &&
+        done.result === 'restored' &&
+        text() === user,
+      `${JSON.stringify(offer)}; ${JSON.stringify(answer)}; sequence ${before.sequence} -> ${after.sequence}; ${files} files; ${JSON.stringify(done)}`
+    )
+    cleanup()
+  }
+
+  // 37. Round 22 (Opus S2): the write throws right after EmptyClipboard. Its ownership survives the throw: never
+  // "untouched"; the transaction loses its authority and its record is kept and offered; the user's Restore puts it back.
+  {
+    copyMulti(user)
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_THROW_AFTER_EMPTY: '1'
+    })
+    await a.ready
+    const live = await a.req('__clipboard-txn', { text: 'dictated text T', holdMs: 300 })
+    const threw = a.logs.find((l) => /the clipboard write threw/.test(l))
+    await a.stop()
+    const r = start(release)
+    await r.ready
+    await sleep(1000)
+    const listed = await r.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const done = offer ? await restoreConfirming(r, offer) : null
+    await r.stop()
+    const back = observe()
+    check(
+      "a write that throws after EmptyClipboard: reported unrestored (never untouched), the record kept and offered; the user's Restore puts the clipboard back",
+      !!live &&
+        /^write-failed\/unrestored\|/.test(String(live.result)) &&
+        !!threw &&
+        !!offer &&
+        !!done &&
+        done.result === 'restored' &&
+        back.text === user &&
+        back.extra === 'extra bytes for ' + user &&
+        recordFiles().length === 0,
+      `${JSON.stringify(live)}; ${threw}; ${JSON.stringify(offer)}; ${JSON.stringify(done)}; text ${back.text}`
+    )
+    cleanup()
+  }
+
+  // 38. Round 22 (F7): whether a record's helper still runs cannot be told (test hook): nothing is judged or deleted on
+  // that unknown (not offered, the dismiss refused, every file kept); a helper that can tell offers and restores it.
+  {
+    copyMulti(user)
+    const kept = await keptRecord('dictated text U')
+    const files = recordFiles().length
+    const u = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_LIVENESS_UNKNOWN: '1'
+    })
+    await u.ready
+    await sleep(1000)
+    const listed = await u.req('clipboard-offers')
+    const state = recordFiles().find((f) => f.endsWith('.state'))
+    const dismissed = state
+      ? await u.req('clipboard-dismiss', {
+          record: state.slice(recordPrefix.length, -'.state'.length)
+        })
+      : null
+    const left = recordFiles().length
+    await u.stop()
+    const r = start(release)
+    await r.ready
+    await sleep(1000)
+    const again = await r.req('clipboard-offers')
+    const offer = again && again.offers[0]
+    const done = offer ? await restoreConfirming(r, offer) : null
+    await r.stop()
+    check(
+      "liveness unknown: not offered, the dismiss refused, every file kept; a helper that can tell then offers it and the user's Restore puts it back",
+      kept &&
+        files > 0 &&
+        !!listed &&
+        listed.offers.length === 0 &&
+        !!dismissed &&
+        dismissed.dismissed === false &&
+        left === files &&
+        !!done &&
+        done.result === 'restored' &&
+        text() === user,
+      `${files} files; ${JSON.stringify(listed)}; ${JSON.stringify(dismissed)}; ${left} left; ${JSON.stringify(done)}`
     )
     cleanup()
   }
@@ -1648,13 +2022,14 @@ async function main() {
     const started = Date.now()
     for (let n = 0; n < runs; n++) {
       if (!copyMulti(user + ' ' + (n % 2))) continue
+      // Round 22 (S8): the expected shape is the seed's own, read back by this process (never the first save's).
+      if (expected === null) expected = seededShape()
       const r = await a.req('__save-only', {})
       const now = observe()
       const intact =
         now.text === user + ' ' + (n % 2) && now.extra === 'extra bytes for ' + user + ' ' + (n % 2)
       if (r && r.established) {
         const shape = `${r.items}|${r.shape}|${r.bytes}`
-        if (expected === null) expected = shape
         if (shape === expected) good++
         else {
           bad++
@@ -1678,8 +2053,8 @@ async function main() {
     )
     for (const l of shown) console.log(`# 33b ${l}`)
     check(
-      'stress with a NULL-window poller: every save established with the seeded shape, or not established with the clipboard intact',
-      bad === 0 && good + noSave > 0,
+      'stress with a NULL-window poller: all 400 saves accounted for, each established with the seeded shape or not established with the clipboard intact',
+      bad === 0 && good + noSave === runs && expected !== null,
       shown.join(' / ')
     )
   }
@@ -1697,6 +2072,7 @@ async function main() {
     const started = Date.now()
     for (let n = 0; n < runs; n++) {
       if (!copyMulti(user + ' ' + (n % 2))) continue
+      if (expected === null) expected = seededShape() // round 22 (S8): the seed's own shape
       const r = await a.req('__save-only', {})
       if (!r || !r.established) {
         notEstablished++
@@ -1704,7 +2080,6 @@ async function main() {
         continue
       }
       const shape = `${r.items}|${r.shape}|${r.bytes}`
-      if (expected === null) expected = shape
       if (shape !== expected) {
         mismatches++
         if (shown.length < 5) shown.push(`#${n} ${shape} vs ${expected}: ${r.line}`)
@@ -2098,6 +2473,34 @@ async function main() {
       'the NULL-window experiment ran (both owners, both probe modes)',
       rows.length === 4 && rows.every((r) => r.held && r.held.opened),
       JSON.stringify(rows)
+    )
+    // Round 22 (Opus): the rows themselves. NULL: B's open succeeds and A afterwards fails with 1418 (taken over).
+    // Its own window: B fails with error 5 and A's listing stays complete.
+    const nullRows = rows.filter((r) => r.owner === 'null')
+    const windowRows = rows.filter((r) => r.owner === 'window')
+    check(
+      'CI 34, the NULL row: B opens over A; A then lists nothing with error 1418',
+      nullRows.length === 2 &&
+        nullRows.every(
+          (r) =>
+            r.probe &&
+            r.probe.opened === true &&
+            /^listed 0 error 1418 /.test(String(r.held.second))
+        ),
+      JSON.stringify(nullRows)
+    )
+    check(
+      "CI 34, the window row: B's open fails with error 5; A's listing stays complete",
+      windowRows.length === 2 &&
+        windowRows.every(
+          (r) =>
+            r.probe &&
+            r.probe.opened === false &&
+            r.probe.openError === 5 &&
+            /^listed (\d+) error 0 counted \1$/.test(String(r.held.second)) &&
+            r.held.second === r.held.first
+        ),
+      JSON.stringify(windowRows)
     )
     await A.stop()
     await B.stop()

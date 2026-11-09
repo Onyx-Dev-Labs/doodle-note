@@ -432,6 +432,34 @@ namespace DoodleNote.DictationHelper
             return put + "|" + savedFormats + (notes.ClipboardMissing != null ? "|missing=" + string.Join(";", notes.ClipboardMissing.ToArray()) : "");
         }
 
+        /// <summary>
+        /// Test build only (round 22, the __seed op): this helper's own window becomes the clipboard's owner with the
+        /// given formats ("name|base64" or "#id|base64"; "-" for no data: a format offered for delayed rendering that
+        /// this window never renders, as Explorer's or Outlook's FileContents can be, and as presence-only formats are).
+        /// Its window pumps messages, so a render request is answered (with nothing) instead of waiting.
+        /// </summary>
+        public static Dictionary<string, object> TestSeed(List<string> items)
+        {
+            if (!ClipboardText.Open()) return Wire.Fields("seeded", false, "why", "not opened");
+            try
+            {
+                if (!Native.EmptyClipboard()) return Wire.Fields("seeded", false, "why", "not emptied");
+                foreach (string item in items)
+                {
+                    int bar = item.IndexOf('|');
+                    if (bar <= 0) return Wire.Fields("seeded", false, "why", "malformed item");
+                    string key = item.Substring(0, bar), data = item.Substring(bar + 1);
+                    uint format = key.StartsWith("#") ? uint.Parse(key.Substring(1)) : Native.RegisterClipboardFormat(key);
+                    bool ok;
+                    if (data == "-") { Native.SetClipboardData(format, IntPtr.Zero); ok = Native.IsClipboardFormatAvailable(format); }
+                    else ok = ClipboardText.SetBytes(format, Convert.FromBase64String(data));
+                    if (!ok) return Wire.Fields("seeded", false, "why", "format " + key + " not set");
+                }
+                return Wire.Fields("seeded", true, "sequence", (double)Native.GetClipboardSequenceNumber());
+            }
+            finally { Native.CloseClipboard(); }
+        }
+
         static void SimulateAnsiTargetRead()
         {
             uint before = Native.GetClipboardSequenceNumber();

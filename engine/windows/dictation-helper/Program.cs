@@ -572,6 +572,17 @@ namespace DoodleNote.DictationHelper
                     }
 #endif
                     break;
+                case "__seed":
+                    // Test build only (round 22): this helper's window seeds the clipboard (formats with data, and formats
+                    // offered for delayed rendering that it never renders). See Delivery.TestSeed.
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+#if DICTATION_TEST
+                    {
+                        List<string> seedItems = Wire.Strings(request, "items");
+                        work.Async(id, delegate { Wire.Reply(id, true, Delivery.TestSeed(seedItems)); });
+                    }
+#endif
+                    break;
                 case "__save-only":
                     // Test build only: the delivery's save and nothing else (no write, no record): what it established.
                     if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
