@@ -57,18 +57,27 @@ namespace DoodleNote.DictationHelper
             {
                 if (window == null)
                 {
-                    System.Windows.Forms.CreateParams parameters = new System.Windows.Forms.CreateParams();
-                    parameters.Parent = new IntPtr(-3); // HWND_MESSAGE
-                    window = new System.Windows.Forms.NativeWindow();
-                    window.CreateHandle(parameters);
+                    try
+                    {
+#if DICTATION_TEST
+                        if (TestMode.Env("DICTATION_HELPER_TEST_READER") == "no-window") return IntPtr.Zero; // test build only
+#endif
+                        System.Windows.Forms.CreateParams parameters = new System.Windows.Forms.CreateParams();
+                        parameters.Parent = new IntPtr(-3); // HWND_MESSAGE
+                        System.Windows.Forms.NativeWindow created = new System.Windows.Forms.NativeWindow();
+                        created.CreateHandle(parameters);
+                        if (created.Handle != IntPtr.Zero) window = created;
+                    }
+                    catch (Exception) { }
                 }
-                return window.Handle;
+                return window != null ? window.Handle : IntPtr.Zero;
             }
         }
 
         static bool Open()
         {
             IntPtr own = Window;
+            if (own == IntPtr.Zero) return false; // round 22: never a NULL-window open (it can be taken over): busy, not established
             for (int attempt = 0; attempt < 12; attempt++)
             {
                 if (Native.OpenClipboard(own)) return true;

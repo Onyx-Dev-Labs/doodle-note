@@ -24,10 +24,13 @@ namespace DoodleNote.DictationHelper
             {
                 // A message-only window on this (pumping) thread owns the clipboard while a paste is
                 // in flight, so a restore can prove ownership with GetClipboardOwner (see ClipboardText).
+                // Test build only: the window cannot be created (round 22: then nothing opens the clipboard at all).
+                if (TestMode.Env("DICTATION_HELPER_TEST_NO_WINDOW") == "1") throw new InvalidOperationException("test: no window");
                 CreateParams parameters = new CreateParams();
                 parameters.Parent = new IntPtr(-3); // HWND_MESSAGE
-                clipboardWindow = new NativeWindow();
-                clipboardWindow.CreateHandle(parameters);
+                NativeWindow created = new NativeWindow();
+                created.CreateHandle(parameters);
+                clipboardWindow = created.Handle != IntPtr.Zero ? created : null;
             }
             catch (Exception) { clipboardWindow = null; }
         }

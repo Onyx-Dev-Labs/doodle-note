@@ -403,7 +403,9 @@ namespace DoodleNote.DictationHelper
             uint before = Native.GetClipboardSequenceNumber();
             Thread reader = new Thread(delegate ()
             {
-                for (int attempt = 0; attempt < 50 && !Native.OpenClipboard(IntPtr.Zero); attempt++) Thread.Sleep(10);
+                bool opened = false;
+                for (int attempt = 0; attempt < 50 && !(opened = Native.OpenClipboard(IntPtr.Zero)); attempt++) Thread.Sleep(10);
+                if (!opened) { Wire.Log("test: the simulated target could not open the clipboard"); return; }
                 try { foreach (uint f in new uint[] { 1, 7, 16 }) Native.GetClipboardData(f); }
                 finally { Native.CloseClipboard(); }
             });
@@ -468,6 +470,8 @@ namespace DoodleNote.DictationHelper
             written = false;
             late = null;
             saved = null;
+            // Round 22: without the helper's own window nothing is opened at all (no save, no write): not pasting.
+            if (Ui.ClipboardWindow == IntPtr.Zero) { Wire.Log("the helper has no clipboard window; not pasting (nothing opened)"); return "no-save"; }
             // An earlier transaction that could not be put back gets its chance first (before our write).
             PendingClipboard.RecoverLeftover("delivery");
             // That check can take a while with several kept records (each opens the clipboard): the paste starts only if it
@@ -1029,12 +1033,19 @@ namespace DoodleNote.DictationHelper
             return ok == IntPtr.Zero ? "no answer in " + timeout + " ms" : null;
         }
 
+        /// <summary>
+        /// Every product clipboard open of the helper (the write, the confirmation, the paste gate, the restore, the
+        /// user's Restore and its view). Round 22: it REFUSES when the helper's window is zero; a NULL-window open can
+        /// be taken over by another opener (round 21, CI 34) and leaves no owner, so it is never made.
+        /// </summary>
         public static bool Open()
         {
+            IntPtr window = Ui.ClipboardWindow;
+            if (window == IntPtr.Zero) return false;
             // Another program may hold the clipboard for a moment.
             for (int attempt = 0; attempt < 12; attempt++)
             {
-                if (Native.OpenClipboard(Ui.ClipboardWindow)) return true;
+                if (Native.OpenClipboard(window)) return true;
                 Thread.Sleep(15);
             }
             return false;
