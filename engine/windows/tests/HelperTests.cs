@@ -758,6 +758,39 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(OurWrite.None, classify(new Dictionary<uint, byte[]>()), "an empty clipboard is not a write");
         }
 
+        public static void OnlyAPositiveAbsenceCountsAsMissing()
+        {
+            var absent = PendingClipboard.Presence.Absent; var unknown = PendingClipboard.Presence.Unknown;
+            Assert.Equal(absent, PendingClipboard.ClassifyPresence(0xFFFFFFFFu, 2), "ERROR_FILE_NOT_FOUND: absent");
+            Assert.Equal(absent, PendingClipboard.ClassifyPresence(0xFFFFFFFFu, 3), "ERROR_PATH_NOT_FOUND: absent");
+            foreach (int error in new[] { 5, 32, 33, 1, 21, 53, 67, 1920, 0 })
+                Assert.Equal(unknown, PendingClipboard.ClassifyPresence(0xFFFFFFFFu, error), "error " + error + " (access denied, sharing, network, ...): unknown, never 'missing'");
+            Assert.Equal(PendingClipboard.Presence.Present, PendingClipboard.ClassifyPresence(0x20u, 0), "attributes read: present");
+            Assert.Equal(PendingClipboard.Presence.Present, PendingClipboard.ClassifyPresence(0x80u, 5), "attributes read (a stale error code is ignored): present");
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dn-presence-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            try
+            {
+                string file = System.IO.Path.Combine(dir, "x.bin");
+                Assert.Equal(absent, PendingClipboard.Probe(file), "a file that is not there");
+                Assert.Equal(absent, PendingClipboard.Probe(System.IO.Path.Combine(dir, "no-such-dir", "x.bin")), "a directory that is not there");
+                System.IO.File.WriteAllBytes(file, new byte[] { 1 });
+                Assert.Equal(PendingClipboard.Presence.Present, PendingClipboard.Probe(file), "a file that is there");
+                using (new System.IO.FileStream(file, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.None))
+                    Assert.Equal(PendingClipboard.Presence.Present, PendingClipboard.Probe(file), "held with no sharing: still present (attributes need no open)");
+            }
+            finally { try { System.IO.Directory.Delete(dir, true); } catch (Exception) { } }
+        }
+
+        public static void TheExpectedLocaleIsPinnedToTheTransaction()
+        {
+            ClipboardOwnership ours = new ClipboardOwnership { TextLocale = 1033 };
+            Func<uint, string, int, byte[]> forms = ours.ExpectedForms();
+            Assert.Equal(true, forms(1, "x", 1033) != null, "the pinned locale: Windows' conversion expected");
+            Assert.Equal(null, forms(1, "x", 1049), "a sentinel stating another locale: nothing is expected (not ours)");
+            Assert.Equal(null, forms(16, "x", 1049), "nor its CF_LOCALE");
+        }
+
         public static void OfferOnlyRecordsAreNeverRestoredOnTheirOwn()
         {
             Func<uint, OurWrite, int, ClipboardView> view = (seq, write, count) => new ClipboardView { Sequence = seq, OurWrite = write, FormatCount = count };
