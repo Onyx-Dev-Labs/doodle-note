@@ -302,7 +302,8 @@ namespace DoodleNote.DictationHelper
             {
                 if (deadlineMs == 0 || elapsed() + PasteEstimateMs <= deadlineMs)
                 {
-                    DeliveryResult pasted = Paste(text, current, snapshot, before, timings, out clipboardAfterPaste, out holdsAfterPaste, out lateWrite);
+                    Func<bool> stillInTime = delegate { return deadlineMs == 0 || elapsed() + PasteEstimateMs <= deadlineMs; };
+                    DeliveryResult pasted = Paste(text, current, snapshot, before, timings, stillInTime, out clipboardAfterPaste, out holdsAfterPaste, out lateWrite);
                     if (pasted != null) return pasted;
                 }
             }
@@ -413,7 +414,7 @@ namespace DoodleNote.DictationHelper
         /// <summary>Wall-clock bound for our clipboard write (open, empty, set, close) on its own thread.</summary>
         const int WriteBudgetMs = 1000;
 
-        static DeliveryResult Paste(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, out string clipboardAfterFailedWrite, out string holdsAfterFailedWrite, out ClipboardText.LateWrite lateWrite)
+        static DeliveryResult Paste(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, Func<bool> stillInTime, out string clipboardAfterFailedWrite, out string holdsAfterFailedWrite, out ClipboardText.LateWrite lateWrite)
         {
             clipboardAfterFailedWrite = "untouched";
             holdsAfterFailedWrite = null;
@@ -423,7 +424,7 @@ namespace DoodleNote.DictationHelper
             ClipboardOwnership ours;
             ClipboardText.LateWrite late;
             bool written;
-            if (BeginClipboardWrite(text, out saved, out ours, out written, out late) != null) return null;
+            if (BeginClipboardWrite(text, out saved, out ours, out written, out late, null, stillInTime) != null) return null;
             lateWrite = late;
             if (late != null)
             {
@@ -458,13 +459,17 @@ namespace DoodleNote.DictationHelper
         /// down, and our bounded write runs. Null when the write ran (see `written` and `late`); otherwise
         /// why it did not start (nothing of the user's was touched).
         /// </summary>
-        static string BeginClipboardWrite(string text, out SavedClipboard saved, out ClipboardOwnership ours, out bool written, out ClipboardText.LateWrite late, Action<SavedClipboard> afterSave = null)
+        static string BeginClipboardWrite(string text, out SavedClipboard saved, out ClipboardOwnership ours, out bool written, out ClipboardText.LateWrite late, Action<SavedClipboard> afterSave = null, Func<bool> stillInTime = null)
         {
             ours = new ClipboardOwnership();
             written = false;
             late = null;
+            saved = null;
             // An earlier transaction that could not be put back gets its chance first (before our write).
             PendingClipboard.RecoverLeftover("delivery");
+            // That check can take a while with several kept records (each opens the clipboard): the paste starts only if it
+            // still fits the delivery's deadline (otherwise nothing of the user's is touched; the typing fallback decides).
+            if (stillInTime != null && !stillInTime()) { Wire.Log("the paste no longer fits the deadline after the kept-records check; not pasting"); return "deadline"; }
             // Saving the user's clipboard renders lazily-provided formats (OLE "Embed Source" and the
             // like), which can take arbitrarily long; it runs in the reader process, bounded per format.
             saved = SavedClipboard.CaptureBounded(CaptureBudgetMs);
