@@ -368,8 +368,11 @@ export function replaceConfigFileBase(path: string, next: string): void {
         fchmodSync(fd, now.mode & 0o7777)
         // Released before the rename (Windows refuses to rename over an open file);
         // from here on a change lands on the replaced file: the stated residual.
-        closeSync(authority)
+        // Cleared first (round 13): a close that fails has still released the
+        // number (POSIX), which must not be closed again below.
+        const opened = authority
         authority = null
+        closeSync(opened)
       }
     } finally {
       closeSync(fd)
@@ -383,7 +386,17 @@ export function replaceConfigFileBase(path: string, next: string): void {
     // full disk, I/O) is thrown as is, the original left intact (round 12).
     if (error !== replaced && unclassified(error)) failure = error
   } finally {
-    if (authority !== null) closeSync(authority)
+    // Still open only after a failure. Closed once, and its own failure changes
+    // nothing (round 13): the outcome above stands and the cleanup below runs.
+    if (authority !== null) {
+      const opened = authority
+      authority = null
+      try {
+        closeSync(opened)
+      } catch {
+        // Released anyway; nothing was written through it.
+      }
+    }
     // Renamed into place: the name is free again and may be another writer's now.
     if (temporary !== null && !(done && replacing)) removeOwnTemporary(temporary)
   }

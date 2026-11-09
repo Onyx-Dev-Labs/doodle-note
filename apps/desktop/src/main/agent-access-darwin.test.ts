@@ -1675,3 +1675,100 @@ test('round 13: after an I/O error at a check, the truncating in-place write is 
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('round 13: a close that fails is not repeated; its error stands and nothing is left', (t) => {
+  // Opus N1 / Astra P3: the authority's close ran before it was cleared, so a
+  // close that failed (POSIX releases the number anyway) was repeated in the
+  // cleanup: EBADF replaced the real error and the temporary file stayed.
+  const realClose = fsModule.closeSync as (fd: number) => void
+  const root = mkdtempSync(join(tmpdir(), 'dn-close-'))
+  try {
+    const cases: {
+      name: string
+      writer: Writer
+      /** Which descriptor's close fails: the authority (darwin) or the temporary file's. */
+      fd: 'authority' | 'temporary'
+      /** A failure injected before it (the authority then closes in the cleanup). */
+      before?: string
+      expect: { thrown: string | null; text: string }
+    }[] = [
+      {
+        name: 'the authority, before the rename',
+        writer: 'darwin',
+        fd: 'authority',
+        expect: { thrown: 'EIO', text: '{"a":1}' }
+      },
+      {
+        // The temporary write refused (EACCES): the base's write decides, after
+        // the authority's close in the cleanup failed.
+        name: 'the authority, in the cleanup after a refused temporary write',
+        writer: 'darwin',
+        fd: 'authority',
+        before: 'EACCES',
+        expect: { thrown: null, text: '{"b":2}' }
+      },
+      {
+        name: 'the temporary file',
+        writer: 'darwin',
+        fd: 'temporary',
+        expect: { thrown: 'EIO', text: '{"a":1}' }
+      },
+      {
+        name: 'the temporary file',
+        writer: 'windows',
+        fd: 'temporary',
+        expect: { thrown: 'EIO', text: '{"a":1}' }
+      }
+    ]
+    let n = 0
+    for (const c of cases) {
+      const label = `${c.writer}: ${c.name}`
+      const folder = join(root, String(n++))
+      mkdirSync(folder)
+      const path = join(folder, 'config.json')
+      writeFileSync(path, '{"a":1}')
+      const ino = statSync(path).ino
+      let watched: number | null = null
+      let closes = 0
+      let failed = false
+      let thrown: string | null = null
+      withFsHook(
+        (name, args) => {
+          if (name === 'openSync') {
+            const temp = String(args[0]).endsWith('.tmp')
+            if (temp === (c.fd === 'temporary') && (temp || args[1] === fsConstants.O_WRONLY))
+              return (fd) => (watched = fd as number)
+          }
+          if (name === 'writeFileSync' && typeof args[0] === 'number' && c.before)
+            throw fsError(c.before)
+          if (name === 'closeSync' && args[0] === watched) {
+            closes++
+            if (!failed) {
+              // Closed for real, then reported failed (as close(2) may on POSIX).
+              failed = true
+              realClose(args[0] as number)
+              throw fsError('EIO')
+            }
+          }
+          return undefined
+        },
+        () => {
+          try {
+            writeWith(c.writer, path, true)
+          } catch (error) {
+            thrown = (error as NodeJS.ErrnoException).code ?? null
+          }
+        }
+      )
+      t.diagnostic(`${label}: ${thrown ?? 'written'}, ${closes} close(s) of that descriptor`)
+      assert.ok(failed, `${label}: reached`)
+      assert.equal(thrown, c.expect.thrown, `${label}: the error`)
+      assert.equal(closes, 1, `${label}: closed once`)
+      assert.equal(readFileSync(path, 'utf8'), c.expect.text, label)
+      if (posix && c.expect.thrown !== null) assert.equal(statSync(path).ino, ino, label)
+      assert.deepEqual(temporaries(folder), [], `${label}: no temporary file left`)
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
