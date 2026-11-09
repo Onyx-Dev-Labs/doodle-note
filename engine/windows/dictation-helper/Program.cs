@@ -8,6 +8,58 @@ using System.Windows.Forms;
 
 namespace DoodleNote.DictationHelper
 {
+#if DICTATION_TEST
+    /// <summary>Test build only (round 21): who keeps the clipboard when two processes open it, with NULL or a window.</summary>
+    internal static class ClipboardExperiment
+    {
+        static string Enumerate()
+        {
+            int listed = 0, error;
+            for (uint f = 0; ;)
+            {
+                Native.ClearLastError(0);
+                f = Native.EnumClipboardFormats(f);
+                if (f == 0) { error = System.Runtime.InteropServices.Marshal.GetLastWin32Error(); break; }
+                listed++;
+            }
+            return "listed " + listed + " error " + error + " counted " + Native.CountClipboardFormats();
+        }
+
+        public static System.Collections.Generic.Dictionary<string, object> Run(bool hold, string owner, int waitMs, int holdMs)
+        {
+            System.Windows.Forms.NativeWindow window = null;
+            IntPtr own = IntPtr.Zero;
+            if (owner == "window")
+            {
+                System.Windows.Forms.CreateParams parameters = new System.Windows.Forms.CreateParams();
+                parameters.Parent = new IntPtr(-3);
+                window = new System.Windows.Forms.NativeWindow();
+                window.CreateHandle(parameters);
+                own = window.Handle;
+            }
+            bool opened = false;
+            int openError = 0;
+            for (int attempt = 0; attempt < (hold ? 12 : 1) && !opened; attempt++)
+            {
+                opened = Native.OpenClipboard(own);
+                if (!opened) { openError = System.Runtime.InteropServices.Marshal.GetLastWin32Error(); System.Threading.Thread.Sleep(15); }
+            }
+            string first = opened ? Enumerate() : "";
+            string openWindow1 = Native.GetOpenClipboardWindow().ToInt64().ToString("x");
+            string second = "", openWindow2 = "";
+            if (opened) System.Threading.Thread.Sleep(waitMs);
+            if (opened && hold) { second = Enumerate(); openWindow2 = Native.GetOpenClipboardWindow().ToInt64().ToString("x"); }
+            if (opened) System.Threading.Thread.Sleep(holdMs);
+            bool closed = false;
+            int closeError = 0;
+            if (opened) { closed = Native.CloseClipboard(); closeError = System.Runtime.InteropServices.Marshal.GetLastWin32Error(); }
+            if (window != null) window.DestroyHandle();
+            return Wire.Fields("owner", owner, "ownWindow", own.ToInt64().ToString("x"), "opened", opened, "openError", openError,
+                "first", first, "openWindowFirst", openWindow1, "second", second, "openWindowSecond", openWindow2, "closed", closed, "closeError", closeError);
+        }
+    }
+#endif
+
     /// <summary>
     /// DoodleNote dictation helper for Windows: reads one JSON request per stdin line and
     /// answers on stdout, with the same operations and replies as the macOS helper
@@ -528,6 +580,21 @@ namespace DoodleNote.DictationHelper
                             "bytes", only != null ? (double)only.ByteCount : -1.0, "shape", only != null ? only.Shape() : "",
                             "skipped", only != null && only.ReportedSkip, "line", SavedClipboard.LastSaveLine));
                     });
+#endif
+                    break;
+                case "__clip-hold":
+                case "__clip-probe":
+                    // Test build only (round 21): the NULL-window open experiment. "__clip-hold" opens the clipboard (with
+                    // NULL or its own message-only window), enumerates, waits while another process probes, enumerates
+                    // again, holds, closes. "__clip-probe" opens with NULL once, enumerates, and closes or holds.
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+#if DICTATION_TEST
+                    {
+                        string op2 = op;
+                        string owner = Wire.Str(request, "owner") ?? "null";
+                        int waitMs = (int)(Wire.Num(request, "waitMs") ?? 1500), holdMs = (int)(Wire.Num(request, "holdMs") ?? 1500);
+                        work.Async(id, delegate { Wire.Reply(id, true, ClipboardExperiment.Run(op2 == "__clip-hold", owner, waitMs, holdMs)); });
+                    }
 #endif
                     break;
                 case "__saturate":
