@@ -59,8 +59,11 @@ namespace DoodleNote.DictationHelper
         /// (for example "FileContents (not provided by the app that copied it)"), so the app can say so.
         /// </summary>
         public List<string> ClipboardMissing;
-        /// <summary>Round 22: not-saved when the clipboard could not be saved, so nothing was pasted (the app says why).</summary>
+        /// <summary>Round 22: not-saved when the clipboard could not be saved or used, so nothing was pasted with it.</summary>
         public string ClipboardNotice;
+        /// <summary>Round 23: why (too-large, unrendered, nothing-savable, owner-unresponsive, zero-sequence, no-record,
+        /// deadline, no-window, unreadable), so the app can tell the user.</summary>
+        public string ClipboardNoticeReason;
 
         public DeliveryResult(DeliveryOutcome outcome, string reason) { Outcome = outcome; Reason = reason; }
 
@@ -78,6 +81,7 @@ namespace DoodleNote.DictationHelper
             if (ProviderSlowestMs >= 0) output["providerSlowestMs"] = Math.Round(ProviderSlowestMs, 1);
             if (ClipboardMissing != null && ClipboardMissing.Count > 0) output["clipboardMissing"] = ClipboardMissing;
             if (ClipboardNotice != null) output["clipboardNotice"] = ClipboardNotice;
+            if (ClipboardNoticeReason != null) output["clipboardNoticeReason"] = ClipboardNoticeReason;
             return output;
         }
     }
@@ -182,7 +186,7 @@ namespace DoodleNote.DictationHelper
         /// <summary>This delivery's established save (for the names of what its put-back could not include).</summary>
         [ThreadStatic] static SavedClipboard deliverySave;
         /// <summary>This delivery's paste could not save the clipboard (no window, or no established save).</summary>
-        [ThreadStatic] static bool deliveryNotSaved;
+        [ThreadStatic] static string deliveryNoSave; // round 23: why the paste did not use the clipboard (null: it did)
 
         static int Ms(Stopwatch watch) { return (int)watch.ElapsedMilliseconds; }
 
@@ -194,28 +198,32 @@ namespace DoodleNote.DictationHelper
             try
             {
                 deliverySave = null;
-                deliveryNotSaved = false;
+                deliveryNoSave = null;
                 DeliveryResult result = DeliverInner(snapshot, text, guards, timings, deadlineMs, alreadyElapsedMs, stats);
                 result.Timings = timings;
-                ClipboardNotes(result, deliverySave, deliveryNotSaved);
+                ClipboardNotes(result, deliverySave, deliveryNoSave);
                 if (result.ProviderSlowestMs < 0 && stats.SlowestMs > 0) result.ProviderSlowestMs = stats.SlowestMs;
                 return result;
             }
-            finally { Bounded.Untrack(); deliverySave = null; deliveryNotSaved = false; }
+            finally { Bounded.Untrack(); deliverySave = null; deliveryNoSave = null; }
         }
 
         /// <summary>
         /// Round 22: the reply names what a put-back short of whole did not include (skipped, partial), and says when the
         /// clipboard could not be saved at all (so nothing was pasted), so the user is told, never left guessing.
         /// </summary>
-        internal static void ClipboardNotes(DeliveryResult result, SavedClipboard saved, bool notSaved)
+        internal static void ClipboardNotes(DeliveryResult result, SavedClipboard saved, string noSaveReason)
         {
             if (saved != null && (result.Clipboard == "skipped" || result.Clipboard == "partial"))
             {
                 List<string> missing = saved.Missing();
                 if (missing.Count > 0) result.ClipboardMissing = missing;
             }
-            if (notSaved && result.Clipboard == "untouched") result.ClipboardNotice = "not-saved";
+            if (noSaveReason != null && result.Clipboard == "untouched")
+            {
+                result.ClipboardNotice = "not-saved";
+                result.ClipboardNoticeReason = noSaveReason;
+            }
         }
 
         /// <summary>How long a paste is expected to take, start to settled, for the deadline check.</summary>
@@ -533,25 +541,30 @@ namespace DoodleNote.DictationHelper
             late = null;
             saved = null;
             // Round 22: without the helper's own window nothing is opened at all (no save, no write): not pasting.
-            if (Ui.ClipboardWindow == IntPtr.Zero) { Wire.Log("the helper has no clipboard window; not pasting (nothing opened)"); deliveryNotSaved = true; return "no-save"; }
+            if (Ui.ClipboardWindow == IntPtr.Zero) { Wire.Log("the helper has no clipboard window; not pasting (nothing opened)"); deliveryNoSave = "no-window"; return "no-save"; }
             // An earlier transaction that could not be put back gets its chance first (before our write).
             PendingClipboard.RecoverLeftover("delivery");
             // That check can take a while with several kept records (each opens the clipboard): the paste starts only if it
             // still fits the delivery's deadline (otherwise nothing of the user's is touched; the typing fallback decides).
-            if (stillInTime != null && !stillInTime()) { Wire.Log("the paste no longer fits the deadline after the kept-records check; not pasting"); return "deadline"; }
+            if (stillInTime != null && !stillInTime()) { Wire.Log("the paste no longer fits the deadline after the kept-records check; not pasting"); deliveryNoSave = "deadline"; return "deadline"; }
             // Round 22 (F4, the bound 1): an owner that does not answer a WM_NULL now is never asked to render either (the
             // save would wait in its render): checked BEFORE the save, and again after it (below) before emptying.
             string unresponsiveBefore = ClipboardText.OwnerUnresponsive();
             if (unresponsiveBefore != null)
             {
                 Wire.Log("the clipboard's owner is not responding before the save (" + unresponsiveBefore + "); not saving, not pasting");
-                deliveryNotSaved = true;
+                deliveryNoSave = "owner-unresponsive";
                 return "owner-unresponsive";
             }
             // Saving the user's clipboard renders lazily-provided formats (OLE "Embed Source" and the
             // like), which can take arbitrarily long; it runs in the reader process, bounded per format.
             saved = SavedClipboard.CaptureBounded(CaptureBudgetMs);
-            if (saved == null) { deliveryNotSaved = true; return "no-save"; }
+            if (saved == null)
+            {
+                deliveryNoSave = SavedClipboard.LastNoSaveReason ?? "unreadable";
+                Wire.Log("not pasting: the clipboard could not be saved (" + deliveryNoSave + ")");
+                return "no-save";
+            }
             deliverySave = saved;
             if (afterSave != null) afterSave(saved);
             // Emptying the clipboard sends WM_DESTROYCLIPBOARD to its owner and waits for its answer
@@ -562,6 +575,7 @@ namespace DoodleNote.DictationHelper
             if (ownerProblem != null)
             {
                 Wire.Log("the clipboard's owner is not responding (" + ownerProblem + "); not pasting");
+                deliveryNoSave = "owner-unresponsive";
                 return "owner-unresponsive";
             }
             // Round 22 (S2): a zero sequence now is no evidence the clipboard is still what was saved: nothing is written
@@ -569,13 +583,14 @@ namespace DoodleNote.DictationHelper
             if (ClipboardText.Sequence("begin") == 0 || saved.Sequence == 0)
             {
                 Wire.Log("the clipboard sequence is not usable evidence (0) before the transaction; not pasting (no record, nothing touched)");
+                deliveryNoSave = "zero-sequence";
                 return "zero-sequence";
             }
             // The transaction is written down until its restore ran, so a helper that ends meanwhile
             // loses nothing (see PendingClipboard; content with a privacy marker stays in memory only).
             // Without a record, no paste.
             PendingRecord record = PendingClipboard.Begin(saved, text);
-            if (record == null) return "no-record";
+            if (record == null) { deliveryNoSave = "no-record"; return "no-record"; }
             saved.Record = record;
             written = ClipboardText.WriteBounded(text, out ours, saved, WriteBudgetMs, out late);
             return null;
@@ -1987,6 +2002,7 @@ namespace DoodleNote.DictationHelper
 
         public static SavedClipboard CaptureBounded(int timeoutMs)
         {
+            LastNoSaveReason = "unreadable";
             Stopwatch watch = Stopwatch.StartNew();
             for (int attempt = 1; ; attempt++)
             {
