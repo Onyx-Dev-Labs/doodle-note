@@ -1511,6 +1511,8 @@ namespace DoodleNote.DictationHelper
         public OurWrite OurWrite;
         public uint Sequence;
         public int FormatCount;
+        /// <summary>The enumeration was not complete (ClipboardText.EnumerateComplete): no proof of anything.</summary>
+        public bool Incomplete;
         /// <summary>A hint for the offer only: our write or the saved content, cut short.</summary>
         public bool LooksInterrupted { get { return OurWrite == OurWrite.Partial || OnlySavedFormats || FormatCount == 0; } }
 
@@ -1528,8 +1530,14 @@ namespace DoodleNote.DictationHelper
             view.OwnerIsUs = owner != IntPtr.Zero && owner == Ui.ClipboardWindow;
             view.OwnerAlive = owner != IntPtr.Zero && Native.IsWindow(owner);
             view.Sequence = Native.GetClipboardSequenceNumber();
-            List<uint> present = new List<uint>();
-            for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
+            List<uint> present;
+            if (!ClipboardText.EnumerateComplete(out present))
+            {
+                // Incomplete (round 21): no proof of anything: not our write, not the saved content (offered, never deleted).
+                view.FormatCount = present.Count;
+                view.Incomplete = true;
+                return view;
+            }
             view.FormatCount = present.Count;
             // A live owner that is not ours could render on demand: never read its data.
             if (view.OwnerAlive && !view.OwnerIsUs) return view;

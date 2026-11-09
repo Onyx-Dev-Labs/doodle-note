@@ -1405,11 +1405,39 @@ namespace DoodleNote.DictationHelper
         /// restore would overwrite). Never for a live foreign owner (it may render: -1), and synthesized formats
         /// are not read (a read would render them). GDI-handle formats count as 0.
         /// </summary>
+        /// <summary>
+        /// THE complete enumeration of the open clipboard (round 21), shared by every proof: the last error cleared before
+        /// each step and ERROR_SUCCESS at the end, no repeated id, and as many formats as CountClipboardFormats counts in
+        /// the same open. False ("incomplete") means no proof of anything: no automatic restore, no "untouched" deletion.
+        /// </summary>
+        public static bool EnumerateComplete(out List<uint> formats)
+        {
+            return EnumerateComplete(delegate (uint f) { Native.ClearLastError(0); return Native.EnumClipboardFormats(f); },
+                delegate { return Marshal.GetLastWin32Error(); }, delegate { return Native.CountClipboardFormats(); }, out formats);
+        }
+
+        /// <summary>The rule, with the native calls injected (unit-tested).</summary>
+        internal static bool EnumerateComplete(Func<uint, uint> next, Func<int> lastError, Func<int> count, out List<uint> formats)
+        {
+            formats = new List<uint>();
+            HashSet<uint> seen = new HashSet<uint>();
+            for (uint f = 0; ;)
+            {
+                f = next(f);
+                if (f == 0) { if (lastError() != 0) return false; break; }
+                if (!seen.Add(f) || formats.Count > 4096) return false;
+                formats.Add(f);
+            }
+            return formats.Count == count();
+        }
+
         public static long OpenClipboardBytes(bool foreignOwner)
         {
             if (foreignOwner) return -1;
             long total = 0;
-            for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f))
+            List<uint> present;
+            if (!EnumerateComplete(out present)) return -1; // display only: unknown
+            foreach (uint f in present)
             {
                 if (SavedClipboard.MaybeSynthesized(f) || f == 2 || f == 3 || f == 9 || f == 14) continue;
                 IntPtr data = Native.GetClipboardData(f);
@@ -1593,8 +1621,9 @@ namespace DoodleNote.DictationHelper
             {
                 if (Native.GetClipboardOwner() != window) { ForeignAtConfirm = true; return; }
                 if (record == null || record.DictatedHash == null) { Rejected = true; RejectedWhy = "nothing to compare against"; return; }
-                List<uint> present = new List<uint>();
-                for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
+                List<uint> present;
+                // An enumeration that is not complete is no proof: a rejection, as a failed read is.
+                if (!ClipboardText.EnumerateComplete(out present)) { Rejected = true; RejectedWhy = "the enumeration was not complete"; return; }
                 int synthesized = 0;
                 foreach (uint f in present) if (SavedClipboard.MaybeSynthesized(f) && !ClipboardText.OurWriteFormat(f)) synthesized++;
                 // Exactly our write: every present format's BYTES ours (our text, our markers, the sentinel) or Windows' from
@@ -2122,8 +2151,8 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         public bool MatchesOpenClipboard()
         {
-            List<uint> present = new List<uint>();
-            for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
+            List<uint> present;
+            if (!ClipboardText.EnumerateComplete(out present)) return false; // incomplete: no proof (no "untouched" deletion)
             byte[] emf = null;
             if (metafile != IntPtr.Zero)
             {
@@ -2253,8 +2282,8 @@ namespace DoodleNote.DictationHelper
             // The one guard: a transaction that lost its authority (a rejection, a keep, ...) is never "ours" again.
             if (offerOnly) return false;
             if (Record == null || Record.DictatedHash == null || ours.Owner == IntPtr.Zero || Native.GetClipboardOwner() != ours.Owner) return false;
-            List<uint> present = new List<uint>();
-            for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
+            List<uint> present;
+            if (!ClipboardText.EnumerateComplete(out present)) return false; // incomplete: no proof, no automatic restore
             if (ClipboardText.ClassifyOurWrite(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, Record.Id, Record.Nonce, Record.DictatedHash, ours.ExpectedForms()) != OurWrite.Complete) return false;
             // And at a sequence our close explains (as the confirmation requires).
             int synthesized = 0;
