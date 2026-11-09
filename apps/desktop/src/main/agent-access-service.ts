@@ -275,8 +275,9 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
 /**
  * Every other platform (macOS): the base's write (win/bark 9355b87 wrote in
  * place with writeFileSync) with one change, the one disclosed for macOS: the
- * text goes to a temporary file beside the target and is renamed over it, so a
- * crash never leaves a half-written config. Everything else is the base's: no
+ * text goes to a temporary file beside the target and is renamed over it, so an
+ * app crash never leaves a half-written config (there is no fsync before the
+ * rename, so a power loss or a kernel panic still can). Everything else is the base's: no
  * re-read before the write (the base wrote blind), the original's permission
  * bits kept (writeFileSync kept them), a new file created with the default mode
  * (0666 less the umask, as writeFileSync did), and a symbolic link followed, even

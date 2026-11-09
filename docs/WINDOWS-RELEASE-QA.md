@@ -638,7 +638,9 @@ old folder, which the installer removed, until it finishes. Client configs are r
 a symbolic link is followed to the file the file system itself reaches,
 `fs.realpathSync.native`, never by joining link texts lexically; a dangling link
 to the name inside its folder's real path, where `writeFileSync` would create it;
-where that cannot be determined, nothing is written), only when their content changes, and not at all if
+where that cannot be determined, nothing is written; the message, "could not tell
+where this file leads", does not name the cause, an `EIO` included: attaching
+it is a known follow-up), only when their content changes, and not at all if
 the client rewrote the file in the meantime (the update starts over from the new
 text). A temporary file whose removal fails stays beside the config as
 `.dn-<8 hex>.tmp` (not reported; the write's own result stands). The removal is
@@ -659,7 +661,12 @@ Windows) keeps the code of win/bark 9355b87 (`src/main/mcp-clients-logic-base.ts
 pinned by SHA-256) with one change: the write is a temporary file renamed over
 the config, in the file the base's `writeFileSync` wrote (the same resolution;
 where it cannot be determined, or the place holds no file, the base's in-place
-write). The replace is used only where the base's write would have been allowed
+write). So an app crash never leaves a half-written config; there is no `fsync`
+before the rename, so a power loss or a kernel panic still can. Kept from the
+base on purpose (for the owner to decide, a separate change): an existing config
+that cannot be read (mode 0200, or `EIO` on the read) is taken for no config,
+and Connect rewrites it with only our server (its other entries are lost);
+Windows refuses in that case. The replace is used only where the base's write would have been allowed
 too: the folder writable, and the file opened for writing first, as the base's
 write opened it (round 11: that descriptor, not an earlier access check, is the
 authority; a new file is linked into place, never over one that appeared
