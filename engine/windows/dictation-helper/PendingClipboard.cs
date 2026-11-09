@@ -802,7 +802,8 @@ namespace DoodleNote.DictationHelper
                     {
                         RecordFacts facts = RecordFacts.Of(state);
                         if (facts.Compare(Now()) == LogonMatch.OtherSession) return false; // another session's record: never deleted from here
-                        if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid, facts.PidStart)) return false; // its helper still runs
+                        // Its helper still runs, or whether it does could not be told (round 22, F7: unknown is never "not running").
+                        if (facts.Pid != Process.GetCurrentProcess().Id && HelperLiveness(facts.Pid, facts.PidStart) != Liveness.NotRunning) return false;
                     }
                 }
                 // The real result: true only when every file of the record is gone (else the card stays, retryable;
@@ -848,7 +849,12 @@ namespace DoodleNote.DictationHelper
                     bool earlierBoot = (!string.IsNullOrEmpty(otherBootId) && bootId.Length > 0 && otherBootId != bootId)
                         || (otherTick.HasValue && otherTick.Value > 0 && (long)Native.GetTickCount64() < (long)otherTick.Value);
                     if (!earlierBoot && otherSession.HasValue && otherSession.Value >= 0 && (int)otherSession.Value != session) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "an invalid state naming another session (" + invalid + "); left to it"; }
-                    if (!earlierBoot && otherPid.HasValue && otherPid.Value > 0 && (int)otherPid.Value != Process.GetCurrentProcess().Id && HelperRunning((int)otherPid.Value, (long)(otherStart ?? 0))) { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state whose helper still runs (" + invalid + "); left to it"; }
+                    Liveness otherHelper = !earlierBoot && otherPid.HasValue && otherPid.Value > 0 && (int)otherPid.Value != Process.GetCurrentProcess().Id
+                        ? HelperLiveness((int)otherPid.Value, (long)(otherStart ?? 0)) : Liveness.NotRunning;
+                    if (otherHelper == Liveness.Running) { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state whose helper still runs (" + invalid + "); left to it"; }
+                    // Round 22 (F7): whether its helper runs could not be told: left to it, bounded by the retention (its
+                    // state file's age); only then rebuilt and offered (never deleted on that unknown).
+                    if (otherHelper == Liveness.Unknown && !OlderThan(StatePath(id), Retention)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state whose helper may still run (that could not be told) (" + invalid + "); left to it (bounded by the retention)"; }
                 }
                 // Its payload may still be whole: then the record is rebuilt OFFER-ONLY with an unknown identity and offered,
                 // never deleted and never restored on its own. Without a usable payload there is nothing to restore from.
@@ -861,7 +867,17 @@ namespace DoodleNote.DictationHelper
             RecordFacts facts = RecordFacts.Of(state); // facts.OfferOnly is the ON-DISK value (a later write heals a failed one)
             // First of all: another session's record (same user, same boot, shared %TEMP%) is never touched here.
             if (facts.Compare(Now()) == LogonMatch.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record; left to it"; }
-            if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid, facts.PidStart)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its helper (pid " + facts.Pid + ") still runs; left to it"; }
+            Liveness itsHelper = facts.Pid != Process.GetCurrentProcess().Id ? HelperLiveness(facts.Pid, facts.PidStart) : Liveness.NotRunning;
+            if (itsHelper == Liveness.Running) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its helper (pid " + facts.Pid + ") still runs; left to it"; }
+            if (itsHelper == Liveness.Unknown)
+            {
+                // Round 22 (F7): a failed query is UNKNOWN, never "not running": nothing is judged or deleted on it. Kept
+                // (offer-only), bounded like an unreadable payload (the retention and the boot limit).
+                string ended = UnreadablePolicy(id, facts, "whether its helper (pid " + facts.Pid + ") still runs could not be told");
+                if (ended != null) return PolicyEnded(ended, ref result, reply);
+                result = RecoverResult.Busy; reply["result"] = "busy";
+                return "whether its helper (pid " + facts.Pid + ") still runs could not be told; kept (bounded by the retention)";
+            }
             // Its restore had run (journaled before the deletion): deleted on sight, never offered.
             if (facts.Stage == "settled") return "settled earlier (never offered); " + (DeleteId(id, "settled: its restore had run") ? "deleted" : "deletion deferred (kept)");
             if (facts.Stage == "saved" && !facts.OfferOnly) return "stage saved: nothing to put back; " + (DeleteId(id, "nothing had been emptied") ? "deleted" : "deletion deferred (kept)");
@@ -1367,17 +1383,45 @@ namespace DoodleNote.DictationHelper
         /// The helper that wrote a record still runs: the same pid AND the same process start time (a reused pid is
         /// another process). Records without a start time (earlier builds) fall back to the process name.
         /// </summary>
-        static bool HelperRunning(int pid, long startTicks = 0)
+        /// <summary>Whether a helper process runs: a query that fails is UNKNOWN, never "not running" (round 22, F7).</summary>
+        internal enum Liveness { NotRunning, Running, Unknown }
+
+        /// <summary>
+        /// Whether the helper `pid` (started at `startTicks`, when known) still runs. NotRunning only on proof: no such
+        /// process, or one that has exited, or one with another start time or name. A query Windows refuses (access
+        /// denied: a protected process that reused the pid) or any other failure is Unknown.
+        /// </summary>
+        internal static Liveness HelperLiveness(int pid, long startTicks = 0)
         {
-            if (pid <= 0) return false;
+            if (pid <= 0) return Liveness.NotRunning;
+#if DICTATION_TEST
+            if (TestMode.Env("DICTATION_HELPER_TEST_LIVENESS_UNKNOWN") == "1") return Liveness.Unknown; // test build only
+#endif
+            Process other;
+            try { other = Process.GetProcessById(pid); }
+            catch (ArgumentException) { return Liveness.NotRunning; } // no process with that id
+            catch (Exception) { return Liveness.Unknown; }
+            using (other)
+            {
+                try
+                {
+                    if (other.HasExited) return Liveness.NotRunning;
+                    if (startTicks > 0) return Math.Abs(other.StartTime.ToUniversalTime().Ticks - startTicks) < TimeSpan.TicksPerSecond ? Liveness.Running : Liveness.NotRunning;
+                    return other.ProcessName.IndexOf("dictation-helper", StringComparison.OrdinalIgnoreCase) >= 0 ? Liveness.Running : Liveness.NotRunning;
+                }
+                catch (InvalidOperationException) { return Liveness.NotRunning; } // it exited meanwhile (no process associated)
+                catch (Exception) { return Liveness.Unknown; }
+            }
+        }
+
+        /// <summary>A file's last write is readable and at least `age` ago (an unreadable time is never "old").</summary>
+        internal static bool OlderThan(string path, TimeSpan age)
+        {
             try
             {
-                using (Process other = Process.GetProcessById(pid))
-                {
-                    if (other.HasExited) return false;
-                    if (startTicks > 0) return Math.Abs(other.StartTime.ToUniversalTime().Ticks - startTicks) < TimeSpan.TicksPerSecond;
-                    return other.ProcessName.IndexOf("dictation-helper", StringComparison.OrdinalIgnoreCase) >= 0;
-                }
+                DateTime written = File.GetLastWriteTimeUtc(path);
+                if (written.Year <= 1601) return false; // the "could not be read" value
+                return DateTime.UtcNow - written >= age;
             }
             catch (Exception) { return false; }
         }

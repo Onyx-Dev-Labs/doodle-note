@@ -432,16 +432,11 @@ namespace DoodleNote.DictationHelper
                 // A record owned by another helper that is still running belongs to it: leave it alone.
                 if (pid.HasValue && pid.Value != Process.GetCurrentProcess().Id && owner != Owner)
                 {
-                    try
-                    {
-                        using (Process other = Process.GetProcessById((int)pid.Value))
-                        {
-                            if (!other.HasExited && other.ProcessName.IndexOf("dictation-helper", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-                        }
-                    }
-                    catch (ArgumentException) { }
-                    catch (InvalidOperationException) { }
-                    catch (System.ComponentModel.Win32Exception) { }
+                    PendingClipboard.Liveness other = PendingClipboard.HelperLiveness((int)pid.Value);
+                    if (other == PendingClipboard.Liveness.Running) return false;
+                    // Round 22 (F7): a query that failed is UNKNOWN, never "not running": left alone, bounded (a dictation's
+                    // silence never lasts an hour; an older record is given back).
+                    if (other == PendingClipboard.Liveness.Unknown && !PendingClipboard.OlderThan(StatePath, TimeSpan.FromHours(1))) return false;
                 }
                 device = Wire.Str(state, "device");
                 volume = Wire.Num(state, "volume");
