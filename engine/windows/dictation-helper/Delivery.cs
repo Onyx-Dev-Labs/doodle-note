@@ -1770,7 +1770,10 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         internal static readonly HashSet<string> PresenceOnly = new HashSet<string>(StringComparer.Ordinal)
         {
-            "MSDEVColumnSelect", "MSDEVLineSelect", "VisualStudioEditorOperationsLineCutCopyClipboardTag"
+            "MSDEVColumnSelect", "MSDEVLineSelect", "VisualStudioEditorOperationsLineCutCopyClipboardTag",
+            // The clipboard-viewer convention: a format whose PRESENCE tells clipboard viewers and history tools to ignore
+            // the entry (Ditto and other clipboard managers honour it); its data is not used.
+            "Clipboard Viewer Ignore"
         };
         /// <summary>The saved presence-only formats (see PresenceOnly).</summary>
         readonly List<uint> presenceOnly = new List<uint>();
@@ -1833,8 +1836,10 @@ namespace DoodleNote.DictationHelper
                 int left = timeoutMs - (int)watch.ElapsedMilliseconds;
                 bool retry;
                 string line;
+                // The second attempt onwards accepts a format its owner does not render under a PROVEN hold as a named,
+                // reported skip (round 22, owner decision: class 3); the first one does not.
                 SavedClipboard saved = Judge(delegate (string request, int ms) { return reader.Request(request, ms); }, left,
-                    delegate { return Native.GetClipboardSequenceNumber(); }, out retry, out line);
+                    delegate { return Native.GetClipboardSequenceNumber(); }, out retry, out line, attempt >= 2);
                 Wire.Log("saving the clipboard (attempt " + attempt + "): " + line);
 #if DICTATION_TEST
                 LastSaveLine = "attempt " + attempt + ": " + line;
@@ -1937,7 +1942,7 @@ namespace DoodleNote.DictationHelper
                 else cap = Math.Min(MaxFormatBytes, MaxBytes - total);
                 // Round 22: a recognised privacy marker that is skipped for ANY reason forces the conservative exclusion
                 // markers on the put-back (the content must never come back without its exclusion).
-                if (cap <= 0) { saved.reportedSkip = true; if (marker) saved.forceMarkers = true; outcomes.Append(" over the cap (the budget is used up)" + (marker ? "; exclusion markers forced" : "")); continue; }
+                if (cap <= 0) { saved.reportedSkip = true; if (marker) saved.forceMarkers = true; else saved.skippedNames.Add(DisplayName(format, name) + " (too large)"); outcomes.Append(" over the cap (the budget is used up)" + (marker ? "; exclusion markers forced" : "")); continue; }
                 if (left() <= 0) { saved.Discard(); line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " not read: out of time]); not pasting"; return null; }
                 string answer = request("get " + format + " " + cap, Math.Max(1, Math.Min(PerFormatMs, left())));
                 if (answer == null) { saved.Discard(); retry = false; line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " overran]): its owner is slow to render; not pasting"; return null; }
@@ -1982,11 +1987,32 @@ namespace DoodleNote.DictationHelper
                     // A positively measured excess: the one named skip a read can give.
                     saved.reportedSkip = true;
                     if (marker) saved.forceMarkers = true;
+                    else saved.skippedNames.Add(DisplayName(format, name) + " (too large)");
                     outcomes.Append(" over the cap (" + size + " bytes)" + (marker ? "; exclusion markers forced" : ""));
                     continue;
                 }
+                bool unrendered = (parts[0] == "none" || parts[0] == "nosize" || parts[0] == "unlocked") && parts.Length == 4;
+                // Only these replies carry an error code in field 3 (never data: nothing but lengths is logged).
+                string why = parts[0] + (unrendered ? " error " + parts[3] : "");
+                if (unrendered && marker)
+                {
+                    // Class 2: a privacy marker present but not cleanly read: the conservative exclusion markers go back.
+                    saved.forceMarkers = true;
+                    outcomes.Append(" marker " + why + ": exclusion markers forced");
+                    continue;
+                }
+                if (unrendered && allowUnrendered)
+                {
+                    // Class 3 (owner decision): under a PROVEN hold with the sequence unchanged, the owner did not render it
+                    // (for example Explorer's or Outlook's FileContents). A NAMED, REPORTED skip: the paste goes ahead and
+                    // the restore result names it to the app.
+                    saved.reportedSkip = true;
+                    saved.skippedNames.Add(DisplayName(format, name) + " (not provided by the app that copied it)");
+                    outcomes.Append(" " + why + ": not rendered by its owner, skipped (reported)");
+                    continue;
+                }
                 saved.Discard();
-                line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " " + parts[0] + (parts.Length > 3 ? " error " + parts[3] : "") + "]): a listed format could not be read; not pasting";
+                line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " " + why + "]): a listed format could not be read" + (unrendered ? " (retried once; then a reported skip)" : "") + "; not pasting";
                 return null;
             }
             // The formats Windows rebuilds, decided by the representation actually RETAINED (never by availability hints).
@@ -2007,12 +2033,30 @@ namespace DoodleNote.DictationHelper
             uint now = sequenceNow();
             if (now != sequence) { saved.Discard(); retry = false; line = "the clipboard changed while it was saved (" + listing + ", now " + now + "); not pasting"; return null; }
             saved.ListedCount = listed;
+            // Provenance (round 22): something was listed but nothing retained can never report "restored".
+            if (listed > 0 && saved.items.Count == 0 && saved.metafile == IntPtr.Zero && saved.presenceOnly.Count == 0) saved.reportedSkip = true;
             line = "ESTABLISHED (" + listing + "; " + (listed == 0 ? "a positively empty clipboard" : "[" + outcomes + "]") + ")";
             return saved;
         }
 
-        /// <summary>How many formats the save's listing held (provenance: an all-skipped save is never an empty clipboard).</summary>
+        /// <summary>How many formats the save's listing held (provenance, written down: an all-skipped save is never an empty clipboard).</summary>
         public int ListedCount;
+        /// <summary>The formats the save could not keep, by name and reason (written down; the restore result names them to the app).</summary>
+        internal readonly List<string> skippedNames = new List<string>();
+        public IList<string> SkippedNames { get { return skippedNames; } }
+
+        /// <summary>A format's name for a notice: its registered name, or the standard name.</summary>
+        internal static string DisplayName(uint format, string name)
+        {
+            if (!string.IsNullOrEmpty(name)) return name;
+            switch (format)
+            {
+                case 1: return "CF_TEXT"; case 2: return "CF_BITMAP"; case 3: return "CF_METAFILEPICT"; case 7: return "CF_OEMTEXT";
+                case 8: return "CF_DIB"; case 9: return "CF_PALETTE"; case 13: return "CF_UNICODETEXT"; case 14: return "CF_ENHMETAFILE";
+                case 15: return "CF_HDROP"; case 16: return "CF_LOCALE"; case 17: return "CF_DIBV5";
+                default: return "format " + format;
+            }
+        }
 
         /// <summary>A save that is not kept: its metafile handle is freed.</summary>
         internal void Discard()
@@ -2056,6 +2100,10 @@ namespace DoodleNote.DictationHelper
             // How complete the save was, so a recovery reports what an ordinary restore would.
             writer.Write(complete);
             writer.Write(reportedSkip);
+            // Provenance (round 22): the listed count and what could not be kept, by name and reason.
+            writer.Write(ListedCount);
+            writer.Write(skippedNames.Count);
+            foreach (string skipped in skippedNames) writer.Write(skipped);
         }
 
         public static SavedClipboard ReadFrom(System.IO.BinaryReader reader)
@@ -2096,6 +2144,12 @@ namespace DoodleNote.DictationHelper
             saved.complete = reader.ReadBoolean() && !saved.contentLost;
             if (TestMode.Env("DICTATION_HELPER_TEST_RECORD_LOSES_NAME") == "1" && saved.items.Count > 0) { saved.items.RemoveAt(saved.items.Count - 1); saved.contentLost = true; saved.complete = false; } // test build only
             saved.reportedSkip = reader.ReadBoolean();
+            if (reader.BaseStream.Position < reader.BaseStream.Length)
+            {
+                saved.ListedCount = reader.ReadInt32();
+                int skipped = reader.ReadInt32();
+                for (int i = 0; i < skipped; i++) saved.skippedNames.Add(reader.ReadString());
+            }
             return saved;
         }
 
