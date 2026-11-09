@@ -31,6 +31,8 @@ interface ActiveJob {
   segments: TranscriptSegment[]
   finals: Map<EngineChannel, { text: string; audioSeconds: number }>
   audioSeconds: number
+  channelMode: 'mixed' | 'split'
+  channels: EngineChannel[]
   started: boolean
   settled: boolean
   exited: boolean
@@ -146,6 +148,8 @@ export class WinBatchTranscriber {
       segments: [],
       finals: new Map(),
       audioSeconds: 0,
+      channelMode: options.channels ?? 'mixed',
+      channels: [],
       started: false,
       settled: false,
       exited: false,
@@ -207,7 +211,11 @@ export class WinBatchTranscriber {
         return
       }
       job.rendererId = window.webContents.id
-      window.webContents.send(ENGINE_BATCH_CONTROL_CHANNEL, { action: 'decode', jobId: job.id })
+      window.webContents.send(ENGINE_BATCH_CONTROL_CHANNEL, {
+        action: 'decode',
+        jobId: job.id,
+        channels: job.channelMode
+      })
       return
     }
     if (event.event === 'status' && event.stage === 'transcribing') {
@@ -229,22 +237,43 @@ export class WinBatchTranscriber {
     }
     if (event.event === 'final' && typeof event.channel === 'string') {
       job.segments.push(...job.assembler.flush(event.channel as EngineChannel))
+      // Streaming finals only close timing segments. They are never evidence
+      // that the separate high-accuracy model completed successfully.
+      if (event.quality !== 'final') return
       const channel = event.channel as EngineChannel
       const text = typeof event.text === 'string' ? event.text.trim() : ''
-      if (text) {
-        job.finals.set(channel, {
-          text,
-          audioSeconds:
-            typeof event.audioSeconds === 'number' ? event.audioSeconds : job.audioSeconds
-        })
-      }
+      job.finals.set(channel, {
+        text,
+        audioSeconds: typeof event.audioSeconds === 'number' ? event.audioSeconds : job.audioSeconds
+      })
       return
     }
     if (event.event === 'error') {
       this.finish(job, new Error(String(event.message ?? 'Windows transcription failed.')))
       return
     }
-    if (event.event === 'done') this.finish(job)
+    if (event.event === 'done') {
+      const incomplete =
+        job.channels.length === 0 ||
+        job.channels.some((channel) => {
+          const final = job.finals.get(channel)
+          return (
+            !final ||
+            (!final.text &&
+              job.segments.some(
+                (segment) => segment.channel === channel && !segment.echo && segment.text.trim()
+              ))
+          )
+        })
+      this.finish(
+        job,
+        incomplete
+          ? new Error(
+              'High-accuracy refinement returned no usable result. No transcript was replaced. Try transcribing the audio again.'
+            )
+          : undefined
+      )
+    }
   }
 
   private async handleRendererMessage(job: ActiveJob, message: EngineBatchMessage): Promise<void> {
@@ -258,6 +287,7 @@ export class WinBatchTranscriber {
           return
         }
         job.audioSeconds = Math.max(0, message.audioSeconds)
+        job.channels = channels
         job.started = true
         job.child.postMessage({ t: 'start', channels })
         break
@@ -311,6 +341,13 @@ export class WinBatchTranscriber {
         )
       }
       job.segments.sort((a, b) => a.startMs - b.startMs)
+      if (job.channelMode === 'mixed') {
+        job.segments = job.segments.map((segment) => ({
+          ...segment,
+          speaker: 'Speaker',
+          speakerId: 'imported-speaker'
+        }))
+      }
       job.resolve({ segments: job.segments, audioSeconds: job.audioSeconds })
     }
     if (job.exited) complete()

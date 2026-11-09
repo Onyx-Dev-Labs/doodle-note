@@ -155,7 +155,7 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     return window.engine.onBatchControl((control) => {
-      if (control.action === 'decode') void decodeWinBatchAudio(control.jobId)
+      if (control.action === 'decode') void decodeWinBatchAudio(control.jobId, control.channels)
       else cancelWinBatchAudio(control.jobId)
     })
   }, [])

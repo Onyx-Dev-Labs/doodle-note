@@ -144,6 +144,7 @@ class ChannelPipeline {
       const result = this.recognizer.getResult(this.stream)
       emit({
         event: 'final',
+        quality: 'live',
         channel: this.channel,
         text: joinedText(result),
         sessionSeconds: (Date.now() - this.startedAtMs) / 1000
@@ -283,7 +284,6 @@ function stopSession(sessionId = 0): void {
         samples.set(chunk, offset)
         offset += chunk.length
       }
-      if (samples.length === 0) continue
       const text: string[] = []
       for (const window of splitWhisperWindows(samples)) {
         const stream = offlineRecognizer.createStream()
@@ -297,6 +297,7 @@ function stopSession(sessionId = 0): void {
       }
       emit({
         event: 'final',
+        quality: 'final',
         channel,
         text: text.join(' '),
         audioSeconds: samples.length / WINDOWS_ASR_SAMPLE_RATE

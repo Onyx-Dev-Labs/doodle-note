@@ -35,3 +35,16 @@ test('long recordings are split below the Whisper hard limit without dropping th
     ]
   )
 })
+
+test('digital silence is not sent to Whisper as a separate window', () => {
+  const samples = new Float32Array(27)
+  samples.set([0.2, -0.1], 2)
+  samples.set([0.000001, -0.000001], 22)
+  const windows = splitWhisperWindows(samples, 10)
+  assert.deepEqual(
+    windows.map((window) => [...window]),
+    [[...samples.subarray(0, 10)], [...samples.subarray(20)]]
+  )
+  assert.deepEqual(splitWhisperWindows(new Float32Array(27), 10), [])
+  assert.deepEqual(splitWhisperWindows(new Float32Array()), [])
+})
