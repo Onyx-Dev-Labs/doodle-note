@@ -950,8 +950,7 @@ namespace DoodleNote.DictationHelper
             catch (OverflowException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
             if (corrupt != null) { DeleteId(id, "payload corrupt"); return "ERROR: payload corrupt (" + corrupt + ")"; }
             if (!ClipboardText.Open()) { result = RecoverResult.Busy; reply["result"] = "busy"; return "the clipboard is busy; kept for a retry"; }
-            string outcome, putBack = null;
-            PendingRecord journal = null;
+            string outcome;
             try
             {
                 ClipboardView view = ClipboardView.Read(saved, id, nonce, dictatedHash);
@@ -1001,7 +1000,7 @@ namespace DoodleNote.DictationHelper
                 }
                 // Journaled like a delivery, offer-only from the start (an interrupted Restore is offered again, never
                 // finished on its own). It carries no sequence facts: nothing on disk is proof of anything.
-                journal = new PendingRecord(id, nonce) { Persisted = true, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, DictatedHash = dictatedHash,
+                PendingRecord journal = new PendingRecord(id, nonce) { Persisted = true, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, DictatedHash = dictatedHash,
                     OfferedSequence = facts.OfferedSequence, OfferedTick = facts.OfferedTick, OfferedBoot = facts.OfferedBoot, OfferedUtc = facts.OfferedUtc, OfferBoots = facts.OfferBoots,
                     OfferOnly = true, OfferOnlyWhy = "the user's Restore of an offer" };
                 Inherit(journal, facts, match, (long)Native.GetTickCount64());
@@ -1039,23 +1038,14 @@ namespace DoodleNote.DictationHelper
                 }
                 if (restored == "unrestored") { result = RecoverResult.Failed; return "put back only in part; kept, offered again"; }
                 outcome = "the user's restore put back (" + seen + "): " + restored;
-                putBack = restored;
+                // Settled BEFORE the file cleanup, which may be deferred (a file held by another process): the offer is
+                // withdrawn now and a "settled" state is deleted on sight, so restored content is never offered again.
+                if (!Stage(journal, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
+                OfferGone(id, "restored");
+                DeleteId(id, outcome);
+                Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", restored));
             }
             finally { Native.CloseClipboard(); }
-            // The only copy is deleted only once the put-back is SEEN on the clipboard after our close (re-opened and
-            // compared): a put-back that did not stick keeps the record, offered again (never "restored" over nothing).
-            if (!saved.PutBackHeld(putBack == "restored"))
-            {
-                result = RecoverResult.Failed;
-                reply["result"] = "unrestored";
-                return "the put-back is not on the clipboard after our close; kept, offered again";
-            }
-            // Settled BEFORE the file cleanup, which may be deferred (a file held by another process): the offer is
-            // withdrawn now and a "settled" state is deleted on sight, so restored content is never offered again.
-            if (!Stage(journal, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
-            OfferGone(id, "restored");
-            DeleteId(id, outcome);
-            Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", putBack));
             return outcome;
         }
 
