@@ -1903,13 +1903,15 @@ namespace DoodleNote.DictationHelper
         /// Studio uses for the same two semantics), and its paste tests them with IsClipboardFormatAvailable. Saved as
         /// presence only and put back as presence only (SetClipboardData(format, NULL) from our window: delayed
         /// rendering that our window never renders, so the format is available with no data, as the editors expect).
-        /// Exactly these names; any other registered format that answers NULL is still a capture failure.
+        /// Exactly these names. Any other format that answers NULL fails the first whole-save attempt and, on the second,
+        /// is a named, reported skip (round 22, class 3), or a forced exclusion when it is a privacy marker (class 2).
         /// </summary>
         internal static readonly HashSet<string> PresenceOnly = new HashSet<string>(StringComparer.Ordinal)
         {
             "MSDEVColumnSelect", "MSDEVLineSelect", "VisualStudioEditorOperationsLineCutCopyClipboardTag",
-            // The clipboard-viewer convention: a format whose PRESENCE tells clipboard viewers and history tools to ignore
-            // the entry (Ditto and other clipboard managers honour it); its data is not used.
+            // The clipboard-viewer convention (round 22): a format whose PRESENCE tells clipboard viewers and history tools
+            // to ignore the entry; its data is not used. KeePass sets it on the passwords it copies (ClipboardUtil,
+            // CfnViewerIgnore) and clipboard managers such as Ditto skip an entry that carries it.
             "Clipboard Viewer Ignore"
         };
         /// <summary>The saved presence-only formats (see PresenceOnly).</summary>
