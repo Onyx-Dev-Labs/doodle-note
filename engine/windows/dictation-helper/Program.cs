@@ -513,7 +513,7 @@ namespace DoodleNote.DictationHelper
                             "oemCodePage", (double)ClipboardText.LocaleCodePage(formLocale, true),
                             "ansi", ansi == null ? null : BitConverter.ToString(ansi).Replace("-", "").ToLowerInvariant(),
                             "oem", oem == null ? null : BitConverter.ToString(oem).Replace("-", "").ToLowerInvariant(),
-                            "inputLocale", ClipboardText.InputLocale(), "lastReadBack", ClipboardText.LastReadBack, "lastWriteLocale", ClipboardText.LastWriteLocale));
+                            "inputLocale", ClipboardText.InputLocale(), "lastWriteLocale", ClipboardText.LastWriteLocale));
                     }
 #endif
                     break;

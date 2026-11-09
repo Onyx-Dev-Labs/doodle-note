@@ -1198,9 +1198,6 @@ namespace DoodleNote.DictationHelper
                     LastWriteLocale = ownership.TextLocale;
 #endif
                     if (record != null) SetSentinel(record, ownership.TextLocale);
-                    // Windows' own text forms, if it renders them while we still hold the clipboard (nobody else can
-                    // write now): then their exact bytes are what the confirmation compares against.
-                    if (ok) ReadBackForms(ownership);
                     // Sampled INSIDE the same open/close as our SetClipboardData: nobody else can
                     // write while we hold the clipboard.
                     ownership.SequenceInside = Native.GetClipboardSequenceNumber();
@@ -1252,25 +1249,9 @@ namespace DoodleNote.DictationHelper
         internal static int InputLocale() { return (int)((long)Native.GetKeyboardLayout(0) & 0xFFFF); }
 
 #if DICTATION_TEST
-        /// <summary>Test build only: what the last write's read-back inside its own open found (reported by __text-forms).</summary>
-        internal static string LastReadBack = "";
         /// <summary>Test build only: the locale the last write pinned (this write thread's input language).</summary>
         internal static int LastWriteLocale;
 #endif
-
-        /// <summary>Under our write's lock: the text forms as Windows renders them now, if it does (null entries otherwise).</summary>
-        static void ReadBackForms(ClipboardOwnership ownership)
-        {
-            ownership.ReadBack = new Dictionary<uint, byte[]>();
-            foreach (uint f in new[] { CF_TEXT_, CF_OEMTEXT_, CF_LOCALE_ })
-            {
-                byte[] bytes = ReadBytes(f, 1 << 20);
-                if (bytes != null) ownership.ReadBack[f] = bytes;
-            }
-#if DICTATION_TEST
-            LastReadBack = "ansi:" + ownership.ReadBack.ContainsKey(CF_TEXT_) + ",oem:" + ownership.ReadBack.ContainsKey(CF_OEMTEXT_) + ",locale:" + ownership.ReadBack.ContainsKey(CF_LOCALE_);
-#endif
-        }
 
         /// <summary>
         /// The bytes Windows synthesizes for a text form of `text` under `locale` (unit- and CI-tested against Windows' own
@@ -1481,26 +1462,19 @@ namespace DoodleNote.DictationHelper
         public string RejectedWhy = "";
         /// <summary>The CF_LOCALE Windows states for our write (this write thread's input language; also in the sentinel).</summary>
         public int TextLocale;
-        /// <summary>Windows' text forms as read back inside our write's own open (when Windows rendered them there).</summary>
-        public Dictionary<uint, byte[]> ReadBack;
-
         /// <summary>
-        /// The text forms a look compares against: Windows' own bytes when our write could read them back inside its own
-        /// open (nobody else can write then), else Windows' conversion on the stated locale's code pages.
+        /// The text forms a look compares against: Windows' conversion of our text on the pinned locale's code pages
+        /// (round 17 found that Windows renders none of them inside our own open, so there is nothing to read back; the
+        /// read-back attempt was removed in round 18).
         /// </summary>
         public Func<uint, string, int, byte[]> ExpectedForms()
         {
-            Dictionary<uint, byte[]> readBack = ReadBack;
             int textLocale = TextLocale;
             return delegate (uint f, string text, int locale)
             {
                 // The locale is PINNED to what this transaction wrote in its sentinel (round 18): a sentinel on the
                 // clipboard that states another locale is not ours, whatever forms come with it.
-                if (locale != textLocale) return null;
-                byte[] seen;
-                if (readBack != null && readBack.TryGetValue(f, out seen))
-                    return f == 16 ? (seen.Length >= 4 ? new[] { seen[0], seen[1], seen[2], seen[3] } : null) : ClipboardText.CString(seen);
-                return ClipboardText.ExpectedTextForm(f, text, locale);
+                return locale == textLocale ? ClipboardText.ExpectedTextForm(f, text, locale) : null;
             };
         }
         /// <summary>Confirm() proved the clipboard was ours after our write was finalized.</summary>
