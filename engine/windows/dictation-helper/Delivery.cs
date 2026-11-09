@@ -2223,10 +2223,16 @@ namespace DoodleNote.DictationHelper
                 if (format == CF_METAFILEPICT)
                 {
                     if (saved.metafile != IntPtr.Zero) outcomes.Append(" rebuilt from the retained EMF (policy)");
-                    else { saved.reportedSkip = true; outcomes.Append(" not saved (no EMF retained: reported)"); }
+                    else { saved.reportedSkip = true; saved.skippedNames.Add("CF_METAFILEPICT (no picture to rebuild it from)"); outcomes.Append(" not saved (no EMF retained: reported)"); }
                 }
                 else if (dibRetained) outcomes.Append(" rebuilt from the retained DIB (policy)");
-                else { saved.complete = false; outcomes.Append(" not saved (no DIB retained: partial)"); }
+                else
+                {
+                    // Round 23 (S2): named too, so no loss hides behind another one's name.
+                    saved.complete = false;
+                    saved.skippedNames.Add(DisplayName(format, null) + " (no picture to rebuild it from)");
+                    outcomes.Append(" not saved (no DIB retained: partial)");
+                }
             }
             // Round 23, THE ONE RULE (owner decision, Opus S-C with Astra S3): if nothing with USER CONTENT goes back, the
             // save is not established and nothing is pasted. User content excludes CF_LOCALE, the privacy markers, the
