@@ -80,6 +80,14 @@ function copyMulti(text) {
   setBytes(RegisterClipboardFormatW(EXTRA), Buffer.from('extra bytes for ' + text))
   CloseClipboard()
 }
+/** Another app rewrites ONE format of what is on the clipboard (without emptying), `times` times. */
+function replaceFormat(format, bytes, times = 1) {
+  for (let i = 0; i < times; i++) {
+    if (!open()) throw new Error('the clipboard could not be opened')
+    setBytes(format, bytes)
+    CloseClipboard()
+  }
+}
 function addFormat() {
   if (!open()) throw new Error('the clipboard could not be opened')
   setBytes(RegisterClipboardFormatW('DoodleNote.CI.Added'), Buffer.from('added later'))
@@ -747,40 +755,90 @@ async function main() {
     await h.stop()
   }
 
-  // 13. Dismiss while a record file is held by another process (its .state.tmp locked): failure is reported and
-  // the record stays whole; once released, Dismiss deletes it.
-  {
+  // 13. Dismiss while ONE record file is held by another process (each of the four in turn): failure is reported and
+  // the record stays whole (nothing deleted); once released, Dismiss deletes every file.
+  for (const suffix of ['.state', '.state.tmp', '.bin', '.bin.tmp']) {
     copyMulti(user)
-    await keptRecord('dictated text L')
+    await keptRecord('dictated text L' + suffix)
     const h = start(release)
     await h.ready
     const listed = await h.req('clipboard-offers')
     const offer = listed && listed.offers[0]
     let first = null
     let second = null
+    let whole = -1
     if (offer) {
-      const tmp = path.join(os.tmpdir(), `${recordPrefix}${offer.record}.state.tmp`)
-      fs.writeFileSync(tmp, '{}')
-      const lock = lockFile(tmp, 4000)
-      await sleep(800)
+      const base = path.join(os.tmpdir(), `${recordPrefix}${offer.record}`)
+      if (suffix.endsWith('.tmp')) fs.writeFileSync(base + suffix, '{}')
+      const lock = lockFile(base + suffix, 4000)
+      await sleep(900)
       first = await h.req('clipboard-dismiss', { record: offer.record })
-      const whole = recordFiles().length
+      whole = recordFiles().length
       await waitExit(lock)
       second = await h.req('clipboard-dismiss', { record: offer.record })
-      check(
-        'Dismiss with a locked record file reports failure and the record stays whole',
-        !!first && first.dismissed === false && whole === 2,
-        `${JSON.stringify(first)}; ${whole}`
-      )
     }
-    check(
-      'once released, Dismiss deletes every file',
-      !!second &&
-        second.dismissed === true &&
-        recordFiles().length === 0 &&
-        !fs.existsSync(path.join(os.tmpdir(), `${recordPrefix}${offer && offer.record}.state.tmp`)),
-      `${JSON.stringify(second)}; ${recordFiles()}`
-    )
+    check(`Dismiss with ${suffix} locked reports failure and deletes nothing`, !!first && first.dismissed === false && whole === 2, `${JSON.stringify(first)}; ${whole}`)
+    check(`once ${suffix} is released, Dismiss deletes every file`, !!second && second.dismissed === true && recordFiles().length === 0 && fs.readdirSync(os.tmpdir()).every((f) => !f.startsWith(recordPrefix)), `${JSON.stringify(second)}; ${recordFiles()}`)
+    await h.stop()
+  }
+
+  // 14. A payload left complete under its temporary name (a crash between the writer's write and its move): adopted
+  // and offered, never deleted as missing.
+  {
+    copyMulti(user)
+    await keptRecord('dictated text M')
+    const bin = recordFiles().find((f) => f.endsWith('.bin'))
+    if (bin) fs.renameSync(path.join(os.tmpdir(), bin), path.join(os.tmpdir(), bin + '.tmp'))
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check('a complete .bin.tmp is adopted and offered', !!bin && !!listed && listed.offers.length === 1 && recordFiles().length === 2, `${JSON.stringify(listed)}; ${recordFiles()}`)
+    const offer = listed && listed.offers[0]
+    const restored = offer ? await restoreConfirming(h, offer) : null
+    check('and restoring it gives back the user clipboard', !!restored && restored.result === 'restored' && names() === userFormats, `${JSON.stringify(restored)}; ${names()}`)
+    await h.stop()
+  }
+
+  // 15. Astra P1-A: another app replaces our write's ANSI text (CF_TEXT) with other bytes, keeping our Unicode text,
+  // markers and sentinel (the owner stays our window): not our write any more. Kept, offered, their bytes stay.
+  {
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const reply = a.req('__clipboard-txn', { text: 'dictated text N', holdMs: 2500 })
+    for (let i = 0; i < 200 && text() !== 'dictated text N'; i++) await sleep(50)
+    await sleep(700)
+    replaceFormat(1, Buffer.from('replaced ANSI\0', 'latin1'))
+    const result = await reply
+    await a.stop()
+    check('an ANSI form replaced after our write: kept, not restored over', !!result && /^owned-but-changed\/unrestored\|/.test(String(result.result)) && recordFiles().length === 2, `${JSON.stringify(result)}; ${recordFiles()}`)
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check('and it is offered', !!listed && listed.offers.length === 1, JSON.stringify(listed))
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+
+  // 16. Astra P1-A: the confirmation rejects our write because the sequence moved too far (another app rewrote our
+  // ANSI form with the SAME bytes, four times, while the confirmation was held open). Content alone would look like
+  // ours; the rejection is final: the later look before the keys must not upgrade it. Kept, offered.
+  {
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500' })
+    await a.ready
+    const reply = a.req('__clipboard-txn', { text: 'dictated text O', holdMs: 300 })
+    for (let i = 0; i < 200 && text() !== 'dictated text O'; i++) await sleep(50)
+    replaceFormat(1, Buffer.from('dictated text O\0', 'latin1'), 4)
+    const result = await reply
+    await a.stop()
+    check('a confirmation rejected for the sequence stays rejected (owned-but-changed, kept)', !!result && /^owned-but-changed\/unrestored\|/.test(String(result.result)) && recordFiles().length === 2, `${JSON.stringify(result)}; ${recordFiles()}`)
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
     await h.stop()
   }
 
