@@ -941,6 +941,7 @@ namespace DoodleNote.DictationHelper
             catch (ArgumentException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
             catch (OverflowException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
             if (corrupt != null) { DeleteId(id, "payload corrupt"); return "ERROR: payload corrupt (" + corrupt + ")"; }
+            PutBackTrace trace = byUser ? new PutBackTrace("user-restore") : null; // log only
             if (!ClipboardText.Open()) { result = RecoverResult.Busy; reply["result"] = "busy"; return "the clipboard is busy; kept for a retry"; }
             string outcome;
             try
@@ -1011,7 +1012,9 @@ namespace DoodleNote.DictationHelper
                     reply["result"] = "busy";
                     return "the clipboard's owner is not responding (" + ownerProblem + "); nothing emptied, kept";
                 }
-                if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_RECOVERY_EMPTY") == "1" || !Native.EmptyClipboard())
+                bool emptied = TestMode.Env("DICTATION_HELPER_TEST_FAIL_RECOVERY_EMPTY") != "1" && Native.EmptyClipboard();
+                trace.Emptied(emptied, emptied ? 0 : Marshal.GetLastWin32Error());
+                if (!emptied)
                 {
                     result = RecoverResult.Failed;
                     reply["result"] = "failed";
@@ -1020,7 +1023,7 @@ namespace DoodleNote.DictationHelper
                 bool journaled = Stage(journal, "recovering-emptied", Native.GetClipboardSequenceNumber());
                 int stall = TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_MS", 0);
                 if (stall > 0) Thread.Sleep(stall); // test build only: die with the clipboard emptied by the user's Restore
-                string restored = saved.PutBackResult(saved.PutBackOpen());
+                string restored = saved.PutBackResult(saved.PutBackOpen(trace));
                 reply["result"] = restored;
                 if (!journaled)
                 {
@@ -1037,7 +1040,12 @@ namespace DoodleNote.DictationHelper
                 DeleteId(id, outcome);
                 Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", restored));
             }
-            finally { Native.CloseClipboard(); }
+            finally
+            {
+                bool closed = Native.CloseClipboard();
+                int closeError = Marshal.GetLastWin32Error();
+                if (trace != null) trace.Closed(closed, closeError);
+            }
             return outcome;
         }
 

@@ -1135,6 +1135,8 @@ namespace DoodleNote.DictationHelper
             // Test build only: this write thread uses another input language (KLID, e.g. 00000419), as a user with several has.
             string layout = TestMode.Env("DICTATION_HELPER_TEST_KEYBOARD_LAYOUT");
             if (!string.IsNullOrEmpty(layout)) Native.LoadKeyboardLayoutW(layout, 1); // KLF_ACTIVATE, for this thread
+            uint sequenceBeforeOpen = Native.GetClipboardSequenceNumber(); // the put-back trace (log only)
+            PutBackTrace trace = null;
             if (!Open()) return false;
             bool ok = false;
             try
@@ -1173,7 +1175,9 @@ namespace DoodleNote.DictationHelper
                         // journaled (an interruption from here on could not be proven ours): give the user's
                         // content back now, in this same open, never leave ours.
                         PendingClipboard.Stage(record, "restore-emptied", emptiedAt);
-                        ownership.PutBack = saved.PutBackResult(saved.PutBackOpen());
+                        trace = new PutBackTrace(abandoned ? "write-rollback (late)" : "write-rollback (unjournaled)", sequenceBeforeOpen);
+                        trace.Emptied(true, 0); // the write's own EmptyClipboard, just above
+                        ownership.PutBack = saved.PutBackResult(saved.PutBackOpen(trace));
                         if (job != null) job.PutBack = ownership.PutBack;
                         saved.LoseAuthority("the write put the saved content back itself (" + ownership.PutBack + ")");
                         Wire.Log((abandoned ? "the late clipboard write" : "the unjournaled clipboard write") + " put the user's saved content back: " + ownership.PutBack);
@@ -1204,7 +1208,12 @@ namespace DoodleNote.DictationHelper
                     ownership.SequenceInside = Native.GetClipboardSequenceNumber();
                 }
             }
-            finally { Native.CloseClipboard(); }
+            finally
+            {
+                bool closed = Native.CloseClipboard();
+                int closeError = Marshal.GetLastWin32Error();
+                if (trace != null) trace.Closed(closed, closeError);
+            }
             if (ownership.Emptied)
             {
                 // Journaled right after the close (before any confirmation), on the normal and the late path.
@@ -1417,6 +1426,14 @@ namespace DoodleNote.DictationHelper
 
         public static bool SetBytes(uint format, byte[] bytes)
         {
+            int error;
+            return SetBytes(format, bytes, out error);
+        }
+
+        /// <summary>SetBytes, with the error of the step that failed (0 on success; -1 when nothing native failed).</summary>
+        public static bool SetBytes(uint format, byte[] bytes, out int error)
+        {
+            error = -1;
             if (format == 0) return false;
             IntPtr memory = Native.GlobalAlloc(Native.GMEM_MOVEABLE, (UIntPtr)Math.Max(1, bytes.Length));
             if (memory == IntPtr.Zero) return false;
@@ -1430,10 +1447,58 @@ namespace DoodleNote.DictationHelper
             Native.GlobalUnlock(memory);
             if (Native.SetClipboardData(format, memory) == IntPtr.Zero)
             {
+                error = Marshal.GetLastWin32Error();
                 Native.GlobalFree(memory);
                 return false;
             }
+            error = 0;
             return true; // the clipboard owns the memory now
+        }
+    }
+
+    /// <summary>
+    /// Round 19, LOG ONLY (no behaviour, no clipboard content, no extra open): one line per put-back (the live
+    /// restore, the write's own rollback, the user's Restore) with the native result and last error of EmptyClipboard,
+    /// of every SetClipboardData (format id and byte length only) and of CloseClipboard, the sequence before the open
+    /// and after the close, and CountClipboardFormats after the close (neither needs an open, so neither waits on an
+    /// owner), with pid, thread id and a monotonic tick. To diagnose round 18's one-off (CI 25(a)).
+    /// </summary>
+    internal sealed class PutBackTrace
+    {
+        readonly string kind;
+        readonly uint sequenceBefore;
+        readonly long started = (long)Native.GetTickCount64();
+        readonly System.Text.StringBuilder sets = new System.Text.StringBuilder();
+        string empty = "not emptied";
+        bool attempted;
+
+        /// <summary>Taken BEFORE the open (`sequenceBeforeOpen` when the open happened earlier, as in our write).</summary>
+        public PutBackTrace(string kind, uint sequenceBeforeOpen = 0)
+        {
+            this.kind = kind;
+            sequenceBefore = sequenceBeforeOpen != 0 ? sequenceBeforeOpen : Native.GetClipboardSequenceNumber();
+        }
+
+        public void Emptied(bool ok, int error) { empty = (ok ? "ok" : "FAILED") + " (error " + error + ")"; attempted = true; }
+
+        public void Set(uint format, int length, bool ok, int error)
+        {
+            attempted = true;
+            if (sets.Length > 0) sets.Append(", ");
+            sets.Append(format == 0 ? "markers" : format.ToString()).Append(length >= 0 ? ":" + length : "").Append(ok ? " ok" : " FAILED (error " + error + ")");
+        }
+
+        /// <summary>After CloseClipboard (its result and error): writes the line, if a put-back was attempted.</summary>
+        public void Closed(bool ok, int error)
+        {
+            if (!attempted) return;
+            uint after = Native.GetClipboardSequenceNumber();
+            int count = Native.CountClipboardFormats();
+            int countError = count == 0 ? Marshal.GetLastWin32Error() : 0;
+            Wire.Log("put-back trace: " + kind + " pid " + Process.GetCurrentProcess().Id + " tid " + Native.GetCurrentThreadId() + " tick " + started
+                + "+" + ((long)Native.GetTickCount64() - started) + " ms; sequence " + sequenceBefore + " -> " + after + "; EmptyClipboard " + empty
+                + "; SetClipboardData [" + sets + "]; CloseClipboard " + (ok ? "ok" : "FAILED") + " (error " + error + "); formats after close "
+                + count + (count == 0 ? " (error " + countError + ")" : ""));
         }
     }
 
@@ -1822,7 +1887,7 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>Set every saved format on the clipboard, which the caller has open and has emptied.</summary>
-        public bool PutBackOpen()
+        public bool PutBackOpen(PutBackTrace trace = null)
         {
             bool ok = true;
             uint sentinel = Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat);
@@ -1833,16 +1898,21 @@ namespace DoodleNote.DictationHelper
                 if (item.Key == sentinel) continue; // never ours as the user's content (an older record may hold one)
                 if (set == stallAfter) Thread.Sleep(TestMode.Int("DICTATION_HELPER_TEST_PUTBACK_STALL_MS", 0)); // test build only: die inside the put-back
                 bool failNow = TestMode.On && Interlocked.Decrement(ref testFailPutBacks) >= 0; // test build only: a set-back that fails
-                if (failNow || !ClipboardText.SetBytes(item.Key, item.Value)) ok = false;
+                int error = -2; // -2: failed by the test hook
+                bool done = !failNow && ClipboardText.SetBytes(item.Key, item.Value, out error);
+                if (!done) ok = false;
+                if (trace != null) trace.Set(item.Key, item.Value.Length, done, error);
                 set++;
             }
             if (metafile != IntPtr.Zero)
             {
-                if (Native.SetClipboardData(CF_ENHMETAFILE, metafile) == IntPtr.Zero) ok = false;
+                bool done = Native.SetClipboardData(CF_ENHMETAFILE, metafile) != IntPtr.Zero;
+                if (trace != null) trace.Set(CF_ENHMETAFILE, -1, done, done ? 0 : Marshal.GetLastWin32Error());
+                if (!done) ok = false;
                 metafile = IntPtr.Zero;
             }
             // A marker was present but unreadable: keep the content out of history and cloud.
-            if (forceMarkers) ClipboardText.SetConservativeMarkers();
+            if (forceMarkers) { ClipboardText.SetConservativeMarkers(); if (trace != null) trace.Set(0, -1, true, 0); }
             return ok;
         }
 
@@ -2141,6 +2211,7 @@ namespace DoodleNote.DictationHelper
             }
             // Someone else emptied the clipboard right after our write: their copy is newer and wins.
             if (ours.ForeignAtConfirm) return "user-changed";
+            PutBackTrace trace = new PutBackTrace("restore"); // log only
             if (!ClipboardText.Open())
             {
                 // Not looked at: the record is kept and only ever offered (nothing on disk is proof).
@@ -2198,7 +2269,9 @@ namespace DoodleNote.DictationHelper
                 }
                 int beforeEmpty = TestMode.Int("DICTATION_HELPER_TEST_RESTORE_STALL_BEFORE_EMPTY_MS", 0);
                 if (beforeEmpty > 0) Thread.Sleep(beforeEmpty); // test build only: die before the restore empties
-                if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_RESTORE_EMPTY") == "1" || !Native.EmptyClipboard())
+                bool emptied = TestMode.Env("DICTATION_HELPER_TEST_FAIL_RESTORE_EMPTY") != "1" && Native.EmptyClipboard();
+                trace.Emptied(emptied, emptied ? 0 : Marshal.GetLastWin32Error());
+                if (!emptied)
                 {
                     Holds = "dictated";
                     return "unrestored";
@@ -2211,9 +2284,14 @@ namespace DoodleNote.DictationHelper
                 }
                 int stall = TestMode.Int("DICTATION_HELPER_TEST_RESTORE_STALL_MS", 0);
                 if (stall > 0) Thread.Sleep(stall); // test build only: die in the middle of a restore
-                ok = PutBackOpen();
+                ok = PutBackOpen(trace);
             }
-            finally { Native.CloseClipboard(); }
+            finally
+            {
+                bool closed = Native.CloseClipboard();
+                int closeError = Marshal.GetLastWin32Error();
+                trace.Closed(closed, closeError);
+            }
             string result = RestoreResult(ok, complete, reportedSkip);
             if (result == "unrestored") Holds = "unknown";
             // A kept record: the sequence after our close, confirmed with our window still the owner.

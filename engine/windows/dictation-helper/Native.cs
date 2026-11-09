@@ -325,10 +325,16 @@ namespace DoodleNote.DictationHelper
         // Clipboard.
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool OpenClipboard(IntPtr owner);
-        [DllImport("user32.dll")]
+        // SetLastError on both (round 19): the put-back trace logs their result and error (log only).
+        [DllImport("user32.dll", SetLastError = true)]
         public static extern bool CloseClipboard();
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         public static extern bool EmptyClipboard();
+        /// <summary>Formats on the clipboard; needs no open, so it never waits on an owner (the put-back trace).</summary>
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern int CountClipboardFormats();
+        [DllImport("kernel32.dll")]
+        public static extern uint GetCurrentThreadId();
         [DllImport("user32.dll")]
         public static extern uint EnumClipboardFormats(uint format);
         [DllImport("user32.dll")]
