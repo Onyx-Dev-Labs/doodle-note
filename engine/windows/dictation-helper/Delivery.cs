@@ -2002,7 +2002,7 @@ namespace DoodleNote.DictationHelper
         /// established (Judge). A capture that is not established is discarded whole (nothing partial is kept), its
         /// reader generation retired, and the WHOLE capture retried while the deadline allows; then null, and the
         /// delivery takes the no-save path (it never empties or writes the clipboard). Null without a retry when a read
-        /// overran (that reader is abandoned while an owner renders, never killed) or the clipboard changed.
+        /// overran (that reader is abandoned while an owner renders, ended only by the bound) or the clipboard changed.
         /// </summary>
 #if DICTATION_TEST
         /// <summary>Test build only: the last save's log line (the __save-only op reports it).</summary>
@@ -2713,8 +2713,9 @@ namespace DoodleNote.DictationHelper
             if (result == "unrestored" || keepRecord) LoseAuthority("an incomplete put-back (" + result + ")");
             if (keepRecord && Record != null && Record.Persisted)
             {
-                // Put back, but an interruption could not have been proven ours (its stage was not journaled):
-                // the record is kept; the next check finds the saved content on the clipboard and drops it.
+                // Put back, but an interruption could not have been proven ours (its stage was not journaled): the
+                // record is kept. The next check deletes it only when it was a WHOLE save and that content is exactly
+                // there; an incomplete one is offered (round 23).
                 PendingRecord record = Record;
                 Record = null;
                 PendingClipboard.Keep(record, "a restore whose stage could not be journaled");
