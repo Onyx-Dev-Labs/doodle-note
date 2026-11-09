@@ -121,8 +121,8 @@ namespace DoodleNote.DictationHelper
         public const int PayloadWaitMs = 250;
         /// <summary>The private format our WRITE carries last ("&lt;record id&gt;:&lt;nonce&gt;"). Restores never set it.</summary>
         public const string SentinelFormat = "DoodleNote.Bark.Transaction";
-        /// <summary>Clipboard operations of our write after its EmptyClipboard (text, three markers, sentinel).</summary>
-        public const int WriteOps = 5;
+        /// <summary>Clipboard operations of our write after its EmptyClipboard (text, its ANSI, OEM and locale forms, three markers, sentinel).</summary>
+        public const int WriteOps = 8;
         /// <summary>Allowance for the sequence moves Windows makes when the clipboard is closed (bounds only).</summary>
         public const int CloseMoves = 2;
         /// <summary>The state-file format this helper writes; older records are removed, never restored from.</summary>
@@ -793,12 +793,9 @@ namespace DoodleNote.DictationHelper
                 }
                 // Journaled like a delivery, keeping the stage FOUND as its origin (unwrapped only when the found
                 // stage is itself a recovery that never emptied: then the clipboard is as that recovery found it).
-                journal = new PendingRecord(id, nonce) { Persisted = true, SequenceAfterWrite = facts.SequenceAfterWrite, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, CreatedTick = facts.Tick, DictatedHash = dictatedHash,
+                journal = new PendingRecord(id, nonce) { Persisted = true, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, DictatedHash = dictatedHash,
                     OfferedSequence = facts.OfferedSequence, OfferedTick = facts.OfferedTick, OfferedBoot = facts.OfferedBoot, OfferedUtc = facts.OfferedUtc, OfferBoots = facts.OfferBoots }; // a failed recovery keeps the first offer
-                RecordFacts origin = facts.Stage == "recovering" && facts.OriginStage.Length > 0 ? facts.AsOrigin() : facts;
-                journal.OriginStage = origin.Stage;
-                journal.OriginSequenceAtStage = origin.SequenceAtStage;
-                journal.OriginSequenceClosed = origin.SequenceClosed;
+                Inherit(journal, facts, match, (long)Native.GetTickCount64());
                 if (!Stage(journal, "recovering", view.Sequence))
                 {
                     result = RecoverResult.Failed;
@@ -840,6 +837,32 @@ namespace DoodleNote.DictationHelper
                 if (journal != null) ConfirmClosed(journal);
             }
             return outcome;
+        }
+
+        /// <summary>
+        /// The rule (unit-tested): what a recovery journal inherits from the record it found. Its state file is stamped with
+        /// THIS helper's identity, so it may carry the found record's sequence facts (origin stage, sequences, the write's
+        /// sequence, the creation tick) only when that record was written in this same logon and boot. A record from
+        /// another or an unknown logon or boot carries none: its old sequence numbers never become proof under the new
+        /// identity (it can only be offered).
+        /// </summary>
+        internal static void Inherit(PendingRecord journal, RecordFacts facts, LogonMatch match, long nowTick)
+        {
+            if (match != LogonMatch.Same)
+            {
+                journal.SequenceAfterWrite = 0;
+                journal.OriginStage = "";
+                journal.OriginSequenceAtStage = 0;
+                journal.OriginSequenceClosed = 0;
+                journal.CreatedTick = nowTick;
+                return;
+            }
+            journal.SequenceAfterWrite = facts.SequenceAfterWrite;
+            journal.CreatedTick = facts.Tick;
+            RecordFacts origin = facts.Stage == "recovering" && facts.OriginStage.Length > 0 ? facts.AsOrigin() : facts;
+            journal.OriginStage = origin.Stage;
+            journal.OriginSequenceAtStage = origin.SequenceAtStage;
+            journal.OriginSequenceClosed = origin.SequenceClosed;
         }
 
         /// <summary>
@@ -1165,10 +1188,9 @@ namespace DoodleNote.DictationHelper
             List<uint> present = new List<uint>();
             for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
             view.FormatCount = present.Count;
-            // Every present format Windows may synthesize counts (also when the saved content had it): Windows adds
-            // them at a close and when first read, one sequence step each. Over-counting only widens the bound
-            // that withholds proof (a), never a deletion.
-            foreach (uint f in present) if (SavedClipboard.MaybeSynthesized(f)) view.SynthesizedPresent++;
+            // Present formats Windows may synthesize that neither our write nor the saved content set (our write sets
+            // every text form explicitly): Windows adds them at a close or a first read, one sequence step each.
+            foreach (uint f in present) if (SavedClipboard.MaybeSynthesized(f) && !ClipboardText.OurWriteFormat(f) && !saved.Has(f)) view.SynthesizedPresent++;
             // A live owner that is not ours could render on demand: never read its data.
             if (view.OwnerAlive && !view.OwnerIsUs) return view;
             Func<uint, int, byte[]> read = delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); };

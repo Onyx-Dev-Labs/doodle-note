@@ -136,6 +136,9 @@ namespace DoodleNote.DictationHelper
         static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, int length, out int returned);
         [DllImport("kernel32.dll")]
         public static extern ulong GetTickCount64();
+        /// <summary>The system OEM code page (CF_OEMTEXT of our write is in it).</summary>
+        [DllImport("kernel32.dll")]
+        public static extern uint GetOEMCP();
 
         /// <summary>When this boot started (UTC, from the tick count). Diagnostics only: it moves with clock corrections.</summary>
         public static DateTime BootTimeUtc { get { return DateTime.UtcNow - TimeSpan.FromMilliseconds(GetTickCount64()); } }
