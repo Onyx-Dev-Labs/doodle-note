@@ -1324,7 +1324,12 @@ async function main() {
       '(c) inside the restore, after its EmptyClipboard',
       { DICTATION_HELPER_TEST_RESTORE_STALL_MS: '15000' },
       'restore-emptied'
-    ]
+    ],
+    // (a) again, three times: one CI run (42662110137) saw the user's Restore report "restored" with an empty
+    // clipboard right after. Since then the record is deleted only once the put-back is seen after the close.
+    ['(a) after the write, before the paste, repeat 1', {}, 'text'],
+    ['(a) after the write, before the paste, repeat 2', {}, 'text'],
+    ['(a) after the write, before the paste, repeat 3', {}, 'text']
   ]) {
     copyMulti(user)
     const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
@@ -1356,7 +1361,7 @@ async function main() {
     const offer = listed && listed.offers[0]
     const restored = offer ? await restoreConfirming(h, offer) : null
     check(
-      `and the user's Restore of it gives back the user clipboard (${label.slice(0, 3)})`,
+      `and the user's Restore of it gives back the user clipboard (${label.replace(/^(\(.\)).*?(, repeat \d)?$/, '$1$2')})`,
       !!restored &&
         restored.result === 'restored' &&
         names() === userFormats &&
