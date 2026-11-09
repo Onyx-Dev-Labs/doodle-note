@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { Readable, Writable } from 'node:stream'
+import { graphemes } from './dictation-overlay-view'
 import type {
   AppInfoEntry,
   ClipboardOffer,
@@ -215,6 +216,11 @@ function toOffer(value: unknown): ClipboardOffer | null {
     likelyOurs: o.likelyOurs === true,
     incomplete: o.incomplete === true,
     missing: toNames(o.missing),
+    // Round 25: every name is kept, so the total is the list's length (a helper that shortens it would send one).
+    missingTotal:
+      typeof o.missingTotal === 'number' && o.missingTotal >= 0
+        ? o.missingTotal
+        : toNames(o.missing).length,
     // Round 24: an older helper sends no count: every format is taken as content (the helper still refuses).
     content: typeof o.content === 'number' && o.content >= 0 ? o.content : o.formats
   }
@@ -230,8 +236,9 @@ function toNames(value: unknown): string[] {
   return value
     .filter((name): name is string => typeof name === 'string' && name.length > 0)
     .map((name) => {
-      const points = Array.from(name)
-      return points.length > 160 ? `${points.slice(0, 160).join('')}…` : name
+      // Round 25: cut on grapheme boundaries (never inside a cluster: an emoji sequence, a combining mark).
+      const parts = graphemes(name)
+      return parts.length > 160 ? `${parts.slice(0, 160).join('')}…` : name
     })
 }
 
@@ -278,7 +285,7 @@ export class DictationHelperClient {
   private gatedChunks: string[] = []
   private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
   private readonly clipboardLateListeners = new Set<
-    (clipboard: string, deliveryId?: string, missing?: string[]) => void
+    (clipboard: string, deliveryId?: string, missing?: string[], record?: string) => void
   >()
   /**
    * Windows: deliveries whose reply has not been consumed yet. A clipboard result for one of them (a late
@@ -437,7 +444,7 @@ export class DictationHelperClient {
   }
 
   onClipboardLate(
-    listener: (clipboard: string, deliveryId?: string, missing?: string[]) => void
+    listener: (clipboard: string, deliveryId?: string, missing?: string[], record?: string) => void
   ): () => void {
     this.clipboardLateListeners.add(listener)
     return () => this.clipboardLateListeners.delete(listener)
@@ -1217,8 +1224,14 @@ export class DictationHelperClient {
         this.lateOutcomes.set(id, { clipboard, missing })
         return false
       }
+      // Round 25 (Astra S1): the record travels too (a rebuilt record's delivery is "", so only it identifies the Restore).
       for (const listener of this.clipboardLateListeners)
-        listener(clipboard, id || undefined, missing.length > 0 ? missing : undefined)
+        listener(
+          clipboard,
+          id || undefined,
+          missing.length > 0 ? missing : undefined,
+          record || undefined
+        )
       return false
     }
     if (parsed.event === 'clipboard' && parsed.phase === 'offer-gone') {

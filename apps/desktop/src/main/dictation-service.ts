@@ -160,7 +160,7 @@ export interface HelperLike {
    * transaction, or a kept one left pending); it names the delivery when known (see the client).
    */
   onClipboardLate?(
-    listener: (clipboard: string, deliveryId?: string, missing?: string[]) => void
+    listener: (clipboard: string, deliveryId?: string, missing?: string[], record?: string) => void
   ): () => void
   /** Windows: a kept clipboard transaction offered to the user, and its withdrawal (see the client). */
   onClipboardOffer?(listener: (offer: ClipboardOffer) => void): () => void
@@ -428,6 +428,11 @@ export class DictationService {
    * (the recovered event, which names that delivery) is shown even though another delivery is now current.
    */
   private restoreAwaiting: string | null = null
+  /**
+   * Round 25: offers the helper refused as nothing-to-restore. A list reload (an older helper sends no content count)
+   * never brings their Restore back.
+   */
+  private readonly nothingToRestore = new Set<string>()
   /** Windows: the delivery the clipboard notice (warning line or panel) is about, when the helper named it. */
   private clipboardDelivery: string | null = null
 
@@ -456,8 +461,8 @@ export class DictationService {
     // Windows: a hook loss/re-install changes what the permissions panel shows; refresh it.
     if (deps.helper.onClipboardLate) {
       this.unsubscribe.push(
-        deps.helper.onClipboardLate((clipboard, deliveryId, missing) =>
-          this.clipboardLate(clipboard, deliveryId, missing)
+        deps.helper.onClipboardLate((clipboard, deliveryId, missing, record) =>
+          this.clipboardLate(clipboard, deliveryId, missing, record)
         )
       )
     }
@@ -503,12 +508,20 @@ export class DictationService {
     // Only an affirmative, valid list replaces what is held (a restart or a long delivery never clears offers).
     if (this.disposed || list === null) return
     this.offers.clear()
-    for (const offer of list) this.offers.set(offer.record, offer)
+    for (const offer of list) this.offers.set(offer.record, this.known(offer))
     this.refreshOfferPanel()
+  }
+
+  /** An offer as the service knows it: one already refused as nothing-to-restore keeps no Restore (round 25). */
+  private known(offer: ClipboardOffer): ClipboardOffer {
+    return this.nothingToRestore.has(offer.record)
+      ? { ...offer, incomplete: true, content: 0 }
+      : offer
   }
 
   private showOffer(offer: ClipboardOffer): void {
     if (this.disposed) return
+    offer = this.known(offer)
     this.offers.set(offer.record, offer)
     this.deps.log(
       `clipboard offer: a kept clipboard (${offer.formats} formats, ${offer.bytes} bytes) can be restored`
@@ -588,10 +601,13 @@ export class DictationService {
       done.result === 'restored-partially'
     // Round 24 (Opus nit): no answer in time; the Restore may still finish, and its recovered event names the
     // offer's delivery: that result is shown when it comes, whatever delivery is current then.
-    if (done.result === 'failed' && offer.delivery) this.restoreAwaiting = offer.delivery
+    // Round 25 (Astra S1): keyed by the RECORD (a rebuilt record's delivery is ""), never by its delivery.
+    if (done.result === 'failed') this.restoreAwaiting = offer.record
+    else if (this.restoreAwaiting === offer.record) this.restoreAwaiting = null // a later answer: no second notice
     if (!completed && !this.offers.has(offer.record)) return
     if (done.result === 'nothing-to-restore') {
       // Round 24 (Opus, the one rule at Restore): nothing with user content can go back; nothing was emptied.
+      this.nothingToRestore.add(offer.record)
       this.offers.set(offer.record, {
         ...offer,
         incomplete: true,
@@ -1862,7 +1878,16 @@ export class DictationService {
     return !(resting?.kind === 'notice' && resting.level !== 'success')
   }
 
+  /** The last clipboard notices raised (their sentences; the newest 20), for the log and the tests (round 25). */
+  private readonly noticesRaised: string[] = []
+
   private setPanel(panel: OverlayPanel | null, ms = 0): void {
+    if (panel?.kind === 'clipboard') {
+      this.noticesRaised.push(
+        clipboardProblemMessage(panel.problem, panel.missing, panel.reason, panel.delivered)
+      )
+      if (this.noticesRaised.length > 20) this.noticesRaised.shift()
+    }
     if (this.panelTimer) clearTimeout(this.panelTimer)
     this.panelTimer = null
     // A standing clipboard offer comes back whenever no other panel is shown (it never times out).
@@ -2070,6 +2095,7 @@ export class DictationService {
     clipboardNotice?: string
     clipboardNoticeReason?: string
     deliveryId?: string
+    reason?: string
   }): string | null {
     // The newest delivery is the one a later clipboard result may still change.
     if (this.windows) this.clipboardDelivery = outcome.deliveryId ?? null
@@ -2081,8 +2107,14 @@ export class DictationService {
     const missing = outcome.clipboardMissing
     const reason = outcome.clipboardNoticeReason
     // Round 24 (Opus): the advice depends on whether the text went in (no "paste it yourself" after typing worked).
+    // Round 25: nor after an insertion that MAY have happened (uncertain, or typing that stopped part-way).
     const delivered = outcome.kind === 'delivered'
-    const message = clipboardProblemMessage(problem, missing, reason, delivered)
+    const mayBeIn =
+      delivered ||
+      outcome.reason === 'insertion-uncertain' ||
+      outcome.reason === 'typing-stopped' ||
+      outcome.reason === 'typing-stopped-secure'
+    const message = clipboardProblemMessage(problem, missing, reason, mayBeIn)
     if (delivered) {
       this.setPanel(
         {
@@ -2109,9 +2141,14 @@ export class DictationService {
    * Windows: the warning for the last delivery said the clipboard could not be told; its rollback
    * finished later. The card's line and the panel now say what actually happened (or go away).
    */
-  private clipboardLate(clipboard: string, deliveryId?: string, missing?: string[]): void {
-    // A Restore that got no answer in time: its result is shown now (round 24).
-    if (deliveryId && deliveryId === this.restoreAwaiting) {
+  private clipboardLate(
+    clipboard: string,
+    deliveryId?: string,
+    missing?: string[],
+    record?: string
+  ): void {
+    // A Restore that got no answer in time: its result is shown now (round 24), matched by its record (round 25).
+    if (record && record === this.restoreAwaiting) {
       this.restoreAwaiting = null
       const late = clipboardProblem(clipboard, undefined)
       this.deps.log(`clipboard: the result of a Restore that had timed out: ${clipboard}`)
