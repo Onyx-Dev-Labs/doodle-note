@@ -369,7 +369,7 @@ namespace DoodleNote.DictationHelper
         public static extern IntPtr GlobalFree(IntPtr mem);
         [DllImport("gdi32.dll")]
         public static extern IntPtr CopyEnhMetaFile(IntPtr source, IntPtr fileName);
-        [DllImport("gdi32.dll")]
+        [DllImport("gdi32.dll", SetLastError = true)]
         public static extern uint GetEnhMetaFileBits(IntPtr hemf, uint size, byte[] buffer);
         [DllImport("gdi32.dll")]
         public static extern IntPtr SetEnhMetaFileBits(uint size, byte[] bits);

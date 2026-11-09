@@ -1094,8 +1094,9 @@ namespace DoodleNote.DictationHelper
             }
             finally
             {
+                Native.ClearLastError(0); // round 22 (S6): the error read is this close's own
                 bool closed = Native.CloseClipboard();
-                int closeError = Marshal.GetLastWin32Error();
+                int closeError = closed ? 0 : Marshal.GetLastWin32Error();
                 if (trace != null) trace.Closed(closed, closeError);
             }
             return outcome;

@@ -236,6 +236,7 @@ namespace DoodleNote.DictationHelper
                     if (data == IntPtr.Zero) return "none " + format + " " + seq + " " + error + " end";
                     if (format == CF_ENHMETAFILE)
                     {
+                        Native.ClearLastError(0); // round 22 (F9): the error reported is this call's own, never a stale one
                         uint size = Native.GetEnhMetaFileBits(data, 0, null);
                         if (size == 0) return "nosize " + format + " " + seq + " " + Marshal.GetLastWin32Error() + " end";
                         if (size > cap) return "oversize " + format + " " + seq + " " + size + " end";
@@ -388,7 +389,8 @@ namespace DoodleNote.DictationHelper
                 return null;
             }
             // A complete framed reply: this request's id first, " end" last (a fragment at EOF has no end).
-            if (answer.StartsWith(id + " ", StringComparison.Ordinal) && answer.EndsWith(" end", StringComparison.Ordinal))
+            // Round 22 (F9): "<id> end" (nothing between) is malformed, never a Substring of negative length.
+            if (answer.Length >= id.Length + 6 && answer.StartsWith(id + " ", StringComparison.Ordinal) && answer.EndsWith(" end", StringComparison.Ordinal))
                 return answer.Substring(id.Length + 1, answer.Length - id.Length - 1 - 4);
             Wire.Log("clipboard reader: a reply out of order or malformed (" + Math.Min(answer.Length, 40) + " chars, not this request's id); this reader is ended");
             End();

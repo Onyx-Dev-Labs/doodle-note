@@ -1315,8 +1315,9 @@ namespace DoodleNote.DictationHelper
             }
             finally
             {
+                Native.ClearLastError(0); // round 22 (S6): the error read is this close's own
                 bool closed = Native.CloseClipboard();
-                int closeError = Marshal.GetLastWin32Error();
+                int closeError = closed ? 0 : Marshal.GetLastWin32Error();
                 if (trace != null) trace.Closed(closed, closeError);
                 if (previousLayout != IntPtr.Zero) Native.ActivateKeyboardLayout(previousLayout, 0); // test build only (see above)
             }
@@ -1528,7 +1529,11 @@ namespace DoodleNote.DictationHelper
             {
                 if (SavedClipboard.MaybeSynthesized(f) || f == 2 || f == 3 || f == 9 || f == 14) continue;
                 IntPtr data = Native.GetClipboardData(f);
-                if (data != IntPtr.Zero) total += (long)Native.GlobalSize(data).ToUInt64();
+                // Round 22 (S6): a format that cannot be read or sized makes the total UNKNOWN (display only), never smaller.
+                if (data == IntPtr.Zero) return -1;
+                long size = (long)Native.GlobalSize(data).ToUInt64();
+                if (size <= 0) return -1;
+                total += size;
             }
             return total;
         }
@@ -1628,6 +1633,7 @@ namespace DoodleNote.DictationHelper
         {
             if (!attempted) return;
             uint after = Native.GetClipboardSequenceNumber();
+            Native.ClearLastError(0); // round 22 (S6): the error read is this count's own
             int count = Native.CountClipboardFormats();
             int countError = count == 0 ? Marshal.GetLastWin32Error() : 0;
             Wire.Log("put-back trace: " + kind + " pid " + Process.GetCurrentProcess().Id + " tid " + Native.GetCurrentThreadId() + " tick " + started
@@ -2689,8 +2695,9 @@ namespace DoodleNote.DictationHelper
             }
             finally
             {
+                Native.ClearLastError(0); // round 22 (S6): the error read is this close's own
                 bool closed = Native.CloseClipboard();
-                int closeError = Marshal.GetLastWin32Error();
+                int closeError = closed ? 0 : Marshal.GetLastWin32Error();
                 trace.Closed(closed, closeError);
             }
             string result = RestoreResult(ok, complete, reportedSkip);
