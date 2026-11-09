@@ -406,11 +406,25 @@ the clipboard lock and still has our window as owner at the confirmed sequence, 
 write (every format compared byte for byte) within the sequence allowance below. Our window owning the clipboard
 is never proof by itself. Every record that the recovery machinery reads back from disk is OFFERED, unconditionally.
 That covers a record after a helper crash, kill or restart, on a retry tick, on a sweep, after an adoption or a
-rebuild, after a failed or interrupted restore, and from another boot, logon or session. The only exceptions:
-another session's record is left alone, and a record whose saved content is already exactly on the clipboard is
-deleted without writing anything. What the user sees: after a helper crash or kill mid-dictation the saved clipboard
+rebuild, after a failed or interrupted restore, and from another boot, logon or session. Nothing read from disk is
+ever WRITTEN to the clipboard without the user's Restore. Records are not offered, but left or deleted, only as
+the deletion contract below lists: another session's record is left alone; deleted without writing anything are a
+record whose saved content is already exactly on the clipboard, one that never emptied anything (stage "saved"), one
+journaled "settled", one whose payload is positively absent, damaged or unrecoverable, and those the retention and
+boot-limit policies end. What the user sees: after a helper crash or kill mid-dictation the saved clipboard
 is offered on the card ("Put back what you had copied before?") instead of being put back silently. The user's
 Restore and Dismiss are unchanged.
+
+What "restored" means (stated exactly; unchanged since round 17): EmptyClipboard and every SetClipboardData for the
+saved formats returned success under our own open, and that open was closed. It is not a later observation of the
+clipboard: no instantaneous check can guarantee what the clipboard holds afterwards (round 18 tried one after the
+close and reverted it in round 19; see the PR). Every put-back writes one log line with the native result and error
+of EmptyClipboard, each SetClipboardData and CloseClipboard, the sequence around it and the format count after the
+close (no content).
+
+The confirmation: a READ that fails under its open rejects the write (the flag below). An open that could not be
+obtained DEFERS: nothing was observed, so nothing is rejected, and any later automatic restore still needs the full
+content check behind the one guard (or the user's Restore).
 
 The one guard. The live transaction carries one flag, set once and never cleared, checked at the top of the only
 in-process path that writes the clipboard after our write (its restore; every caller goes through it: the normal
@@ -469,7 +483,9 @@ that shares %TEMP%. It is offered in the boot it is rebuilt in only (counted as 
 tick of this boot that the damaged state still shows is kept. So damage cannot extend the retention as long as that
 timing information is recoverable; a state damaged beyond it starts a new, bounded clock. Its delivery id is lost.
 
-A state journaled "settled" is deleted on sight, never offered. "Settled" is written before a restored record's
+A state journaled "settled" is deleted on sight, never offered. Stated plainly: if journaling "settled" fails AND the
+file deletion fails too, the record keeps its earlier stage and can be offered again after a successful restore (the
+user's Restore of it then finds the saved content already there and deletes it, or asks again). "Settled" is written before a restored record's
 file cleanup, for both the transaction's own restore and the user's Restore, and the offer is withdrawn at the same
 moment.
 
@@ -481,7 +497,10 @@ look uses a three-state probe (GetFileAttributesW):
 
 These act only on ABSENT: "missing payload" cleanup (a state is deleted for a missing payload only when both .bin
 and .bin.tmp are positively absent), adoption, the orphan and stray-.tmp sweeps (an unreadable file time is never
-"old"), the deletion's own checks, and Dismiss. UNKNOWN keeps the record whole. A payload that cannot be looked at,
+"old"), the deletion's own checks, and Dismiss. UNKNOWN keeps the record whole. The retention and boot limit are
+DECISIONS: when one ends a record whose file cannot be looked at, the deletion is deferred (reported as such) and a
+later check retries; there is no guaranteed physical bound while a file stays unreadable. A state file that cannot be
+read at all is kept and checked again before any retention processing (its clock cannot be read either). A payload that cannot be looked at,
 read or decrypted now is kept offer-only and bounded by the unreadable-payload policy below, so nothing loops for
 ever.
 
@@ -537,19 +556,25 @@ Deletion.
 - Otherwise every handle is marked for deletion in the order state .tmp, payload .tmp, state, payload, and their
   close removes the files.
 
-It is NOT atomic across the helper's death: marks already set are honoured when a killed process's handles close.
-Every crash point therefore ends as one of two outcomes:
-- The whole record. A kill before the state's mark leaves it intact, so a Dismiss that never completed CAN be
-  offered again.
-- The payload without its state. It is never restored from, and it is swept as an orphan after 10 minutes, which
-  completes a deletion already decided.
+It is NOT atomic across the helper's death or a failed rollback: marks already set are honoured when the handles
+close, a killed process's included. Stated as the PHYSICAL outcomes, every interruption ends as one of:
+- The whole record (intact). A kill before the state's mark leaves it intact, so a Dismiss that never completed CAN
+  be offered again.
+- A payload without its state. It is never restored from, and it is swept as an orphan once its state is positively
+  absent and it is older than 10 minutes.
+- A state without its payload. A failed rollback can leave one: the marks already set on the payload files stay
+  while the state's is cleared, or a kill lands before a completion re-marks the state. Recovery removes it once both
+  payload files are positively absent.
 
-It never leaves a state without its payload offered as restorable.
+None of these is an unauthorised deletion: the deletion had already been decided. If a mark fails, the marks already
+set are cleared; if every clear succeeds, nothing is deleted. If a clear fails, the deletion is completed instead:
+every handle is marked again from the beginning in the same order, every re-mark's result is checked and a failed
+one logged. Whatever is left is reported as it is: intact means kept; with the state gone, the offer is withdrawn
+and the payload is an orphan. CI kills a helper between two marks and drives the mixed rollback.
 
-If a mark fails, the marks already set are cleared (nothing deleted). If clearing one fails too, the deletion is
-completed instead, every handle marked again from the beginning in the same order, and reported as such. A deletion
-that did not complete is reported as it is: intact means kept; with the state gone, the offer is withdrawn and the
-payload is an orphan. CI kills a helper between two marks and drives the mixed rollback.
+Adoption persists the record's offer-only fact before it moves .bin.tmp into place; if that write fails, the move
+still proceeds (and a rebuild passes no such step). Both are harmless now that nothing on disk grants authority: the
+adopted record is offered either way.
 
 Another session's record (same user, same boot, shared %TEMP%) is left alone by the decision
 procedure, which checks that first, and by Dismiss, which refuses it; the orphan and round-8 sweeps act
