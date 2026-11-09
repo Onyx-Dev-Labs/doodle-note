@@ -1632,7 +1632,9 @@ async function main() {
     'unresponsive',
     'helper-no-window',
     'zero-sequence',
-    'zero-sequence-write'
+    'zero-sequence-write',
+    // Round 24 (Astra S2): the write's own journal (emptying) fails: nothing emptied, and the reason is no-record.
+    'journal-emptying'
   ]) {
     const seeded = copyMulti(user)
     const before = observe()
@@ -1641,9 +1643,11 @@ async function main() {
         ? { DICTATION_HELPER_TEST_ZERO_SEQUENCE: 'begin' }
         : fault === 'zero-sequence-write'
           ? { DICTATION_HELPER_TEST_EXPECT_ZERO_SEQUENCE: '1' }
-          : fault === 'helper-no-window'
-            ? { DICTATION_HELPER_TEST_NO_WINDOW: '1' }
-            : { DICTATION_HELPER_TEST_READER: fault }
+          : fault === 'journal-emptying'
+            ? { DICTATION_HELPER_TEST_FAIL_JOURNAL: 'emptying' }
+            : fault === 'helper-no-window'
+              ? { DICTATION_HELPER_TEST_NO_WINDOW: '1' }
+              : { DICTATION_HELPER_TEST_READER: fault }
     const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
     await a.ready
     // Round 22 (S8): records are watched DURING the transaction, so "no record" means none was ever created.
@@ -1656,14 +1660,21 @@ async function main() {
     const after = observe()
     const lines = a.logs.filter((l) => /saving the clipboard \(attempt/.test(l))
     await a.stop()
+    const written = fault === 'zero-sequence-write' || fault === 'journal-emptying'
     const expected =
       fault === 'zero-sequence-write'
-        ? /^write-failed\/untouched\|/.test(String(result && result.result))
-        : fault === 'zero-sequence'
-          ? result && result.result === 'zero-sequence'
-          : result && result.result === 'no-save'
+        ? /^write-failed\/untouched\|.*\|not-started=zero-sequence$/.test(
+            String(result && result.result)
+          )
+        : fault === 'journal-emptying'
+          ? /^write-failed\/untouched\|.*\|not-started=no-record$/.test(
+              String(result && result.result)
+            )
+          : fault === 'zero-sequence'
+            ? result && result.result === 'zero-sequence'
+            : result && result.result === 'no-save'
     check(
-      `reader fault "${fault}": not established, the delivery never touches the clipboard (byte-identical, sequence unchanged, no record${fault === 'zero-sequence-write' ? ' left' : ' ever'})`,
+      `reader fault "${fault}": not established, the delivery never touches the clipboard (byte-identical, sequence unchanged, no record${written ? ' left; the reason said' : ' ever'})`,
       seeded &&
         !!expected &&
         after.text === user &&
@@ -1671,7 +1682,7 @@ async function main() {
         after.sequence === before.sequence &&
         after.count === before.count &&
         recordFiles().length === 0 &&
-        (fault === 'zero-sequence-write' || !everRecord),
+        (written || !everRecord),
       `${JSON.stringify(result)}; sequence ${before.sequence} -> ${after.sequence}; ${recordFiles()}; a record seen during it: ${everRecord}; ${lines.join(' / ')}`
     )
     console.log(
@@ -2172,6 +2183,61 @@ async function main() {
         back.text === words &&
         back.extra === 'extra bytes for ' + words,
       `${JSON.stringify(live)}; ${files} files; text there ${there.text}; ${JSON.stringify(offer)}; ${JSON.stringify(refused)}; ${JSON.stringify(accepted)}; ${left} left; ${JSON.stringify(listedAfter)}`
+    )
+    cleanup()
+  }
+
+  // 40. Round 24 (Opus, the one rule at the user's Restore): a record whose only content format is lost on read-back
+  // (test hook: the read drops its last item) has nothing with the user's content to put back. Its offer counts 0
+  // content; the user's Restore is refused before emptying ("nothing-to-restore"), the clipboard unchanged; the
+  // record stays for Dismiss.
+  {
+    const only = 'only custom content ' + identity
+    const seeded = seed('only a custom format', [
+      [RegisterClipboardFormatW(EXTRA), Buffer.from(only)]
+    ])
+    const k = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS: '15000'
+    })
+    await k.ready
+    void k.req('__clipboard-txn', { text: 'dictated text NR', holdMs: 200 })
+    const reached = await waitStage('restore-emptied')
+    await sleep(800)
+    await k.kill()
+    const files = recordFiles().length
+    const z = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_RECORD_LOSES_NAME: '1'
+    })
+    await z.ready
+    await sleep(1000)
+    const listed = await z.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const before = observe()
+    const answer = offer
+      ? await z.req('clipboard-restore', {
+          record: offer.record,
+          sequence: offer.sequence,
+          acceptIncomplete: true
+        })
+      : null
+    const after = observe()
+    await z.stop()
+    const left = recordFiles().length
+    check(
+      "a record with no user content left (its only content lost on read-back): offered with content 0; the user's Restore is refused before emptying (nothing-to-restore), the clipboard unchanged, the record kept",
+      seeded &&
+        reached &&
+        files > 0 &&
+        !!offer &&
+        offer.incomplete === true &&
+        offer.content === 0 &&
+        !!answer &&
+        answer.result === 'nothing-to-restore' &&
+        after.sequence === before.sequence &&
+        left === files,
+      `${JSON.stringify(offer)}; ${JSON.stringify(answer)}; sequence ${before.sequence} -> ${after.sequence}; ${files} -> ${left} files`
     )
     cleanup()
   }

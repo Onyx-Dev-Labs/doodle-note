@@ -291,6 +291,58 @@ process.stdin.on('end', () => process.exit(0))
   }
 })
 
+test('Windows (round 24): the no-paste reason is passed on only as a plain token, only with not-saved, and also with an outcome other than delivered', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-reason-'))
+  const script = join(dir, 'helper.js')
+  writeFileSync(
+    script,
+    `
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+send({ event: 'ready', pid: process.pid, platform: 'win32' })
+const replies = {
+  a: { outcome: 'delivered', verified: true, method: 'type', clipboard: 'untouched', clipboardNotice: 'not-saved', clipboardNoticeReason: 'Bad Reason!' },
+  b: { outcome: 'uncertain', reason: 'insertion-unverifiable', verified: false, method: 'type', clipboard: 'untouched', clipboardNotice: 'not-saved', clipboardNoticeReason: 'nothing-savable' },
+  c: { outcome: 'delivered', verified: true, method: 'paste', clipboard: 'restored', clipboardNoticeReason: 'too-large' },
+  d: { outcome: 'delivered', verified: true, method: 'type', clipboard: 'untouched', clipboardNotice: 'not-saved', clipboardNoticeReason: 'some-future-reason' }
+}
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    if (req.op === 'deliver') send({ event: 'reply', id: req.id, ok: true, ...replies[req.text] })
+    else send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`
+  )
+  const client = new DictationHelperClient({
+    command: process.execPath,
+    args: [script],
+    platform: 'win32'
+  })
+  try {
+    const a = await client.deliver('s1', 'a', {}, 'da')
+    assert.equal(a.clipboardNotice, 'not-saved')
+    assert.equal(a.clipboardNoticeReason, undefined, 'a reason that is no plain token is dropped')
+    const b = await client.deliver('s1', 'b', {}, 'db')
+    assert.equal(b.outcome, 'uncertain')
+    assert.equal(b.clipboardNotice, 'not-saved', 'not-saved travels with a recovery too')
+    assert.equal(b.clipboardNoticeReason, 'nothing-savable')
+    const c = await client.deliver('s1', 'c', {}, 'dc')
+    assert.equal(c.clipboardNoticeReason, undefined, 'never a reason without not-saved')
+    const d = await client.deliver('s1', 'd', {}, 'dd')
+    assert.equal(
+      d.clipboardNoticeReason,
+      'some-future-reason',
+      'an unknown token is passed on (the app falls back to its plain sentence)'
+    )
+  } finally {
+    await client.dispose()
+  }
+})
+
 test('Windows: deliveries outstanding at once are bounded; a late result of an outstanding one is never evicted', async () => {
   const client = new DictationHelperClient({ ...offerHelper(), platform: 'win32' })
   try {

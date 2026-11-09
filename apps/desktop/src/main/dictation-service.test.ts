@@ -2899,7 +2899,8 @@ test('Windows: a late clipboard rollback updates the warning the reply caused', 
   await tick()
   assert.match(JSON.stringify(h.overlay.at(-1)), /could not tell what it holds/)
   assert.ok(h.helper.clipboardLateListener, 'the service listens for the late rollback')
-  h.helper.clipboardLateListener!('restored')
+  // The helper's late result names its delivery (round 24: one naming none never changes the current notice).
+  h.helper.clipboardLateListener!('restored', h.helper.lastDeliveryId)
   await tick()
   const card = JSON.stringify(h.overlay.at(-1))
   assert.doesNotMatch(card, /could not be put back/)
@@ -2948,6 +2949,12 @@ test('Windows: a kept transaction left pending for the newest delivery is surfac
   assert.match(JSON.stringify(h.overlay.at(-1)), /clipboard/i, 'the user is told')
 })
 
+/** Round 24: a click on the offer card the user sees (its buttons name that card's record). */
+const clickOffer = (
+  h: ReturnType<typeof harness>,
+  action: 'offer-restore' | 'offer-dismiss' | 'offer-delete' | 'offer-keep'
+): void => h.service.onOverlayAction(action, null, h.overlay.at(-1)?.offerRecord)
+
 const offer = (over: Partial<ClipboardOffer> = {}): ClipboardOffer => ({
   record: '0123456789abcdef0123456789abcdef',
   delivery: 'd1',
@@ -2958,6 +2965,7 @@ const offer = (over: Partial<ClipboardOffer> = {}): ClipboardOffer => ({
   likelyOurs: true,
   incomplete: false,
   missing: [],
+  content: 2,
   ...over
 })
 
@@ -2981,7 +2989,7 @@ test('Windows: a kept clipboard is offered with Restore and Dismiss, formats and
   assert.equal(card.controls.offerDismiss, true)
   assert.equal(card.controls.dismiss, false, 'never the shared dismiss')
   h.helper.offers = [] // restored: the helper no longer lists it
-  h.service.onOverlayAction('offer-restore', null)
+  clickOffer(h, 'offer-restore')
   await tick()
   assert.deepEqual(h.helper.restoreCalls, [{ record: offer().record, sequence: 41 }])
   assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
@@ -3000,7 +3008,7 @@ test('Windows (round 22): an incomplete offer says what is missing before Restor
     'Part of this clipboard could not be saved: FileContents (not provided by the app that copied it). Restore puts back the rest.'
   )
   h.helper.offers = []
-  h.service.onOverlayAction('offer-restore', null)
+  clickOffer(h, 'offer-restore')
   await tick()
   assert.deepEqual(h.helper.restoreCalls, [
     { record: offer().record, sequence: 41, acceptIncomplete: true }
@@ -3020,14 +3028,14 @@ test('Windows (round 22): a Restore the helper finds incomplete empties nothing;
   await h.service.start()
   await tick()
   assert.equal(h.overlay.at(-1)!.warning, null)
-  h.service.onOverlayAction('offer-restore', null)
+  clickOffer(h, 'offer-restore')
   await tick()
   assert.deepEqual(h.helper.restoreCalls, [{ record: offer().record, sequence: 41 }])
   assert.match(
     h.overlay.at(-1)!.warning ?? '',
     /could not be saved: CF_ENHMETAFILE \(it could not be rebuilt\)/
   )
-  h.service.onOverlayAction('offer-restore', null)
+  clickOffer(h, 'offer-restore')
   await tick()
   assert.deepEqual(h.helper.restoreCalls.at(-1), {
     record: offer().record,
@@ -3036,24 +3044,150 @@ test('Windows (round 22): a Restore the helper finds incomplete empties nothing;
   })
 })
 
-test('Windows (round 23): a completed Restore whose offer was withdrawn first (offer-gone and recovered before the reply) still names what is missing', async () => {
+/** How many times the overlay came to show `title` (one notice is one arrival, however often it is re-rendered). */
+const arrivals = (h: ReturnType<typeof harness>, title: string): number =>
+  h.overlay.filter((v, i) => v.title === title && h.overlay[i - 1]?.title !== title).length
+
+for (const order of ['offer-gone and recovered', 'offer-gone only'] as const) {
+  test(`Windows (rounds 23-24): a completed Restore whose offer was withdrawn first (${order} before the reply) names what is missing, exactly once`, async () => {
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    await h.service.start()
+    // A delivery runs first, so a result naming another delivery cannot show the notice by itself (Opus round 24).
+    h.helper.delivery = {
+      outcome: 'delivered',
+      method: 'paste',
+      verified: true,
+      clipboard: 'restored'
+    }
+    await speak(h, 'some words')
+    await tick()
+    const missing = ['FileContents (not provided by the app that copied it)']
+    const kept = offer({ incomplete: true, missing, delivery: 'd-old' })
+    h.helper.offers = [kept]
+    h.helper.offerListener!(kept)
+    await tick()
+    h.helper.restoreAnswers = [{ result: 'restored-partially', missing }]
+    h.helper.offers = []
+    // The helper's order: offer-gone, then recovered (it names the record's own, older delivery), then the reply.
+    h.helper.beforeRestoreAnswer = () => {
+      h.helper.offerGoneListener!(kept.record)
+      if (order === 'offer-gone and recovered')
+        h.helper.clipboardLateListener!('restored-partially', 'd-old', missing)
+    }
+    clickOffer(h, 'offer-restore')
+    await tick()
+    const title =
+      'Your clipboard was put back except: FileContents (not provided by the app that copied it).'
+    assert.equal(h.overlay.at(-1)!.title, title)
+    assert.equal(arrivals(h, title), 1, 'exactly one notice')
+  })
+}
+
+test('Windows (round 24): a click acts only on the card the user saw (an offer-gone that made another offer current is never restored for it)', async () => {
   const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
-  const missing = ['FileContents (not provided by the app that copied it)']
-  h.helper.offers = [offer({ incomplete: true, missing })]
-  h.helper.restoreAnswers = [{ result: 'restored-partially', missing }]
+  const first = offer({ record: 'a'.repeat(32) })
+  const second = offer({ record: 'b'.repeat(32), incomplete: true, missing: ['X (y)'] })
+  h.helper.offers = [first, second]
   await h.service.start()
   await tick()
-  h.helper.offers = []
-  // The helper's order: offer-gone, then recovered (with the names), then the reply.
-  h.helper.beforeRestoreAnswer = () => {
-    h.helper.offerGoneListener!(offer().record)
-    h.helper.clipboardLateListener!('restored-partially', 'd1', missing)
+  const shown = h.overlay.at(-1)!.offerRecord
+  assert.equal(shown, first.record)
+  // The first one is withdrawn: the second (incomplete, never shown) becomes current; the click was for the first.
+  h.helper.offers = [second]
+  h.helper.offerGoneListener!(first.record)
+  await tick()
+  h.service.onOverlayAction('offer-restore', null, shown)
+  await tick()
+  assert.deepEqual(h.helper.restoreCalls, [], 'no Restore of a card the user never saw')
+  h.service.onOverlayAction('offer-restore', null, undefined)
+  await tick()
+  assert.deepEqual(h.helper.restoreCalls, [], 'nor without the record')
+})
+
+test('Windows (round 24, the one rule at Restore): an incomplete offer with no user content shows no Restore; a helper that finds none says so', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  h.helper.offers = [offer({ incomplete: true, content: 0, missing: ['CF_DIB (too large)'] })]
+  await h.service.start()
+  await tick()
+  const card = h.overlay.at(-1)!
+  assert.ok(!card.controls.offerRestore, 'no Restore')
+  assert.equal(card.controls.offerDismiss, true)
+  assert.match(card.warning ?? '', /There is nothing to put back/)
+  const n = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  n.helper.offers = [offer({ incomplete: true, content: 1, missing: ['X (y)'] })]
+  n.helper.restoreAnswers = [{ result: 'nothing-to-restore', missing: ['X (y)'] }]
+  await n.service.start()
+  await tick()
+  clickOffer(n, 'offer-restore')
+  await tick()
+  assert.ok(!n.overlay.at(-1)!.controls.offerRestore, 'the card no longer offers Restore')
+})
+
+test('Windows (round 24): a Restore that got no answer in time shows its result when the helper reports it later', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await h.service.start()
+  h.helper.delivery = {
+    outcome: 'delivered',
+    method: 'paste',
+    verified: true,
+    clipboard: 'restored'
   }
-  h.service.onOverlayAction('offer-restore', null)
+  await speak(h, 'some words')
+  await tick()
+  const kept = offer({ delivery: 'd-old', incomplete: true, missing: ['X (y)'] })
+  h.helper.offers = [kept]
+  h.helper.offerListener!(kept)
+  await tick()
+  h.helper.restoreAnswers = [{ result: 'failed' }]
+  clickOffer(h, 'offer-restore')
+  await tick()
+  h.helper.offers = []
+  h.helper.offerGoneListener!(kept.record)
+  h.helper.clipboardLateListener!('restored-partially', 'd-old', ['X (y)'])
+  await tick()
+  assert.equal(h.overlay.at(-1)!.title, 'Your clipboard was put back except: X (y).')
+})
+
+test('Windows (round 24): a clipboard too large to save gives no paste-it-yourself advice once typing put the text in', async () => {
+  for (const [outcome, advice] of [
+    ['delivered', false],
+    ['uncertain', true]
+  ] as const) {
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    await h.service.start()
+    h.helper.delivery = {
+      outcome,
+      ...(outcome === 'uncertain' ? { reason: 'insertion-unverifiable' } : {}),
+      method: 'type',
+      verified: outcome === 'delivered',
+      clipboard: 'untouched',
+      clipboardNotice: 'not-saved',
+      clipboardNoticeReason: 'too-large'
+    }
+    await speak(h, 'typed words')
+    await tick()
+    const shown = JSON.stringify(h.overlay.at(-1))
+    assert.match(shown, /too large to save/)
+    assert.equal(/paste it yourself/.test(shown), advice, outcome)
+  }
+})
+
+test('Windows (round 24): an unknown no-paste reason (even "constructor") falls back to the plain sentence', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await h.service.start()
+  h.helper.delivery = {
+    outcome: 'delivered',
+    method: 'type',
+    verified: true,
+    clipboard: 'untouched',
+    clipboardNotice: 'not-saved',
+    clipboardNoticeReason: 'constructor'
+  }
+  await speak(h, 'typed words')
   await tick()
   assert.equal(
     h.overlay.at(-1)!.title,
-    'Your clipboard was put back except: FileContents (not provided by the app that copied it).'
+    'DoodleNote could not save your clipboard, so it did not paste with it. Your clipboard was left as it was.'
   )
 })
 
@@ -3129,7 +3263,7 @@ test('Windows: a clipboard that changed since the offer is shown and asked again
   ]
   await h.service.start()
   await tick()
-  h.service.onOverlayAction('offer-restore', null)
+  clickOffer(h, 'offer-restore')
   await tick()
   const card = h.overlay.at(-1)!
   assert.equal(card.title, 'Your clipboard has changed since DoodleNote offered this.')
@@ -3137,7 +3271,7 @@ test('Windows: a clipboard that changed since the offer is shown and asked again
     card.detail,
     /replaces what is on your clipboard \(3 formats, 4\.0 KB\) with what you had copied before \(2 formats, 1\.3 KB\)/
   )
-  h.service.onOverlayAction('offer-restore', null)
+  clickOffer(h, 'offer-restore')
   await tick()
   assert.deepEqual(
     h.helper.restoreCalls.map((c) => c.sequence),
@@ -3157,7 +3291,7 @@ test('Windows: Dismiss asks first, deletes only after the helper did, and keeps 
   assert.deepEqual(h.helper.dismissCalls, [])
   assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
   // Dismiss: a second click is needed.
-  h.service.onOverlayAction('offer-dismiss', null)
+  clickOffer(h, 'offer-dismiss')
   await tick()
   let card = h.overlay.at(-1)!
   assert.equal(card.title, 'Delete the saved clipboard?')
@@ -3165,13 +3299,13 @@ test('Windows: Dismiss asks first, deletes only after the helper did, and keeps 
   assert.equal(card.controls.offerKeep, true)
   assert.deepEqual(h.helper.dismissCalls, [], 'nothing deleted on the first click')
   // Keep it: back to the offer.
-  h.service.onOverlayAction('offer-keep', null)
+  clickOffer(h, 'offer-keep')
   await tick()
   assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
   // The helper could not delete it: the card stays and says so.
   h.helper.dismissResult = false
-  h.service.onOverlayAction('offer-dismiss', null)
-  h.service.onOverlayAction('offer-delete', null)
+  clickOffer(h, 'offer-dismiss')
+  clickOffer(h, 'offer-delete')
   await tick()
   card = h.overlay.at(-1)!
   assert.equal(card.warning, 'The saved copy could not be deleted. Try again.')
@@ -3179,7 +3313,7 @@ test('Windows: Dismiss asks first, deletes only after the helper did, and keeps 
   // Now it can.
   h.helper.dismissResult = true
   h.helper.offers = []
-  h.service.onOverlayAction('offer-delete', null)
+  clickOffer(h, 'offer-delete')
   await tick()
   assert.deepEqual(h.helper.dismissCalls, ['a'.repeat(32), 'a'.repeat(32)])
   assert.doesNotMatch(
@@ -3198,7 +3332,7 @@ test('Windows: every outstanding offer is kept; the next shows after one resolve
   assert.match(h.overlay.at(-1)!.detail, /\(1 format,/)
   // The first is restored; the helper lists the second only.
   h.helper.offers = [second]
-  h.service.onOverlayAction('offer-restore', null)
+  clickOffer(h, 'offer-restore')
   await tick()
   await tick()
   assert.match(h.overlay.at(-1)!.detail, /\(7 formats,/, 'the next outstanding offer shows')
@@ -3216,7 +3350,7 @@ test('Windows: a refresh without a valid list keeps the offers held', async () =
   // A restart or a long delivery: the list request gets no valid answer.
   h.helper.offersUnavailable = true
   h.helper.restoreAnswers = [{ result: 'busy' }]
-  h.service.onOverlayAction('offer-restore', null)
+  clickOffer(h, 'offer-restore')
   await tick()
   await (h.service as unknown as { loadClipboardOffers(): Promise<void> }).loadClipboardOffers()
   await tick()

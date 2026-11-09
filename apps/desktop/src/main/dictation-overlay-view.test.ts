@@ -331,7 +331,8 @@ test('Windows (round 23): an incomplete card shows at most three names (+N more)
     created: '',
     likelyOurs: false,
     incomplete: true,
-    missing: ['A (x)', 'B (x)', 'C (x)', 'D (x)', 'E (x)']
+    missing: ['A (x)', 'B (x)', 'C (x)', 'D (x)', 'E (x)'],
+    content: 2
   }
   const some = panelView({ kind: 'clipboard-offer', offer }, base)
   assert.equal(
@@ -339,13 +340,17 @@ test('Windows (round 23): an incomplete card shows at most three names (+N more)
     'Part of this clipboard could not be saved: A (x); B (x); C (x) +2 more. Restore puts back the rest.'
   )
   const none = panelView(
-    { kind: 'clipboard-offer', offer: { ...offer, formats: 0, missing: ['A (x)'] } },
+    { kind: 'clipboard-offer', offer: { ...offer, formats: 0, content: 0, missing: ['A (x)'] } },
     base
   )
   assert.equal(
     none.warning,
-    'None of this clipboard could be saved (A (x)). Restore cannot put any of it back; Dismiss deletes the saved record.'
+    'None of this clipboard could be saved (A (x)). There is nothing to put back; Dismiss deletes the saved record.'
   )
+  // Round 24 (Opus): no user content to put back: no Restore button at all.
+  assert.ok(!none.controls.offerRestore)
+  assert.equal(none.controls.offerDismiss, true)
+  assert.equal(none.offerRecord, offer.record)
 })
 
 test('Windows: the clipboard offer card names formats and size only, with Restore and Dismiss', () => {
@@ -362,7 +367,8 @@ test('Windows: the clipboard offer card names formats and size only, with Restor
         created: '',
         likelyOurs: false,
         incomplete: false,
-        missing: []
+        missing: [],
+        content: 1
       }
     },
     base
