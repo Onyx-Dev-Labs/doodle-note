@@ -1089,14 +1089,20 @@ namespace DoodleNote.DictationHelper
                     result = RecoverResult.Pending;
                     return "put back (" + seen + "): " + restored + ", but its stage could not be journaled: kept as an offer";
                 }
-                if (restored == "unrestored") { result = RecoverResult.Failed; return "put back only in part; kept, offered again"; }
+                // Round 23 (Opus SF1): an ACCEPTED partial restore (the user was shown what is missing and chose it) is done:
+                // settled and deleted like any completed restore, never offered again. Only a put-back that failed keeps it.
+                if (restored == "unrestored" && !partially) { result = RecoverResult.Failed; return "put back only in part; kept, offered again"; }
+                if (partially) restored = "restored-partially";
                 outcome = "the user's restore put back (" + seen + "): " + restored;
                 // Settled BEFORE the file cleanup, which may be deferred (a file held by another process): the offer is
                 // withdrawn now and a "settled" state is deleted on sight, so restored content is never offered again.
                 if (!Stage(journal, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
                 OfferGone(id, "restored");
                 outcome += DeleteId(id, outcome) ? "; deleted" : "; " + Deferred;
-                Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", restored));
+                // Round 23 (Astra S1): the event names what is missing too (it can reach the app before the reply).
+                Dictionary<string, object> recovered = Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", restored);
+                if (partially) recovered["missing"] = saved.Missing();
+                Wire.Send(recovered);
             }
             finally
             {
