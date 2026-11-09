@@ -10,6 +10,13 @@
 import { overlayFontCss, barkPine, barkWhite } from './brand-assets'
 import { FEATURE_NAME } from '../shared/dictation-brand'
 
+/**
+ * The URL the page navigates to for an action, as the overlay window parses it: the action, then (for an offer's
+ * buttons, round 24) the 32-hex record of the card the page showed. Shared with the window's will-navigate handler
+ * and the rendered layout check, so the page-to-main hop cannot drift.
+ */
+export const OVERLAY_ACTION_URL = /^doodle-dictation:\/\/([a-z-]+)(?:\/([0-9a-f]{32}))?$/
+
 export function overlayHtml(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
@@ -71,8 +78,8 @@ ${overlayFontCss}
   .card{box-sizing:border-box;flex:1;border-radius:16px 14px 17px 13px/13px 17px 14px 16px;padding:10px 14px;display:flex;flex-direction:column;gap:6px;min-height:0}
   .card .title{flex:none;font-weight:700;font-size:14px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
   .card.warn{border-color:var(--warn)}.card.error{border-color:var(--err)}
-  .card .cardwarn{flex:0 1 auto;min-height:16px;overflow-y:auto;overscroll-behavior:contain;color:var(--warn);font-weight:600;font-size:12px;line-height:1.35}
-  .card .detail{flex:1;min-height:16px;color:var(--mute);font:12px/1.35 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
+  .card .cardwarn{flex:0 1 auto;min-height:1lh;overflow-y:auto;overscroll-behavior:contain;color:var(--warn);font-weight:600;font-size:12px;line-height:1.35}
+  .card .detail{flex:1;min-height:1lh;color:var(--mute);font:12px/1.35 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
   .diff{flex:1;min-height:0;overflow:hidden;font:12px/1.45 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;white-space:pre-wrap;word-break:break-word;-webkit-user-select:text;user-select:text;background:var(--wash);border-radius:8px;padding:6px 8px}
   .diff ins{text-decoration:none;color:var(--ok);background:rgba(79,122,74,.16);border-radius:3px}
   .diff del{color:var(--err);background:rgba(179,65,47,.14);border-radius:3px;text-decoration:line-through}

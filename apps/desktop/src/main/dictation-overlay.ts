@@ -11,7 +11,7 @@ import {
   type SoundKind
 } from '../shared/dictation-pill'
 import { overlaySize, type OverlayView } from './dictation-overlay-view'
-import { overlayHtml } from './dictation-overlay-page'
+import { OVERLAY_ACTION_URL, overlayHtml } from './dictation-overlay-page'
 import { tagDictationWindow } from './dictation-windows'
 
 export type OverlayAction =
@@ -223,7 +223,7 @@ export class DictationOverlay {
     window.webContents.on('will-navigate', (event, url) => {
       event.preventDefault()
       // Round 24: an offer's buttons carry the record of the card the page showed (32 hex digits).
-      const match = /^doodle-dictation:\/\/([a-z-]+)(?:\/([0-9a-f]{32}))?$/.exec(url)
+      const match = OVERLAY_ACTION_URL.exec(url)
       if (match) this.handle(match[1] as string, match[2])
     })
     this.loaded = false
