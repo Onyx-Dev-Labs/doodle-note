@@ -337,8 +337,11 @@ namespace DoodleNote.DictationHelper
         public static extern int CountClipboardFormats();
         [DllImport("kernel32.dll")]
         public static extern uint GetCurrentThreadId();
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         public static extern uint EnumClipboardFormats(uint format);
+        /// <summary>Cleared right before each enumeration step (the reader's listing reads the error it ends with).</summary>
+        [DllImport("kernel32.dll", EntryPoint = "SetLastError")]
+        public static extern void ClearLastError(uint code);
         [DllImport("user32.dll")]
         public static extern IntPtr GetClipboardData(uint format);
         [DllImport("user32.dll", SetLastError = true)]

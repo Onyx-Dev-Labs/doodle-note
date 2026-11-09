@@ -517,6 +517,19 @@ namespace DoodleNote.DictationHelper
                     }
 #endif
                     break;
+                case "__save-only":
+                    // Test build only: the delivery's save and nothing else (no write, no record): what it established.
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+#if DICTATION_TEST
+                    work.Async(id, delegate
+                    {
+                        SavedClipboard only = SavedClipboard.CaptureBounded(1500);
+                        Wire.Reply(id, true, Wire.Fields("established", only != null, "items", only != null ? only.Count : -1,
+                            "bytes", only != null ? (double)only.ByteCount : -1.0, "shape", only != null ? only.Shape() : "",
+                            "skipped", only != null && only.ReportedSkip, "line", SavedClipboard.LastSaveLine));
+                    });
+#endif
+                    break;
                 case "__saturate":
                     // Test build only: act as if the bounded-call cap had just been hit (the busy restart).
                     if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }

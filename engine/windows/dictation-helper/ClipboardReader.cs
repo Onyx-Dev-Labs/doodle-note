@@ -30,9 +30,11 @@ namespace DoodleNote.DictationHelper
     /// and any change since the list (or before the paste empties the clipboard) discards the save.
     /// The reader exits when its stdin closes, so it never outlives the helper.
     ///
-    /// Reader protocol (one line each way per request):
-    ///   "list"            → "list &lt;seq&gt; &lt;hasDib 0|1&gt; &lt;hasEmf 0|1&gt; &lt;format&gt;:&lt;base64 name&gt; …"   (or "busy")
-    ///   "get &lt;f&gt; &lt;cap&gt;"    → "data &lt;f&gt; &lt;seq&gt; &lt;base64&gt;" | "emf &lt;f&gt; &lt;seq&gt; &lt;base64&gt;" | "none|oversize|unlocked &lt;f&gt; &lt;seq&gt;" | "busy"
+    /// Reader protocol (one line each way per request; round 20: every request starts with an id the reply echoes,
+    /// so a late reply can never answer a later request):
+    ///   "&lt;id&gt; list"          → "&lt;id&gt; list &lt;seq before&gt; &lt;hasDib 0|1&gt; &lt;hasEmf 0|1&gt; &lt;counted&gt; &lt;enumeration error&gt; &lt;seq after&gt; &lt;format&gt;:&lt;base64 name&gt; …"
+    ///                           (counted: CountClipboardFormats in the same open)   (or "&lt;id&gt; busy")
+    ///   "&lt;id&gt; get &lt;f&gt; &lt;cap&gt;" → "&lt;id&gt; data &lt;f&gt; &lt;seq&gt; &lt;base64&gt;" | "... emf ..." | "&lt;id&gt; none|oversize|unlocked &lt;f&gt; &lt;seq&gt;" | "&lt;id&gt; busy"
     /// </summary>
     internal static class ClipboardReader
     {
@@ -59,7 +61,7 @@ namespace DoodleNote.DictationHelper
             {
                 string reply;
                 try { reply = Answer(line.Trim()); }
-                catch (Exception) { reply = "busy"; }
+                catch (Exception) { string t = line.Trim(); int sp = t.IndexOf(' '); reply = (sp > 0 ? t.Substring(0, sp) : t) + " busy"; }
                 byte[] bytes = new UTF8Encoding(false).GetBytes(reply + "\n");
                 // The helper may have exited while this reader finished a render: nobody is listening.
                 try
@@ -74,20 +76,51 @@ namespace DoodleNote.DictationHelper
 
         static string Answer(string request)
         {
+            // "<id> <request>": the id is echoed in front of the reply.
+            int space = request.IndexOf(' ');
+            string id = space > 0 ? request.Substring(0, space) : request;
+            string reply = AnswerRequest(space > 0 ? request.Substring(space + 1) : "");
+#if DICTATION_TEST
+            // Test build only (the reader inherits the helper's environment): simulate a reply that arrives late
+            // (a stray line before this one).
+            if (TestMode.Env("DICTATION_HELPER_TEST_READER") == "stray-line") return "0 list 1 0 0 0 0 1\n" + id + " " + reply;
+#endif
+            return id + " " + reply;
+        }
+
+        static string AnswerRequest(string request)
+        {
             string[] parts = request.Split(' ');
+#if DICTATION_TEST
+            string hook = TestMode.Env("DICTATION_HELPER_TEST_READER") ?? "";
+#else
+            string hook = "";
+#endif
             if (parts[0] == "list")
             {
                 if (!Open()) return "busy";
                 try
                 {
-                    StringBuilder reply = new StringBuilder("list ");
-                    reply.Append(Native.GetClipboardSequenceNumber()).Append(' ');
-                    reply.Append(Native.IsClipboardFormatAvailable(CF_DIB) || Native.IsClipboardFormatAvailable(CF_DIBV5) ? "1 " : "0 ");
-                    reply.Append(Native.IsClipboardFormatAvailable(CF_ENHMETAFILE) ? "1" : "0");
-                    // Enumerating renders nothing; names are looked up without the clipboard.
-                    for (uint format = Native.EnumClipboardFormats(0); format != 0; format = Native.EnumClipboardFormats(format))
-                        reply.Append(' ').Append(format).Append(':').Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(SavedClipboard.FormatName(format))));
-                    return reply.ToString();
+                    uint before = Native.GetClipboardSequenceNumber();
+                    string dib = Native.IsClipboardFormatAvailable(CF_DIB) || Native.IsClipboardFormatAvailable(CF_DIBV5) ? "1" : "0";
+                    string emf = Native.IsClipboardFormatAvailable(CF_ENHMETAFILE) ? "1" : "0";
+                    int counted = Native.CountClipboardFormats();
+                    // Enumerating renders nothing; names are looked up without the clipboard. A 0 is the end only with
+                    // ERROR_SUCCESS (cleared before each step); the helper also compares the count (Judge).
+                    StringBuilder entries = new StringBuilder();
+                    uint format = 0;
+                    int error;
+                    for (;;)
+                    {
+                        Native.ClearLastError(0);
+                        format = Native.EnumClipboardFormats(format);
+                        if (format == 0) { error = Marshal.GetLastWin32Error(); break; }
+                        entries.Append(' ').Append(format).Append(':').Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(SavedClipboard.FormatName(format))));
+                    }
+                    uint after = Native.GetClipboardSequenceNumber();
+                    if (hook == "enum-error") { error = 1418; entries.Length = 0; } // test build only: ERROR_CLIPBOARD_NOT_OPEN, nothing listed
+                    if (hook == "list-empty") entries.Length = 0;                    // test build only: listed 0, counted as is
+                    return "list " + before + " " + dib + " " + emf + " " + counted + " " + error + " " + after + entries;
                 }
                 finally { Native.CloseClipboard(); }
             }
@@ -95,6 +128,8 @@ namespace DoodleNote.DictationHelper
             {
                 uint format = uint.Parse(parts[1]);
                 long cap = long.Parse(parts[2]);
+                if (hook == "get-none") return "none " + format + " " + Native.GetClipboardSequenceNumber(); // test build only
+                if (hook == "die-mid-reply") { Stream raw = Console.OpenStandardOutput(); raw.Write(new byte[] { 100, 97, 116 }, 0, 3); raw.Flush(); Environment.Exit(3); } // test build only: "dat", then gone
                 int delay = TestMode.Int("DICTATION_HELPER_TEST_CAPTURE_DELAY_MS", 0);
                 if (!Open()) return "busy";
                 try
@@ -219,14 +254,21 @@ namespace DoodleNote.DictationHelper
             }
         }
 
-        /// <summary>One request; null when the reader did not answer within timeoutMs (it is then abandoned).</summary>
+        int nextId;
+
+        /// <summary>
+        /// One request; null when the reader did not answer within timeoutMs (it is then abandoned) or ended. Every
+        /// request carries an id the reply must echo (round 20): a line with another id (a late reply, a stray line)
+        /// is never taken as this request's answer; it ends this reader and answers "out-of-order" (not established).
+        /// </summary>
         public string Request(string request, int timeoutMs)
         {
             string answer;
+            string id = (++nextId).ToString();
             requestOwner = Native.GetClipboardOwner();
             try
             {
-                process.StandardInput.WriteLine(request);
+                process.StandardInput.WriteLine(id + " " + request);
                 process.StandardInput.Flush();
             }
             catch (Exception)
@@ -234,9 +276,16 @@ namespace DoodleNote.DictationHelper
                 End();
                 return null;
             }
-            if (lines.TryTake(out answer, Math.Max(1, timeoutMs))) return answer;
-            Abandon();
-            return null;
+            if (!lines.TryTake(out answer, Math.Max(1, timeoutMs)))
+            {
+                if (lines.IsCompleted) { End(); return null; } // the reader ended (killed, or died mid-reply)
+                Abandon();
+                return null;
+            }
+            if (answer.StartsWith(id + " ", StringComparison.Ordinal)) return answer.Substring(id.Length + 1);
+            Wire.Log("clipboard reader: a reply out of order or malformed (" + Math.Min(answer.Length, 40) + " chars, not this request's id); this reader is ended");
+            End();
+            return "out-of-order";
         }
 
         /// <summary>
