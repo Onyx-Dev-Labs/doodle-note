@@ -791,6 +791,45 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(null, forms(16, "x", 1049), "nor its CF_LOCALE");
         }
 
+        public static void TheSaveIsWrittenOverOnlyWhenPositivelyEstablished()
+        {
+            // Round 20: hooked reader replies; Judge decides whether the helper may write. Formats: CF_UNICODETEXT (13)
+            // and a registered one; the listing's entries are "<id>:<base64 name>".
+            Func<uint, string> entry = (f) => f + ":" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(f == 13 ? "CF_UNICODETEXT" : "DoodleNote.CI.Extra"));
+            uint extra = Native.RegisterClipboardFormat("DoodleNote.CI.Extra");
+            string two = " " + entry(13) + " " + entry(extra);
+            Func<uint, string> data = (f) => "data " + f + " 100 " + Convert.ToBase64String(new byte[] { 1, 2, 3 });
+            Func<string, Func<string, string>, SavedClipboard> judge = (listReply, getReply) =>
+            {
+                bool retry; string line;
+                return SavedClipboard.Judge((request, ms) => request == "list" ? listReply : getReply(request), 1500, () => 100u, out retry, out line);
+            };
+            Func<string, string> allData = (request) => data(uint.Parse(request.Split(' ')[1]));
+            // Established: listed 2 = counted 2, no error, sequence unchanged, both saved.
+            SavedClipboard ok = judge("list 100 0 0 2 0 100" + two, allData);
+            Assert.Equal(true, ok != null && ok.Count == 2, "listed = counted, no error, both formats saved: established");
+            // Positive empty: listed 0, counted 0, no error.
+            SavedClipboard empty = judge("list 100 0 0 0 0 100", allData);
+            Assert.Equal(true, empty != null && empty.Count == 0, "listed 0, counted 0, no error: a positively empty clipboard (the only zero-item record)");
+            // Not established: no record at all, so the delivery never empties or writes the clipboard.
+            Assert.Equal(null, judge("list 100 0 0 5 1418 100", allData), "an enumeration error (ERROR_CLIPBOARD_NOT_OPEN) with a non-empty clipboard");
+            Assert.Equal(null, judge("list 100 0 0 5 0 100", allData), "listed 0 but counted 5 (the round-19 failure mode)");
+            Assert.Equal(null, judge("list 100 0 0 3 0 100" + two, allData), "listed 2 but counted 3");
+            Assert.Equal(null, judge("list 100 0 0 2 0 101" + two, allData), "the sequence moved across the listing");
+            Assert.Equal(null, judge("list 100 0 0 2 0 100" + two, (request) => "none " + request.Split(' ')[1] + " 100"), "listed 2, counted 2, but every get answers none");
+            Assert.Equal(null, judge("list 100 0 0 2 0 100" + two, (request) => "unlocked " + request.Split(' ')[1] + " 100"), "every get answers unlocked");
+            Assert.Equal(null, judge("out-of-order", allData), "a late reply from the previous request (the client answers out-of-order)");
+            Assert.Equal(null, judge("list 100 0 0", allData), "a reader killed mid-reply (a truncated listing)");
+            Assert.Equal(null, judge("busy", allData), "a busy reader");
+            Assert.Equal(null, judge(null, allData), "a reader that overran or ended");
+            Assert.Equal(null, judge("list 100 0 0 2 0 100" + two, (request) => request.Contains(extra.ToString()) ? "dat" : allData(request)), "a get reply cut short");
+            Assert.Equal(null, judge("list 100 0 0 2 0 100" + two, (request) => data(13)), "a get reply for another format (out of order)");
+            Assert.Equal(null, judge("list 100 0 0 1 0 100 13:not-base64!", allData), "a malformed listing entry");
+            // Named skips are definite outcomes: over the cap still establishes the save (reported as skipped).
+            SavedClipboard skipped = judge("list 100 0 0 2 0 100" + two, (request) => request.Contains(extra.ToString()) ? "oversize " + extra + " 100" : allData(request));
+            Assert.Equal(true, skipped != null && skipped.Count == 1 && skipped.ReportedSkip, "one format over the cap: established, that format reported as skipped");
+        }
+
         public static void OfferOnlyRecordsAreNeverRestoredOnTheirOwn()
         {
             Func<uint, OurWrite, int, ClipboardView> view = (seq, write, count) => new ClipboardView { Sequence = seq, OurWrite = write, FormatCount = count };
