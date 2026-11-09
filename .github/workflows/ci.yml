@@ -167,7 +167,7 @@ jobs:
       # Kept clipboard records round-trip through the SHIPPED helper's clipboard-offers / -restore / -dismiss.
       # The records are made by the test-ops build (same sources) ended at a journaled stage; no window, no input.
       - name: Clipboard offers end to end on the packaged helper
-        timeout-minutes: 12
+        timeout-minutes: 20
         shell: pwsh
         run: |
           $helper = "apps/desktop/release/win-unpacked/resources/engine/dictation-helper.exe"

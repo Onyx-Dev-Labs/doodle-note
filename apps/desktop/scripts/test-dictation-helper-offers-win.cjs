@@ -35,6 +35,8 @@ const GetClipboardFormatNameW = user32.func(
   'int __stdcall GetClipboardFormatNameW(uint32 f, _Out_ uint16_t *b, int n)'
 )
 const GetClipboardSequenceNumber = user32.func('uint32 __stdcall GetClipboardSequenceNumber()')
+const CountClipboardFormats = user32.func('int __stdcall CountClipboardFormats()')
+const GetLastError = kernel32.func('uint32 __stdcall GetLastError()')
 const GlobalAlloc = kernel32.func('void* __stdcall GlobalAlloc(uint32 f, uintptr n)')
 const GlobalLock = kernel32.func('void* __stdcall GlobalLock(void* h)')
 const GlobalUnlock = kernel32.func('bool __stdcall GlobalUnlock(void* h)')
@@ -47,9 +49,11 @@ const RtlCopyOut = kernel32.func(
 )
 const block = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+let lastOpenError = 0
 function open() {
   for (let i = 0; i < 150; i++) {
     if (OpenClipboard(null)) return true
+    lastOpenError = GetLastError()
     block(20)
   }
   return false
@@ -101,9 +105,10 @@ function addFormat() {
   CloseClipboard()
 }
 function names() {
-  if (!open()) return '(not opened)'
+  if (!open()) return `(not opened: error ${lastOpenError})`
   const out = []
-  for (let f = EnumClipboardFormats(0); f !== 0; f = EnumClipboardFormats(f)) {
+  let f = EnumClipboardFormats(0)
+  for (; f !== 0; f = EnumClipboardFormats(f)) {
     if (f < 0xc000) {
       out.push(String(f))
       continue
@@ -112,8 +117,33 @@ function names() {
     const n = GetClipboardFormatNameW(f, b, 256)
     out.push(Buffer.from(b.buffer).toString('utf16le', 0, n * 2))
   }
+  // EnumClipboardFormats returns 0 both at the end and on failure: tell them apart (round 19).
+  const error = GetLastError()
+  const count = CountClipboardFormats()
   CloseClipboard()
+  if (error !== 0 || count !== out.length)
+    return `(enumeration failed: error ${error}, ${count} formats counted, ${out.length} listed: ${out.sort().join(' ')})`
   return out.sort().join(' ')
+}
+/** One open: the formats, the user's text and custom bytes (content, not names), the sequence and the count. */
+function observe() {
+  const seen = {
+    opened: open(),
+    openError: lastOpenError,
+    sequence: GetClipboardSequenceNumber(),
+    count: CountClipboardFormats()
+  }
+  if (!seen.opened) return seen
+  const listed = []
+  for (let f = EnumClipboardFormats(0); f !== 0; f = EnumClipboardFormats(f)) listed.push(f)
+  seen.enumError = GetLastError()
+  seen.formats = listed.length
+  const t = readBytes(13)
+  seen.text = t ? t.toString('utf16le').replace(/\0.*$/s, '') : null
+  const e = readBytes(RegisterClipboardFormatW(EXTRA))
+  seen.extra = e ? e.toString() : null
+  CloseClipboard()
+  return seen
 }
 function text() {
   if (!open()) return null
@@ -277,9 +307,19 @@ function start(exe, env = {}) {
     logs,
     req,
     ready,
+    // Killed and its exit OBSERVED (round 19): a restarted helper never runs beside it.
     kill: async () => {
       child.kill()
-      await sleep(500)
+      const exited = await new Promise((r) => {
+        if (child.exitCode !== null || child.signalCode !== null) return r(true)
+        const t = setTimeout(() => r(false), 10000)
+        child.once('exit', () => {
+          clearTimeout(t)
+          r(true)
+        })
+      })
+      if (!exited) console.log('# a helper did not exit within 10 s of its kill')
+      return exited
     },
     stop: async () => {
       child.stdin.end()
@@ -1325,11 +1365,14 @@ async function main() {
       { DICTATION_HELPER_TEST_RESTORE_STALL_MS: '15000' },
       'restore-emptied'
     ],
-    // (a) again, three times: one CI run (42662110137) saw the user's Restore report "restored" with an empty
-    // clipboard right after. Since then the record is deleted only once the put-back is seen after the close.
-    ['(a) after the write, before the paste, repeat 1', {}, 'text'],
-    ['(a) after the write, before the paste, repeat 2', {}, 'text'],
-    ['(a) after the write, before the paste, repeat 3', {}, 'text']
+    // (a) 25 more times (round 19): one CI run (42662110137) saw the user's Restore reply "restored" and then a format
+    // enumeration with no entries. Diagnosed, not guarded: content checked under one open, the helper's put-back
+    // trace and the record directory printed on any failure.
+    ...Array.from({ length: 25 }, (_, n) => [
+      `(a) after the write, before the paste, repeat ${n + 1}`,
+      {},
+      'text'
+    ])
   ]) {
     copyMulti(user)
     const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
@@ -1342,7 +1385,7 @@ async function main() {
       for (let i = 0; i < 200 && text() !== 'dictated text F'; i++) await sleep(50)
     else await waitStage(wait)
     await sleep(label.startsWith('(a)') ? 300 : 1200)
-    await a.kill()
+    const exited = await a.kill()
     const before = names()
     const sequence = GetClipboardSequenceNumber()
     const h = start(release)
@@ -1351,7 +1394,8 @@ async function main() {
     const listed = await h.req('clipboard-offers')
     check(
       `killed ${label}: a restarted release helper offers it and never writes the clipboard`,
-      !!listed &&
+      exited &&
+        !!listed &&
         listed.offers.length === 1 &&
         names() === before &&
         names() !== userFormats &&
@@ -1360,14 +1404,27 @@ async function main() {
     )
     const offer = listed && listed.offers[0]
     const restored = offer ? await restoreConfirming(h, offer) : null
-    check(
-      `and the user's Restore of it gives back the user clipboard (${label.replace(/^(\(.\)).*?(, repeat \d)?$/, '$1$2')})`,
+    const after = observe()
+    const ok =
       !!restored &&
-        restored.result === 'restored' &&
-        names() === userFormats &&
-        recordFiles().length === 0,
-      `${JSON.stringify(restored)}; [${names()}] vs [${userFormats}]; ${recordFiles()}; release log: ${h.logs.slice(-10).join(' / ')}`
+      restored.result === 'restored' &&
+      after.opened &&
+      after.text === user &&
+      after.extra === 'extra bytes for ' + user &&
+      recordFiles().length === 0
+    check(
+      `and the user's Restore of it gives back the user clipboard (${label.replace(/^(\(.\)).*?(, repeat \d+)?$/, '$1$2')})`,
+      ok,
+      `${JSON.stringify(restored)}; observed ${JSON.stringify({ ...after, text: after.text === user ? '(the user text)' : after.text, extra: after.extra === 'extra bytes for ' + user ? '(the user bytes)' : after.extra })}; records [${fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith(recordPrefix))}]; release log: ${h.logs
+        .filter((l) => /put-back trace|restore|record/.test(l))
+        .slice(-12)
+        .join(' / ')}`
     )
+    if (ok) {
+      const trace = h.logs.find((l) => /put-back trace: user-restore/.test(l))
+      if (/repeat 1$/.test(label) || !label.includes('repeat'))
+        console.log(`# ${trace || '(no put-back trace line)'}`)
+    }
     await h.stop()
     cleanup()
   }
@@ -1648,8 +1705,9 @@ async function main() {
         `# write thread layout ${layout || '(default)'}: pinned 0x${(pinned || 0).toString(16)}, stamped 0x${stamped && stamped.readUInt32LE(0).toString(16)}`
       )
       check(
-        `write thread layout ${layout || '(default)'}: Windows stamps the pinned locale (0x${(pinned || 0).toString(16)}) and the confirmation passes`,
+        `write thread layout ${layout || '(default)'}: the layout ACTIVATED, Windows stamps the pinned locale (0x${(pinned || 0).toString(16)}) and the confirmation passes`,
         !!stamped &&
+          (!layout || pinned === (parseInt(layout, 16) & 0xffff)) &&
           stamped.readUInt32LE(0) === pinned &&
           !!result &&
           /^restored\|/.test(String(result.result)),
