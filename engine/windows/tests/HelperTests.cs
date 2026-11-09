@@ -632,11 +632,11 @@ namespace DoodleNote.DictationHelper.Tests
                 expect(PendingClipboard.RecoveryVerdict.OursByWrite, facts(stage, 3), view(9, OurWrite.Complete, 8, false), same, stage + ": (a) our complete write, within our own operations");
             expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("emptied", 4), view(4, OurWrite.None, 0, false), same, "(b) empty at exactly M (journaled under our lock)");
             expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, new RecordFacts { Stage = "restore-emptied", SequenceAtStage = 8, SequenceClosed = 9 }, view(9, OurWrite.None, 0, false), same, "(b) empty at the sequence confirmed after our close");
-            ClipboardView mine = view(12, OurWrite.None, 3, true); mine.OwnerIsUs = true; mine.OwnerAlive = true; mine.OwnedByThisTransaction = true;
+            ClipboardView mine = view(12, OurWrite.None, 3, true); mine.OwnerIsUs = true; mine.OwnerAlive = true;
             expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), mine, same, "ownership alone is no proof any more (an app can add a format without emptying): offered");
-            ClipboardView added = view(12, OurWrite.None, 3, false); added.OwnerIsUs = true; added.OwnerAlive = true; added.OwnedByThisTransaction = true;
+            ClipboardView added = view(12, OurWrite.None, 3, false); added.OwnerIsUs = true; added.OwnerAlive = true;
             expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7), added, same, "(c) refused: our window owns it, but a foreign format was added without emptying");
-            ClipboardView otherTxn = view(12, OurWrite.None, 3, false); otherTxn.OwnerIsUs = true; otherTxn.OwnerAlive = true; otherTxn.OwnedByThisTransaction = false;
+            ClipboardView otherTxn = view(12, OurWrite.None, 3, false); otherTxn.OwnerIsUs = true; otherTxn.OwnerAlive = true;
             expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), otherTxn, same, "our window owns it for ANOTHER transaction: never ours for this one");
             // (a) needs continuity: a manager replaying every format (our sentinel too) after the crash, at a later sequence.
             expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7), view(7 + (uint)PendingClipboard.CloseMoves + 8 + 1, OurWrite.Complete, 8, false), same, "a complete write BEYOND our own operations: a replay, offered, not restored on its own");
@@ -690,7 +690,7 @@ namespace DoodleNote.DictationHelper.Tests
             Func<string, string, LogonNow> now = (key, boot) => new LogonNow { Session = 1, Logon = "3e7", SessionKey = key, KeyCreatedTick = 1000, BootId = boot, Tick = 5000000 };
             RecordFacts here = new RecordFacts { Session = 1, Logon = "3e7", SessionKey = "a1", BootId = "14", Tick = 4000000 };
             Assert.Equal(LogonMatch.Same, here.Compare(now("a1", "14")), "same session, LUID, key and boot (a clock correction changes nothing)");
-            Assert.Equal(LogonMatch.Different, here.Compare(now("a1", "15")), "another boot (Windows' boot counter): deleted, the clipboard did not survive it");
+            Assert.Equal(LogonMatch.Different, here.Compare(now("a1", "15")), "another boot (Windows' boot counter): nothing proven; offered (see OfferBootStep)");
             Assert.Equal(LogonMatch.Different, new RecordFacts { Session = 1, Logon = "3e7", SessionKey = "a1", Tick = 9000000 }.Compare(now("a1", "")), "the tick count is below the record's: a new boot");
             Assert.Equal(LogonMatch.OtherSession, new RecordFacts { Session = 2, Logon = "3e7", SessionKey = "a1", BootId = "14", Tick = 4000000 }.Compare(now("a1", "14")), "another session of the same user (shared %TEMP%): left alone, not deleted");
             Assert.Equal(LogonMatch.Unknown, here.Compare(now("b2", "14")), "another key in the same boot (a cleaner, a replaced persistent key, a relogin): offered, never deleted");
@@ -730,7 +730,7 @@ namespace DoodleNote.DictationHelper.Tests
             Func<long, string, LogonNow> now = (tick, boot) => new LogonNow { BootId = boot, Tick = tick };
             RecordFacts offered = new RecordFacts { OfferedTick = 1000, OfferedBoot = "14", CreatedUtc = DateTime.UtcNow };
             Assert.Equal(false, PendingClipboard.Expired(offered, now(1000 + day - 1, "14")), "within 24 h of the first offer: still offered");
-            Assert.Equal(true, PendingClipboard.Expired(offered, now(1000 + day + 1, "14")), "24 h after the first offer, on the tick count: deleted");
+            Assert.Equal(true, PendingClipboard.Expired(offered, now(1000 + day + 1, "14")), "24 h after the first offer, on the tick count: expired (a retention policy)");
             Assert.Equal(false, PendingClipboard.Expired(offered, now(1000 + 2 * day, "15")), "another boot: not by this rule (Compare deletes it as another boot)");
             RecordFacts jumped = new RecordFacts { OfferedTick = 1000, OfferedBoot = "14", CreatedUtc = DateTime.UtcNow.AddDays(-40) };
             Assert.Equal(false, PendingClipboard.Expired(jumped, now(5000, "14")), "a wall-clock jump alone never deletes (the tick count decides)");
@@ -782,19 +782,23 @@ namespace DoodleNote.DictationHelper.Tests
         {
             RecordFacts facts = new RecordFacts();
             // Boot A: the transaction crashed before any offer.
-            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "A"), "never offered: nothing to count");
+            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "A", 9000), "never offered: nothing to count");
             // Boot B: first offered (as Offer() records it).
-            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "B"), "first offer in B");
+            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "B", 9000), "first offer in B");
             facts.OfferedTick = 5000; facts.OfferedBoot = "B"; facts.OfferBoots = 1; facts.OfferedSequence = 40;
-            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "B"), "still B: kept");
+            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "B", 9000), "still B: kept");
             // Boot C: offered again, as a fresh offer (sequence numbers restarted).
-            Assert.Equal("reoffer", PendingClipboard.OfferBootStep(facts, "C"), "C: offered again");
+            Assert.Equal("reoffer", PendingClipboard.OfferBootStep(facts, "C", 9000), "C: offered again");
             Assert.Equal(2, facts.OfferBoots, "two boots counted");
             Assert.Equal(0u, facts.OfferedSequence, "the old offered sequence means nothing in C");
             facts.OfferedTick = 3000; facts.OfferedBoot = "C"; facts.OfferedSequence = 7;
-            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "C"), "still C: kept");
+            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "C", 9000), "still C: kept");
             // Boot D: deleted (a policy, not proof the content is no longer wanted).
-            Assert.Equal("delete", PendingClipboard.OfferBootStep(facts, "D"), "D: deleted");
+            Assert.Equal("delete", PendingClipboard.OfferBootStep(facts, "D", 9000), "D: deleted (the boot limit is a policy)");
+            // Without a boot counter: a tick count below the offer's is another boot.
+            RecordFacts noCounter = new RecordFacts { OfferedTick = 50000, OfferBoots = 1, OfferedSequence = 3 };
+            Assert.Equal("keep", PendingClipboard.OfferBootStep(noCounter, "", 60000), "no counter, later tick: the same boot");
+            Assert.Equal("reoffer", PendingClipboard.OfferBootStep(noCounter, "", 1000), "no counter, earlier tick: another boot");
         }
 
         public static void ARecoveryJournalNeverCarriesAnotherBootsSequences()
@@ -871,7 +875,7 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(2, PendingClipboard.NextStep(true, 2, PendingClipboard.RetryKind.Busy), "a busy clipboard waits on its step");
             Assert.Equal(PendingClipboard.RetryKind.Check, PendingClipboard.KindAfter(PendingClipboard.RecoverResult.Failed, false), "RecoverLeftover (start, delivery) never consumes a step");
             Assert.Equal(PendingClipboard.RetryKind.Failed, PendingClipboard.KindAfter(PendingClipboard.RecoverResult.Failed, true), "the timer's failed attempt");
-            Assert.Equal(PendingClipboard.RetryKind.Busy, PendingClipboard.KindAfter(PendingClipboard.RecoverResult.Busy, true), "the timer finds the clipboard busy");
+            Assert.Equal(PendingClipboard.RetryKind.Pending, PendingClipboard.KindAfter(PendingClipboard.RecoverResult.Busy, true), "the timer finds the clipboard busy (or the key unavailable): backs off, never a tight loop");
             Assert.Equal(PendingClipboard.RetryKind.Pending, PendingClipboard.KindAfter(PendingClipboard.RecoverResult.Pending, true), "the timer finds it still ambiguous");
         }
 

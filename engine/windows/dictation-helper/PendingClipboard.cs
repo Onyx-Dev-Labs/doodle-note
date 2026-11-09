@@ -317,14 +317,6 @@ namespace DoodleNote.DictationHelper
             if (now != 0) StageClosed(record, now);
         }
 
-        /// <summary>The transaction whose EmptyClipboard (by this helper) was the last one: only it can be proven ours by ownership.</summary>
-        static volatile string lastEmptiedBy;
-        public static string LastEmptiedBy { get { return lastEmptiedBy; } }
-        /// <summary>This helper just emptied the clipboard for this transaction (so our window owns it for this one only).</summary>
-        public static void NoteEmptied(PendingRecord record) { lastEmptiedBy = record != null ? record.Id : null; }
-        static void NoteEmptied(string id) { lastEmptiedBy = id; }
-        /// <summary>Our window still owns the clipboard but its content is not exactly ours: proof (c) may not apply any more.</summary>
-        public static void ForgetOwnership() { lastEmptiedBy = null; }
 
         /// <summary>A restore ran but the record must be kept (its stage could not be journaled): checked again later.</summary>
         public static void Keep(PendingRecord record)
@@ -334,7 +326,7 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>A restore result that leaves nothing to do later (anything but "unrestored").</summary>
-        public static bool Settled(string restoreResult) { return restoreResult != "unrestored"; }
+        public static bool Settled(string restoreResult) { return restoreResult != "unrestored" && restoreResult != "user-changed"; }
 
         /// <summary>
         /// The transaction is over for this delivery: its record is deleted when the restore completed (or
@@ -394,7 +386,13 @@ namespace DoodleNote.DictationHelper
         static void WriteStateJson(string path, string json)
         {
             string tmp = path + ".tmp";
-            File.WriteAllText(tmp, json);
+            // Flushed to the disk before it replaces the state file, so a crash never leaves a zeroed journal.
+            byte[] bytes = Encoding.UTF8.GetBytes(json);
+            using (FileStream stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                stream.Write(bytes, 0, bytes.Length);
+                stream.Flush(true);
+            }
             if (File.Exists(path)) File.Replace(tmp, path, null); // atomic replacement
             else File.Move(tmp, path);
         }
@@ -480,7 +478,7 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>What a check of a kept record came to (it decides the retry schedule).</summary>
-        internal enum RecoverResult { Done, Failed, Pending, Busy }
+        internal enum RecoverResult { Done, Failed, Pending, Busy, Foreign }
 
         /// <summary>
         /// How a check moves the record's backoff (see NextStep): it ADVANCES on a failed restore attempt or a
@@ -521,7 +519,10 @@ namespace DoodleNote.DictationHelper
         internal static RetryKind KindAfter(RecoverResult result, bool fromTimer)
         {
             if (!fromTimer) return RetryKind.Check;
-            return result == RecoverResult.Busy ? RetryKind.Busy : result == RecoverResult.Pending ? RetryKind.Pending : RetryKind.Failed;
+            // A check that could not decide now (the clipboard busy, a file or the key unavailable) backs off like a pending one:
+            // 3, 10, 30, 60, 120 s, then the next helper start; never a tight loop. (RetryKind.Busy, 1 s on the same step, is
+            // only for waiting out a delivery of ours in flight.)
+            return result == RecoverResult.Failed ? RetryKind.Failed : RetryKind.Pending;
         }
 
         /// <summary>The retry step a kept record is on (tests); -1 when none is scheduled.</summary>
@@ -559,7 +560,7 @@ namespace DoodleNote.DictationHelper
         /// <summary>Under gate.</summary>
         static void AfterCheck(string id, RecoverResult result, bool fromTimer)
         {
-            if (result == RecoverResult.Done) { CancelRetry(id); return; }
+            if (result == RecoverResult.Done || result == RecoverResult.Foreign) { CancelRetry(id); return; } // another session's: not ours to retry
             ScheduleRetry(id, KindAfter(result, fromTimer));
         }
 
@@ -588,7 +589,16 @@ namespace DoodleNote.DictationHelper
                     string id = match.Groups[1].Value;
                     bool isState = match.Groups[2].Value == "state";
                     if (isState && !match.Groups[3].Success) { states.Add(id); continue; }
-                    if (isState) continue; // a state .tmp: replaced atomically by its writer, removed with its record
+                    if (isState)
+                    {
+                        // A state .tmp is replaced atomically by its writer and removed with its record; one left with no state
+                        // file, older than 10 minutes, is a stray (no payload depends on it).
+                        if (File.Exists(StatePath(id))) continue;
+                        try { if (DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < TimeSpan.FromMinutes(10)) continue; } catch (Exception) { continue; }
+                        TryDelete(path);
+                        Wire.Log("a stray state .tmp (" + name.Substring(Prefix.Length) + ") was deleted");
+                        continue;
+                    }
                     if (File.Exists(StatePath(id)) || writing.Contains(id) || inFlight.Contains(id)) continue;
                     // Only an orphan old enough not to be another session's helper mid-step (writing or deleting it).
                     try { if (DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < TimeSpan.FromMinutes(10)) continue; } catch (Exception) { continue; }
@@ -686,10 +696,19 @@ namespace DoodleNote.DictationHelper
                 return "its state file could not be read now (" + error.GetType().Name + "); kept";
             }
             Dictionary<string, object> state = Wire.Parse(text);
-            if (state == null) { DeleteId(id, "a corrupt state file"); return "corrupt state; deleted"; }
+            if (state == null)
+            {
+                // A state file read in full that does not parse. Its payload may still be whole: then the record is kept and
+                // OFFERED (a fresh journal with no stage authority, stamped with this helper's identity), never deleted.
+                string kept = RebuildState(id);
+                if (kept == "busy") { result = RecoverResult.Busy; reply["result"] = "busy"; return "a corrupt state file; its payload could not be read now; kept"; }
+                if (kept != "rebuilt") { DeleteId(id, "a corrupt state file and no usable payload (" + kept + ")"); return "corrupt state, no usable payload; deleted"; }
+                Wire.Log("clipboard record " + id.Substring(0, 8) + ": a corrupt state file was rebuilt from its payload (no stage authority); offered");
+                return RecoverOne(id, out result, byUser, expectSequence, reply);
+            }
             RecordFacts facts = RecordFacts.Of(state);
             // First of all: another session's record (same user, same boot, shared %TEMP%) is never touched here.
-            if (facts.Compare(Now()) == LogonMatch.OtherSession) { result = RecoverResult.Busy; reply["result"] = "busy"; return "another session's record; left to it"; }
+            if (facts.Compare(Now()) == LogonMatch.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record; left to it"; }
             if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid, facts.PidStart)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its helper (pid " + facts.Pid + ") still runs; left to it"; }
             if (inFlight.Contains(id)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "in flight here"; }
             if (facts.Stage == "saved") { DeleteId(id, "nothing had been emptied"); return "stage saved: nothing to put back"; }
@@ -801,7 +820,7 @@ namespace DoodleNote.DictationHelper
                     // however old it is), measured on the tick count from the first offer.
                     // Offered in an earlier boot and not answered: offered once more in this boot (a fresh offer: sequence
                     // numbers restarted), and deleted when a second reboot finds it still unanswered.
-                    if (OfferBootStep(facts, bootId) == "delete")
+                    if (OfferBootStep(facts, bootId, (long)Native.GetTickCount64()) == "delete")
                     {
                         DeleteId(id, "offered in two boots without an answer");
                         return "offered in two boots without an answer; deleted";
@@ -830,6 +849,15 @@ namespace DoodleNote.DictationHelper
                 }
                 int beforeEmpty = TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_BEFORE_EMPTY_MS", 0);
                 if (beforeEmpty > 0) Thread.Sleep(beforeEmpty); // test build only: die before the recovery empties
+                // EmptyClipboard waits on a live foreign owner's WM_DESTROYCLIPBOARD (up to ~5 s on a hung one) while we hold the
+                // lock: an owner that does not answer a WM_NULL now is not asked at all (kept, tried again later).
+                string ownerProblem = view.OwnerAlive && !view.OwnerIsUs ? ClipboardText.OwnerUnresponsive() : null;
+                if (ownerProblem != null)
+                {
+                    result = RecoverResult.Failed;
+                    reply["result"] = "busy";
+                    return "the clipboard's owner is not responding (" + ownerProblem + "); nothing emptied, kept";
+                }
                 if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_RECOVERY_EMPTY") == "1" || !Native.EmptyClipboard())
                 {
                     result = RecoverResult.Failed;
@@ -837,7 +865,6 @@ namespace DoodleNote.DictationHelper
                     journal = null;
                     return "the clipboard could not be emptied; kept for a retry (" + verdict + ")";
                 }
-                NoteEmptied(id);
                 bool journaled = Stage(journal, "recovering-emptied", Native.GetClipboardSequenceNumber());
                 int stall = TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_MS", 0);
                 if (stall > 0) Thread.Sleep(stall); // test build only: die with the clipboard emptied by the recovery
@@ -863,6 +890,38 @@ namespace DoodleNote.DictationHelper
                 if (journal != null) ConfirmClosed(journal);
             }
             return outcome;
+        }
+
+        /// <summary>
+        /// Under gate: a state file that does not parse is replaced by a fresh one with stage "unknown" (it proves nothing: the
+        /// record can only be offered) when the payload decrypts and names this record. rebuilt | busy | none | corrupt.
+        /// </summary>
+        static string RebuildState(string id)
+        {
+            string payload = PayloadPath(id);
+            if (!File.Exists(payload)) { string adopted = AdoptPayload(id); if (adopted != "adopted") return adopted; }
+            byte[] bytes;
+            try { bytes = File.ReadAllBytes(payload); }
+            catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
+            string nonce;
+            try
+            {
+                byte[] plain = ProtectedData.Unprotect(bytes, Entropy, DataProtectionScope.CurrentUser);
+                using (BinaryReader reader = new BinaryReader(new MemoryStream(plain), Encoding.UTF8))
+                {
+                    if (reader.ReadString() != "DNCB3" || reader.ReadString() != id) return "corrupt";
+                    nonce = reader.ReadString();
+                }
+            }
+            catch (CryptographicException error)
+            {
+                int hr = System.Runtime.InteropServices.Marshal.GetHRForException(error);
+                return hr == unchecked((int)0x80090005) || hr == unchecked((int)0x8007000D) ? "corrupt" : "busy";
+            }
+            catch (EndOfStreamException) { return "corrupt"; }
+            PendingRecord record = new PendingRecord(id, nonce) { Persisted = true, Stage = "unknown" };
+            try { WriteState(record); return "rebuilt"; }
+            catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
         }
 
         /// <summary>Under gate: a complete .bin.tmp (decrypts, names this record) is moved into place. adopted | busy | none | corrupt.</summary>
@@ -979,9 +1038,12 @@ namespace DoodleNote.DictationHelper
         /// does not count that boot). In a boot after that it is deleted. "reoffer": offered in an earlier boot, so the
         /// offer starts again here (sequence numbers restarted); "delete"; "keep".
         /// </summary>
-        internal static string OfferBootStep(RecordFacts facts, string bootNow)
+        internal static string OfferBootStep(RecordFacts facts, string bootNow, long tickNow)
         {
-            if (facts.OfferedTick == 0 || facts.OfferedBoot.Length == 0 || bootNow.Length == 0 || facts.OfferedBoot == bootNow) return "keep";
+            if (facts.OfferedTick == 0) return "keep";
+            // Another boot: the boot counters differ, or (when a counter is unknown) the tick count is below the offer's.
+            bool otherBoot = facts.OfferedBoot.Length > 0 && bootNow.Length > 0 ? facts.OfferedBoot != bootNow : tickNow < facts.OfferedTick;
+            if (!otherBoot) return "keep";
             if (facts.OfferBoots >= 2) return "delete";
             facts.OfferBoots = 2;
             facts.OfferedSequence = 0;
@@ -1027,7 +1089,7 @@ namespace DoodleNote.DictationHelper
             catch (Exception error) { Wire.Log("ERROR: the retention check failed: " + error.GetType().Name); }
         }
 
-        public enum RecoveryVerdict { Stale, Untouched, Pending, OtherSession, OursByWrite, OursByOwner, InterruptedEmpty }
+        public enum RecoveryVerdict { Stale, Untouched, Pending, OtherSession, OursByWrite, InterruptedEmpty }
 
         static bool PostEmpty(string stage) { return stage == "emptied" || stage == "restore-emptied" || stage == "recovering-emptied"; }
 
@@ -1220,8 +1282,6 @@ namespace DoodleNote.DictationHelper
     internal sealed class ClipboardView
     {
         public bool OwnerAlive, OwnerIsUs, OnlySavedFormats;
-        /// <summary>Our live window owns the clipboard and our last EmptyClipboard was for THIS transaction.</summary>
-        public bool OwnedByThisTransaction;
         /// <summary>Every saved format is present with identical content, and nothing else (but synthesized formats).</summary>
         public bool HoldsSavedExactly;
         public OurWrite OurWrite;
@@ -1247,7 +1307,6 @@ namespace DoodleNote.DictationHelper
             IntPtr owner = Native.GetClipboardOwner();
             view.OwnerIsUs = owner != IntPtr.Zero && owner == Ui.ClipboardWindow;
             view.OwnerAlive = owner != IntPtr.Zero && Native.IsWindow(owner);
-            view.OwnedByThisTransaction = view.OwnerIsUs && view.OwnerAlive && PendingClipboard.LastEmptiedBy == recordId;
             view.Sequence = Native.GetClipboardSequenceNumber();
             view.RestoreOps = saved.RestoreOps;
             List<uint> present = new List<uint>();
