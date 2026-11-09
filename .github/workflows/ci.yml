@@ -118,6 +118,18 @@ jobs:
       - name: Desktop tests
         run: pnpm --filter desktop test
 
+      # Round 24 (Astra): the overlay's cards rendered for real (Electron's Chromium, the bundled font, the window
+      # size the app gives them): the buttons and a line of the dictated text stay in view for every notice variant.
+      - name: Overlay card layout (rendered)
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $fixtures = Join-Path $env:RUNNER_TEMP "overlay-layout.json"
+          pnpm --filter desktop exec tsx scripts/overlay-layout-fixtures.ts $fixtures
+          if ($LASTEXITCODE -ne 0) { throw "Overlay layout fixtures failed" }
+          pnpm --filter desktop exec electron scripts/test-overlay-layout.cjs $fixtures
+          if ($LASTEXITCODE -ne 0) { throw "Overlay card layout check failed" }
+
       # Bark's Windows helper is C# built with the .NET Framework 4.8 compiler that
       # ships with Windows (no SDK). Its logic tests run before packaging.
       - name: Build and test the Windows dictation helper

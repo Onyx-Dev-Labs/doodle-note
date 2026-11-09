@@ -9,6 +9,11 @@ export type OverlayMode = 'rest' | 'session' | 'message'
 
 export interface OverlayView {
   visible: boolean
+  /**
+   * Windows (round 24): the clipboard offer the card shows; its buttons name it, so a click acts only on the card
+   * the user saw (absent on every other view).
+   */
+  offerRecord?: string
   mode: OverlayMode
   /** The dock edge, so the page can lay the resting and live pills out along it. */
   edge: PillEdge
@@ -135,10 +140,23 @@ const WINDOW = {
   warningLine: 26,
   detailBlock: 64,
   message: { width: 380, height: 132 },
+  /** Round 24: a card grows to fit its text (estimated), up to this; the page bounds every block too. */
+  messageMax: 300,
   /** Windows: the clipboard offer card (a longer explanation and two buttons). */
   offer: { width: 460, height: 236 },
   diff: { width: 480, height: 300 }
 } as const
+
+/** The card's fixed parts in px: the root's padding, the card's border and padding, and the buttons' row. */
+const CARD_FIXED = 14 + 3.2 + 20 + 22
+
+/** About how many lines a text takes at `perLine` characters a line (counted in code points). */
+function textLines(text: string, perLine: number): number {
+  if (!text) return 0
+  return text
+    .split('\n')
+    .reduce((n, part) => n + Math.max(1, Math.ceil(Array.from(part).length / perLine)), 0)
+}
 
 /** Window size the page needs for a view; the overlay docks a window of this size. */
 export function overlaySize(view: OverlayView): Size {
@@ -151,13 +169,35 @@ export function overlaySize(view: OverlayView): Size {
       height: Math.max(WINDOW.message.height, Math.min(WINDOW.diff.height, 110 + lines * 19))
     }
   }
-  if (view.mode === 'message' && (view.controls.offerRestore || view.controls.offerDelete))
-    return { ...WINDOW.offer }
-  if (view.mode === 'message')
-    // A warning line on a card (Windows: the clipboard could not be fully put back) needs room.
-    return view.warning
-      ? { width: WINDOW.message.width, height: WINDOW.message.height + WINDOW.warningLine }
-      : { ...WINDOW.message }
+  if (view.mode === 'message') {
+    // Round 24: room for the title, the warning and at least ONE line of the text (an offer card: its whole
+    // explanation, up to the page's three lines), and always the buttons (Astra rendered a too-large warning that
+    // pushed Copy text and Dismiss out of a fixed 158 px window). An estimate of the lines (conservative characters
+    // per line for the card's width), never less than the old fixed sizes, at most messageMax; the page bounds
+    // every block too, so the buttons stay in view whatever the estimate.
+    const offer = !!(view.controls.offerRestore || view.controls.offerDelete || view.offerRecord)
+    const per = offer
+      ? { title: 50, warning: 60, detail: 64 }
+      : { title: 40, warning: 48, detail: 50 }
+    const title = Math.min(6, textLines(view.title, per.title))
+    const warning = Math.min(8, textLines(view.warning ?? '', per.warning))
+    const detail = offer ? Math.min(3, textLines(view.detail, per.detail)) : view.detail ? 1 : 0
+    const needed =
+      CARD_FIXED +
+      title * 18.2 +
+      (warning ? 6 + warning * 16.2 : 0) +
+      (detail ? 6 + detail * 16.2 : 0) +
+      6
+    const floor = offer
+      ? WINDOW.offer.height
+      : view.warning
+        ? WINDOW.message.height + WINDOW.warningLine
+        : WINDOW.message.height
+    return {
+      width: offer ? WINDOW.offer.width : WINDOW.message.width,
+      height: Math.max(floor, Math.min(WINDOW.messageMax, Math.ceil(needed)))
+    }
+  }
   if (view.mode === 'session') {
     if (view.edge !== 'bottom') {
       const status = view.showStatus && !(view.tone === 'active' && view.title === 'Listening')
