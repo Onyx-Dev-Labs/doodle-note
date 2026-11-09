@@ -88,6 +88,13 @@ function replaceFormat(format, bytes, times = 1) {
     CloseClipboard()
   }
 }
+/** One format's bytes as another app reads them (null when absent). */
+function readFormat(format) {
+  if (!open()) return null
+  const b = readBytes(format)
+  CloseClipboard()
+  return b
+}
 function addFormat() {
   if (!open()) throw new Error('the clipboard could not be opened')
   setBytes(RegisterClipboardFormatW('DoodleNote.CI.Added'), Buffer.from('added later'))
@@ -799,26 +806,38 @@ async function main() {
     await h.stop()
   }
 
-  // 15. Astra P1-A: another app replaces our write's ANSI text (CF_TEXT) with other bytes, keeping our Unicode text,
-  // markers and sentinel (the owner stays our window): not our write any more. Kept, offered, their bytes stay.
-  {
-    copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
-    await a.ready
-    const reply = a.req('__clipboard-txn', { text: 'dictated text N', holdMs: 2500 })
-    for (let i = 0; i < 200 && text() !== 'dictated text N'; i++) await sleep(50)
-    await sleep(700)
-    replaceFormat(1, Buffer.from('replaced ANSI\0', 'latin1'))
-    const result = await reply
-    await a.stop()
-    check('an ANSI form replaced after our write: kept, not restored over', !!result && /^owned-but-changed\/unrestored\|/.test(String(result.result)) && recordFiles().length === 2, `${JSON.stringify(result)}; ${recordFiles()}`)
-    const h = start(release)
-    await h.ready
-    const listed = await h.req('clipboard-offers')
-    check('and it is offered', !!listed && listed.offers.length === 1, JSON.stringify(listed))
-    const offer = listed && listed.offers[0]
-    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
-    await h.stop()
+  // 15. P1-A: another app replaces ONE text form of our write (CF_TEXT, CF_OEMTEXT or CF_LOCALE) without emptying,
+  // keeping our Unicode text, markers and sentinel (the owner stays our window); before our write's confirmation
+  // (held open by a test hook, so the order is fixed) and between the confirmation and the paste gate. Every case:
+  // not our write any more, kept and offered, their bytes stay, nothing pasted or restored over them.
+  for (const [format, name, bytes] of [
+    [1, 'CF_TEXT', Buffer.from('replaced ANSI\0', 'latin1')],
+    [7, 'CF_OEMTEXT', Buffer.from('replaced OEM\0', 'latin1')],
+    [16, 'CF_LOCALE', Buffer.from([0x07, 0x04, 0x00, 0x00])]
+  ]) {
+    for (const when of ['before the confirmation', 'after the confirmation']) {
+      copyMulti(user)
+      const before = when.startsWith('before')
+      const a = start(testops, { DICTATION_HELPER_TEST: '1', ...(before ? { DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500' } : {}) })
+      await a.ready
+      const dictated = `dictated text N ${name} ${when}`
+      const reply = a.req('__clipboard-txn', { text: dictated, holdMs: before ? 300 : 2500 })
+      for (let i = 0; i < 200 && text() !== dictated; i++) await sleep(50)
+      if (!before) await sleep(700)
+      replaceFormat(format, bytes)
+      const result = await reply
+      await a.stop()
+      const kept = recordFiles().length
+      const theirs = readFormat(format)
+      check(`${name} replaced ${when}: kept, not restored over`, !!result && /^owned-but-changed\/unrestored\|/.test(String(result.result)) && kept === 2 && !!theirs && theirs.equals(bytes), `${JSON.stringify(result)}; ${kept}; ${theirs && theirs.toString('hex')}`)
+      const h = start(release)
+      await h.ready
+      const listed = await h.req('clipboard-offers')
+      check(`${name} replaced ${when}: offered`, !!listed && listed.offers.length === 1, JSON.stringify(listed))
+      const offer = listed && listed.offers[0]
+      if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+      await h.stop()
+    }
   }
 
   // 16. Astra P1-A: the confirmation rejects our write because the sequence moved too far (another app rewrote our
