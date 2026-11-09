@@ -1858,10 +1858,11 @@ namespace DoodleNote.DictationHelper
         /// "unlocked" or "nosize" (zero is not a size) for a listed format, a missing registered name, a failed EMF
         /// rebuild, the deadline running out. Null without `retry`: an overrun, or the clipboard changed.
         /// </summary>
-        internal static SavedClipboard Judge(Func<string, int, string> request, int timeoutMs, Func<uint> sequenceNow, out bool retry, out string line)
+        internal static SavedClipboard Judge(Func<string, int, string> request, int timeoutMs, Func<uint> sequenceNow, out bool retry, out string line, bool allowUnrendered = false)
         {
             retry = true;
             line = null;
+            if (timeoutMs <= 0) { line = "NOT ESTABLISHED: no time left for a listing (nothing requested); not pasting"; return null; } // S4: no 1 ms request
             Stopwatch watch = Stopwatch.StartNew();
             Func<int> left = () => timeoutMs - (int)watch.ElapsedMilliseconds;
             string list = request("list", Math.Max(1, Math.Min(PerFormatMs, left())));
