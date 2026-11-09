@@ -73,6 +73,11 @@ function open() {
       null,
       null
     )
+  // Round 23 (Astra S4): never a NULL-window open by this process either: a failed window is a failed open.
+  if (!readWindow) {
+    lastOpenError = GetLastError()
+    return false
+  }
   for (let i = 0; i < 150; i++) {
     if (OpenClipboard(readWindow)) return true
     lastOpenError = GetLastError()
@@ -338,6 +343,7 @@ const block = (t) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0
 // Round 22 (Opus): this process opens with a window of its own too (a NULL-window open can be taken over).
 const CreateWindowExW = user32.func('void* __stdcall CreateWindowExW(uint32 ex, str16 cls, str16 name, uint32 style, int x, int y, int w, int h, void* parent, void* menu, void* inst, void* param)')
 const own = CreateWindowExW(0, 'STATIC', 'DoodleNote CI holder', 0, 0, 0, 0, 0, null, null, null, null)
+if (!own) { console.error('the holder window could not be created'); process.exit(3) } // round 23: never a NULL open
 let opened = false
 for (let i = 0; i < 150 && !(opened = OpenClipboard(own)); i++) block(20)
 if (opened) {
@@ -367,6 +373,7 @@ const block = (t) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0
 // Round 22 (Opus): this process opens with a window of its own too (a NULL-window open can be taken over).
 const CreateWindowExW = user32.func('void* __stdcall CreateWindowExW(uint32 ex, str16 cls, str16 name, uint32 style, int x, int y, int w, int h, void* parent, void* menu, void* inst, void* param)')
 const own = CreateWindowExW(0, 'STATIC', 'DoodleNote CI holder', 0, 0, 0, 0, 0, null, null, null, null)
+if (!own) { console.error('the holder window could not be created'); process.exit(3) } // round 23: never a NULL open
 let opened = false
 for (let i = 0; i < 150 && !(opened = OpenClipboard(own)); i++) block(20)
 if (opened) {
@@ -1954,6 +1961,221 @@ async function main() {
     cleanup()
   }
 
+  // 35b. Round 23 (Opus S-D): a copy carrying "Clipboard Viewer Ignore" is never written to disk (in memory only),
+  // and still goes back whole (the flag as presence only).
+  {
+    const words = 'viewer ignore ' + identity
+    const {
+      h,
+      ok,
+      seed: s
+    } = await seededBy({}, [`#13|${u16(words)}`, 'Clipboard Viewer Ignore|-'])
+    let everRecord = false
+    const watch = setInterval(() => {
+      if (recordFiles().length > 0) everRecord = true
+    }, 5)
+    const live = await h.req('__clipboard-txn', { text: 'dictated text VI', holdMs: 300 })
+    clearInterval(watch)
+    const flag = available('Clipboard Viewer Ignore')
+    const now = text()
+    await h.stop()
+    check(
+      'Clipboard Viewer Ignore (round 23): never written to disk; the put-back restores the text and the flag',
+      ok &&
+        !!live &&
+        /^restored\|/.test(String(live.result)) &&
+        flag &&
+        now === words &&
+        !everRecord,
+      `${JSON.stringify(s)}; ${JSON.stringify(live)}; flag ${flag}; text ${now}; a record seen: ${everRecord}`
+    )
+    cleanup()
+  }
+
+  // 35c. Round 23, the one rule (Opus S-B): a delayed-render text owner that renders nothing for its text while its
+  // CF_LOCALE reads: nothing with the user's content would go back, so no paste and the clipboard is left alone.
+  {
+    const {
+      h,
+      ok,
+      seed: s
+    } = await seededBy({}, ['#13|-', `#16|${Buffer.from([9, 4, 0, 0]).toString('base64')}`])
+    const before = observe()
+    const live = await h.req('__clipboard-txn', { text: 'dictated text DL', holdMs: 300 })
+    const after = observe()
+    const saving = saveLines(h)
+    const why = h.logs.find((l) => /not pasting: the clipboard could not be saved/.test(l))
+    await h.stop()
+    check(
+      'the text unrendered by its owner, CF_LOCALE readable (round 23, the one rule): not established, no paste, the clipboard untouched, the reason unrendered',
+      ok &&
+        !!live &&
+        live.result === 'no-save' &&
+        after.sequence === before.sequence &&
+        after.count === before.count &&
+        /\(unrendered\)/.test(String(why)) &&
+        recordFiles().length === 0,
+      `${JSON.stringify(s)}; ${JSON.stringify(live)}; sequence ${before.sequence} -> ${after.sequence}; ${saving.join(' / ')}; ${why}`
+    )
+    console.log(`# 35c: ${saving.join(' / ') || '(no save line)'}`)
+    cleanup()
+  }
+
+  // 36b. Round 23 (Opus SF3): the incomplete-enumeration hook at the two call sites the unit test cannot reach: the
+  // confirmation (rejects: kept, offered) and the content proof of the restore (with the quick proof failing too:
+  // kept, never restored on an incomplete look). The user's Restore then puts the clipboard back.
+  for (const [env, expect] of [
+    [{ DICTATION_HELPER_TEST_ENUM_INCOMPLETE: 'confirm' }, /^owned-but-changed\/unrestored\|/],
+    [
+      {
+        DICTATION_HELPER_TEST_ENUM_INCOMPLETE: 'still-there',
+        DICTATION_HELPER_TEST_ZERO_SEQUENCE: 'still-ours'
+      },
+      /^unrestored\|/
+    ]
+  ]) {
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
+    await a.ready
+    const live = await a.req('__clipboard-txn', { text: 'dictated text IE', holdMs: 300 })
+    await a.stop()
+    const files = recordFiles().length
+    const r = start(release)
+    await r.ready
+    await sleep(1000)
+    const listed = await r.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const done = offer ? await restoreConfirming(r, offer) : null
+    await r.stop()
+    const back = observe()
+    check(
+      `an incomplete enumeration at ${env.DICTATION_HELPER_TEST_ENUM_INCOMPLETE}: never taken as proof (kept, offered; the user's Restore puts it back)`,
+      !!live &&
+        expect.test(String(live.result)) &&
+        files > 0 &&
+        !!done &&
+        done.result === 'restored' &&
+        back.text === user &&
+        recordFiles().length === 0,
+      `${JSON.stringify(live)}; ${files} files; ${JSON.stringify(done)}; text ${back.text}`
+    )
+    cleanup()
+  }
+
+  // 37b. Round 23 (Astra B1): the write's own rollback (its emptied stage not journaled: test hook) throws before its
+  // put-back, or after it but before its result is assigned. Emptied is recorded first: never "untouched"; the record
+  // is kept (offered and put back by the user's Restore, or found already whole on the clipboard and deleted).
+  for (const where of ['before-set', 'after-set']) {
+    copyMulti(user)
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_FAIL_JOURNAL: 'emptied',
+      DICTATION_HELPER_TEST_THROW_IN_ROLLBACK: where
+    })
+    await a.ready
+    const live = await a.req('__clipboard-txn', { text: 'dictated text RB', holdMs: 300 })
+    const threw = a.logs.find((l) =>
+      /the clipboard write threw .* after emptying the clipboard/.test(l)
+    )
+    await a.stop()
+    const files = recordFiles().length
+    const r = start(release)
+    await r.ready
+    await sleep(1000)
+    const listed = await r.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const done = offer ? await restoreConfirming(r, offer) : null
+    await r.stop()
+    const back = observe()
+    check(
+      `the write's rollback throws ${where}: reported unrestored (never untouched), the record kept; ${where === 'before-set' ? "offered, and the user's Restore puts it back" : 'the saved content already whole there: deleted without writing'}`,
+      !!live &&
+        /^write-failed\/unrestored\|/.test(String(live.result)) &&
+        !!threw &&
+        files > 0 &&
+        (where === 'before-set' ? !!done && done.result === 'restored' : !offer) &&
+        back.text === user &&
+        back.extra === 'extra bytes for ' + user &&
+        recordFiles().length === 0,
+      `${JSON.stringify(live)}; ${threw}; ${files} files; ${JSON.stringify(listed)}; ${JSON.stringify(done)}; text ${back.text}`
+    )
+    cleanup()
+  }
+
+  // 39. Round 23 (Astra B2, Opus SF2): an INCOMPLETE record (a class-3 skip of FileContents) whose retained part is back on
+  // the clipboard is never deleted as "already there". Two ways to get there: the live put-back succeeded but its
+  // stage could not be journaled (kept), and the helper died with every retained format set back. Its offer says it is
+  // incomplete; a Restore without acceptIncomplete empties nothing ("incomplete"); with it, "restored-partially"
+  // names FileContents and the record is settled and deleted.
+  for (const path of ['journal failed', 'killed after the put-back']) {
+    const words = 'incomplete record ' + identity
+    const { h, ok } = await seededBy(
+      path === 'journal failed'
+        ? { DICTATION_HELPER_TEST_FAIL_JOURNAL: 'restore-emptied' }
+        : { DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS: '15000' },
+      [`#13|${u16(words)}`, `${EXTRA}|${b64('extra bytes for ' + words)}`, 'FileContents|-']
+    )
+    const reply = h.req('__clipboard-txn', { text: 'dictated text IR', holdMs: 300 })
+    let live = null
+    if (path === 'journal failed') {
+      live = await reply
+      await h.stop()
+    } else {
+      const reached = await waitStage('restore-emptied')
+      await sleep(800)
+      await h.kill()
+      live = { result: reached ? 'killed in its put-back' : 'did not reach its put-back' }
+    }
+    const files = recordFiles().length
+    const there = observe()
+    const r = start(release)
+    await r.ready
+    await sleep(1000)
+    const listed = await r.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const before = observe()
+    const refused = offer
+      ? await r.req('clipboard-restore', { record: offer.record, sequence: offer.sequence })
+      : null
+    const unchanged = observe()
+    const accepted = offer
+      ? await r.req('clipboard-restore', {
+          record: offer.record,
+          sequence:
+            refused && typeof refused.sequence === 'number' ? refused.sequence : offer.sequence,
+          acceptIncomplete: true
+        })
+      : null
+    await sleep(300)
+    const left = recordFiles().length
+    const listedAfter = await r.req('clipboard-offers')
+    await r.stop()
+    const back = observe()
+    check(
+      `an incomplete record whose retained part is back (${path}): offered as incomplete (never deleted as already there); a Restore without acceptIncomplete empties nothing; with it "restored-partially" names FileContents and the record is settled`,
+      ok &&
+        files > 0 &&
+        there.text === words &&
+        !!offer &&
+        offer.incomplete === true &&
+        offer.missing.includes('FileContents (not provided by the app that copied it)') &&
+        !!refused &&
+        refused.result === 'incomplete' &&
+        unchanged.sequence === before.sequence &&
+        !!accepted &&
+        accepted.result === 'restored-partially' &&
+        Array.isArray(accepted.missing) &&
+        accepted.missing.includes('FileContents (not provided by the app that copied it)') &&
+        left === 0 &&
+        !!listedAfter &&
+        listedAfter.offers.length === 0 &&
+        back.text === words &&
+        back.extra === 'extra bytes for ' + words,
+      `${JSON.stringify(live)}; ${files} files; text there ${there.text}; ${JSON.stringify(offer)}; ${JSON.stringify(refused)}; ${JSON.stringify(accepted)}; ${left} left; ${JSON.stringify(listedAfter)}`
+    )
+    cleanup()
+  }
+
   // 38. Round 22 (F7): whether a record's helper still runs cannot be told (test hook): nothing is judged or deleted on
   // that unknown (not offered, the dismiss refused, every file kept); a helper that can tell offers and restores it.
   {
@@ -2152,32 +2374,39 @@ async function main() {
     cleanup()
   }
 
-  // 25e'. Round 21: a seed of ONLY an oversize custom format (no text, so nothing synthesized): a true zero-item save
-  // that is SKIPPED (its provenance kept), never taken for an empty clipboard: the live restore reports "skipped".
+  // 25e'. Round 21: a seed of ONLY an oversize custom format (no text, so nothing synthesized). Round 23 (the one rule):
+  // nothing with the user's content would go back, so the save is not established and nothing is pasted.
   {
     const seeded = seed('only an oversize custom format', [
       [RegisterClipboardFormatW(EXTRA), Buffer.from('y'.repeat(200))]
     ])
     const a = start(testops, { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_CLIP_MAXBYTES: '64' })
     await a.ready
+    const before = observe()
     const live = await a.req('__clipboard-txn', { text: 'dictated text G2', holdMs: 300 })
+    const after = observe()
     const saving = a.logs.find((l) => /saving the clipboard \(attempt/.test(l))
+    const why = a.logs.find((l) => /not pasting: the clipboard could not be saved/.test(l))
     await a.stop()
+    // Round 23, the one rule (a directed change; round 22 asserted a zero-item "skipped" save that emptied it).
     check(
-      'only an oversize custom format: a zero-item save reported "skipped" (never "restored"), the record gone, nothing set back',
+      'only an oversize custom format (round 23, the one rule): not established, no paste, the clipboard untouched, the reason too-large',
       seeded &&
         !!live &&
-        /^skipped\|/.test(String(live.result)) &&
-        recordFiles().length === 0 &&
-        CountClipboardFormats() === 0,
-      `${JSON.stringify(live)}; ${recordFiles()}; ${CountClipboardFormats()} formats; ${saving}`
+        live.result === 'no-save' &&
+        after.sequence === before.sequence &&
+        after.count === before.count &&
+        String(readFormat(RegisterClipboardFormatW(EXTRA))).startsWith('y'.repeat(200)) &&
+        /\(too-large\)/.test(String(why)) &&
+        recordFiles().length === 0,
+      `${JSON.stringify(live)}; sequence ${before.sequence} -> ${after.sequence}; ${recordFiles()}; ${saving}; ${why}`
     )
     cleanup()
   }
 
   // 25e. Opus round 18 B1: a save in which EVERY format is over the cap (the test-build cap hook stands in for the
-  // real 16 MiB per transaction): nothing could be kept, so the live restore reports "skipped" (the contract since
-  // round 4: content the save itself could not keep) and the record is gone; what did fit is set back.
+  // real 16 MiB per transaction, as a 4K screenshot's DIB exceeds it). Round 23 (the one rule): only CF_LOCALE fits,
+  // which is no user content, so the save is not established and the clipboard is left as it was.
   {
     const big = 'x'.repeat(200)
     const seeded = seed('an all-oversize copy', [
@@ -2186,12 +2415,22 @@ async function main() {
     ])
     const a = start(testops, { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_CLIP_MAXBYTES: '64' })
     await a.ready
+    const before = observe()
     const live = await a.req('__clipboard-txn', { text: 'dictated text G', holdMs: 300 })
+    const after = observe()
+    const why = a.logs.find((l) => /not pasting: the clipboard could not be saved/.test(l))
     await a.stop()
+    // Round 23, the one rule (the 4K-screenshot case; round 22 asserted a "skipped" restore of only CF_LOCALE).
     check(
-      'every user format over the cap: the live restore reports "skipped" and the record is gone (only what fit, e.g. the 4-byte CF_LOCALE, is set back)',
-      seeded && !!live && /^skipped\|/.test(String(live.result)) && recordFiles().length === 0,
-      `${JSON.stringify(live)}; ${recordFiles()}; ${CountClipboardFormats()} formats`
+      'every user format over the cap (round 23, the one rule): not established, no paste, the clipboard untouched (only CF_LOCALE fit: no user content), the reason too-large',
+      seeded &&
+        !!live &&
+        live.result === 'no-save' &&
+        after.sequence === before.sequence &&
+        after.text === big &&
+        /\(too-large\)/.test(String(why)) &&
+        recordFiles().length === 0,
+      `${JSON.stringify(live)}; sequence ${before.sequence} -> ${after.sequence}; ${recordFiles()}; ${why}`
     )
     cleanup()
   }
