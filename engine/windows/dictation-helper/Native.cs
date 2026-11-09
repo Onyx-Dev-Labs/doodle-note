@@ -18,6 +18,8 @@ namespace DoodleNote.DictationHelper
         public static extern IntPtr GetKeyboardLayout(uint threadId);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern IntPtr LoadKeyboardLayoutW(string klid, uint flags);
+        [DllImport("user32.dll")]
+        public static extern IntPtr ActivateKeyboardLayout(IntPtr layout, uint flags);
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern int GetLocaleInfoW(uint locale, uint type, out uint value, int chars);
         [DllImport("kernel32.dll", SetLastError = true)]

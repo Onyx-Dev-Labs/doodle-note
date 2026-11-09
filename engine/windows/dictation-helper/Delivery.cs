@@ -1084,21 +1084,34 @@ namespace DoodleNote.DictationHelper
                 {
                     // Abandoned: this thread owns the rollback. If our text was already set, put the
                     // user's content back now; if it put it back while still open (Write), settle.
-                    string outcome;
-                    if (ours.Emptied)
+                    string outcome = "unrestored";
+                    try
                     {
-                        ConfirmWritten(ours, saved);
-                        outcome = saved.Restore(ours);
-                        Wire.Log("the late clipboard write was undone: " + outcome);
+                        if (ours.Emptied)
+                        {
+                            ConfirmWritten(ours, saved);
+                            outcome = saved.Restore(ours);
+                            Wire.Log("the late clipboard write was undone: " + outcome);
+                        }
+                        else outcome = ours.PutBack ?? job.PutBack ?? "untouched";
+                        // A failed put-back stays "unrestored": its record is kept for a retry, and no warning is cleared.
+                        saved.Settle(outcome);
                     }
-                    else outcome = ours.PutBack ?? job.PutBack ?? "untouched";
-                    // A failed put-back stays "unrestored": its record is kept for a retry, and no warning is cleared.
-                    saved.Settle(outcome);
-                    job.Holds = outcome == "unrestored" ? "unknown" : null;
-                    job.Outcome = outcome;
-                    // Whenever it lands (before or after the reply), the app learns what happened.
-                    Wire.Send(Wire.Fields("event", "clipboard", "phase", "late-restore", "id", deliveryId ?? "", "clipboard", outcome));
-                    DeliveriesInFlight.LateEnd();
+                    catch (Exception error)
+                    {
+                        // Nothing more is written on its own: the transaction loses its authority (its record stays offered).
+                        Wire.Log("ERROR: the late rollback failed (" + error.GetType().Name + "); kept as an offer");
+                        outcome = "unrestored";
+                        try { saved.KeepAsOffer("the late rollback failed"); } catch (Exception) { }
+                    }
+                    finally
+                    {
+                        job.Holds = outcome == "unrestored" ? "unknown" : null;
+                        job.Outcome = outcome;
+                        // Whenever it lands (before or after the reply), the app learns what happened.
+                        Wire.Send(Wire.Fields("event", "clipboard", "phase", "late-restore", "id", deliveryId ?? "", "clipboard", outcome));
+                        DeliveriesInFlight.LateEnd();
+                    }
                 }
             });
             thread.IsBackground = true;
@@ -1133,11 +1146,14 @@ namespace DoodleNote.DictationHelper
             ownership = new ClipboardOwnership();
             PendingRecord record = saved != null ? saved.Record : null;
             // Test build only: this write thread uses another input language (KLID, e.g. 00000419), as a user with several has.
+            // CI-only: on a real desktop with one input method for all apps this could switch the user's input language, so
+            // the previous layout is activated again when the write ends (below).
             string layout = TestMode.Env("DICTATION_HELPER_TEST_KEYBOARD_LAYOUT");
-            if (!string.IsNullOrEmpty(layout)) Native.LoadKeyboardLayoutW(layout, 1); // KLF_ACTIVATE, for this thread
+            IntPtr previousLayout = IntPtr.Zero;
+            if (!string.IsNullOrEmpty(layout)) { previousLayout = Native.GetKeyboardLayout(0); Native.LoadKeyboardLayoutW(layout, 1); } // KLF_ACTIVATE
             uint sequenceBeforeOpen = Native.GetClipboardSequenceNumber(); // the put-back trace (log only)
             PutBackTrace trace = null;
-            if (!Open()) return false;
+            if (!Open()) { if (previousLayout != IntPtr.Zero) Native.ActivateKeyboardLayout(previousLayout, 0); return false; }
             bool ok = false;
             try
             {
@@ -1213,6 +1229,7 @@ namespace DoodleNote.DictationHelper
                 bool closed = Native.CloseClipboard();
                 int closeError = Marshal.GetLastWin32Error();
                 if (trace != null) trace.Closed(closed, closeError);
+                if (previousLayout != IntPtr.Zero) Native.ActivateKeyboardLayout(previousLayout, 0); // test build only (see above)
             }
             if (ownership.Emptied)
             {
