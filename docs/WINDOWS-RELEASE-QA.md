@@ -455,22 +455,34 @@ there refuses or fails that proof, never matches. Before the transaction a zero 
 is touched; inside or at the confirmation it rejects our write (kept, as an offer); at the user's Restore nothing is
 emptied. Two cases follow from that contract (CI 25d, 25e): over an originally EMPTY clipboard there is
 nothing to set back, so the restore reports "restored", leaves the clipboard empty and deletes the record (also
-the user's Restore of one kept after a kill); a save in which every format was over the cap (16 MiB per
-transaction) kept nothing of them, so the restore reports "skipped" (only what fit, if anything, is set back), the
-record is deleted and the app's warning names it.
+the user's Restore of one kept after a kill). A save in which every format was over the cap (16 MiB per
+transaction) is, since round 23, NOT established (the one rule below): nothing is pasted and the clipboard is left
+as it was (round 22 established it as a zero-item "skipped" save that emptied the clipboard and put back nothing).
 
 Owner decision (round 22): skip-with-notice vs refuse for owner-unrendered formats. A listed format whose data the
 save cannot read falls in one of three classes. The rest of the save rule stands unchanged.
 
+THE ONE RULE (round 23, owner decision): if nothing with the user's content goes back, the save is not established
+and nothing is pasted. User content excludes CF_LOCALE, the privacy markers, the presence-only flags, our sentinel
+and bookkeeping (OLE, "Preferred DropEffect"). It covers every skip below (class 3, a cap, a policy) when nothing else
+is kept, and a delayed-render text owner that renders nothing for its text while its CF_LOCALE reads. A positively
+empty clipboard is not this case. Stated plainly: a clipboard holding only an oversize image (a 4K screenshot's DIB
+is about 31.6 MiB, over the 16 MiB cap) now refuses to dictate by paste instead of destroying the screenshot; raising
+the cap is the alternative. The user is told why: "Your clipboard holds something too large to save (such as a large
+screenshot), so DoodleNote did not paste with it and left your clipboard as it was. Copy something smaller first, or
+copy the dictated text from DoodleNote and paste it yourself." Every other path that does not paste with the
+clipboard says why too (the owner did not provide it, the owner is not responding, and the rest).
+
 | Class | What | The save | The put-back | What the user is told |
 | --- | --- | --- | --- | --- |
-| 1. Known presence-only flags | Clipboard Viewer Ignore (clipboard viewers and history tools skip an entry that carries it: KeePass sets it, ClipboardUtil.CfnViewerIgnore; Ditto honours it); MSDEVColumnSelect, MSDEVLineSelect and VisualStudioEditorOperationsLineCutCopyClipboardTag (Scintilla and Visual Studio: the copy was a column or a whole line; Scintilla's ScintillaWin.cxx checks their presence only) | saved as presence only, never read | set again with no data (presence) | nothing (the copy goes back whole) |
-| 2. Privacy markers | ExcludeClipboardContentFromMonitorProcessing, CanIncludeInClipboardHistory, CanUploadToCloudClipboard, present but not cleanly read (over their cap, none, nosize, unlocked) | established; the marker forces the conservative markers | the three markers set to "exclude" | nothing (the content stays excluded); such a save is never written to disk |
-| 3. Anything else its owner did not render | none, nosize or unlocked for a listed format under the reader's PROVEN hold with the sequence unchanged, on the second whole-save attempt (the first stays strict) | established with a NAMED, REPORTED skip, only beside content that does go back (when no format with data was provided, nothing would come back: not established, no paste) | everything else; the result is "skipped" | "Your clipboard was put back except: FileContents (not provided by the app that copied it)." An offer of such a record says so on its card before Restore |
+| 1. Known presence-only flags (matched ignoring case, as RegisterClipboardFormat is) | Clipboard Viewer Ignore (clipboard viewers and history tools skip an entry that carries it: Ditto tests its presence only; KeePass sets it, with data, ClipboardUtil.CfnViewerIgnore; round 23: a copy carrying it is never written to disk, in memory only, like a privacy-marked one); MSDEVColumnSelect, MSDEVLineSelect and VisualStudioEditorOperationsLineCutCopyClipboardTag (Scintilla and Visual Studio: the copy was a column or a whole line; Scintilla's ScintillaWin.cxx checks their presence only) | saved as presence only, never read | set again with no data (presence) | nothing (the copy goes back whole) |
+| 2. Privacy markers | ExcludeClipboardContentFromMonitorProcessing, CanIncludeInClipboardHistory, CanUploadToCloudClipboard, present but not cleanly read (over their cap, none, nosize, unlocked) | established; the marker forces the conservative markers (no reported skip) | the three markers set to "exclude" | nothing (the content stays excluded); such a save is never written to disk |
+| 3. Anything else its owner did not render | none, nosize or unlocked for a listed format under the reader's PROVEN hold with the sequence unchanged, on the second whole-save attempt (the first stays strict) | established with a NAMED, REPORTED skip, only beside user content that does go back (the one rule) | everything else; the result is "skipped" | "Your clipboard was put back except: FileContents (not provided by the app that copied it)." An offer of such a record says so on its card before Restore |
 
 Still NOT ESTABLISHED (no paste): a lost hold, an enumeration error, listed != counted, a sequence change, a framing
-error (malformed, fragmentary, out of order, "<id> end" with nothing between), busy, an owner that does not answer
-before a render ("unresponsive"), an overrun. The cost of class 3, stated plainly: the user's clipboard comes back
+error (malformed, fragmentary, out of order, "<id> end" with nothing between, a negative reply whose error is not a
+number), busy, an owner that does not answer before a render ("unresponsive", after one more ping within the
+remaining budget), an overrun, and the one rule. The cost of class 3, stated plainly: the user's clipboard comes back
 without that format (Explorer's or Outlook's FileContents: a pasted file attachment is then missing; the file list
 CF_HDROP, when the owner offered one, goes back), and the user is told so by name. The alternative (refusing) blocks
 the paste for every copy from such an owner (the text is then typed in a classic text box, or kept on the recovery
@@ -482,9 +494,14 @@ class-3 or cap skip, a policy skip, a registered format whose name is lost, an E
 rebuilt) is INCOMPLETE. Its offer says so: "Part of this clipboard could not be saved: <names>. Restore puts back the
 rest." The helper empties nothing for it unless the app's request says the user was shown that (acceptIncomplete);
 otherwise it answers "incomplete" with the names and the card then shows them. When it runs, it puts back everything
-that survived and answers "restored-partially" with the names, which the app shows. A record with content lost on
-read-back stays offered. A clipboard that could not be saved at all (no window, not established) is said too:
-"DoodleNote could not save your clipboard, so it did not paste with it."
+that survived and answers "restored-partially" with the names, which the app shows; that accepted partial Restore
+settles and deletes the record (round 23: the user chose it; before, a record with content lost on read-back stayed
+offered). Round 23: an incomplete record is NEVER "already on the clipboard": its retained part back on the
+clipboard proves nothing more can go back, but it is settled only by an accepted partial Restore, Dismiss or the
+retention, never deleted as untouched nor answered "restored". The names travel with the reply AND with the events
+(recovered, late-restore), and a completed Restore is reported even when its offer was withdrawn before the reply.
+Every name is named: a bitmap, palette or metafile picture that cannot be rebuilt too. The card shows at most three
+(+N more), so its buttons stay in view, and says "None of this clipboard could be saved" when nothing goes back.
 
 The false-negative risk of the strict save, stated plainly: every refusal above is a blocked paste (the dictated text
 is typed in a classic text box, or kept on the recovery card for copying). That is the chosen cost: a paste over a
@@ -499,7 +516,13 @@ retention; a silenced output device is given back after an hour.
 Native gates (not runnable in CI; the owner's list, round 22): Excel (a saved and an unsaved workbook), Word,
 PowerPoint shapes, an Outlook message and an attachment, Explorer files (a normal folder and inside a zip), an image
 copied in a browser, Teams, Snipping Tool, KeePass and Bitwarden, a Remote Desktop session, a slow or modal renderer
-with the clipboard lockout measured, and a third-party app that opens the clipboard with a NULL window.
+with the clipboard lockout measured, and a third-party app that opens the clipboard with a NULL window. Round 23
+(Opus): copy a column in Notepad++, dictate, restart the helper, paste in Notepad++ (whether presence-only flags
+survive the helper's window going away is not established; it fails safe: the record is offered, never taken as
+already there).
+
+EmptyClipboard audit, stated exactly: three sites in the RELEASE build (our write, the live transaction's restore,
+the user's Restore); the test build has a fourth (the __seed op).
 
 Known limitation: the user's Restore checks only its own record for being in flight, not whether another delivery
 is under way. If one is, that live transaction's own confirmation or paste-gate look sees the changed clipboard and
@@ -705,7 +728,8 @@ wait, the transaction record is how the next helper finishes the job. The helper
 are stuck, or because two clipboard readers wait on owners that never render, happens only between
 deliveries. Clipboard readers are never killed on exit. THE BOUND on a reader held in an owner's render (round 22):
 (1) an owner that does not answer a WM_NULL is never asked to render: the helper checks before the save and again
-before emptying, and the reader checks before each read; (2) Windows' own WM_RENDERFORMAT timeout; (3) the reader
+before emptying, and the reader checks before each read (one more ping within the remaining budget); (2) Windows' own
+WM_RENDERFORMAT timeout (not quantified here: Windows documents no value, and it was not measured); (3) the reader
 reads its stdin on its own thread and ends itself when a read is still outstanding 30 s after its stdin closed (the
 helper abandoned it, or ended); (4) the helper ends an abandoned reader after 120 s on an owner reported hung, or
 after 300 s whatever the owner reports. IsHungAppWindow alone is no bound: an owner that is busy but pumps is never
