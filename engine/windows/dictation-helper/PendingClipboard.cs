@@ -1008,6 +1008,10 @@ namespace DoodleNote.DictationHelper
                 }
                 if (restored == "unrestored") { result = RecoverResult.Failed; return "put back only in part; kept, offered again"; }
                 outcome = "the user's restore put back (" + seen + "): " + restored;
+                // Settled BEFORE the file cleanup, which may be deferred (a file held by another process): the offer is
+                // withdrawn now and a "settled" state is deleted on sight, so restored content is never offered again.
+                if (!Stage(journal, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
+                OfferGone(id, "restored");
                 DeleteId(id, outcome);
                 Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", restored));
             }
