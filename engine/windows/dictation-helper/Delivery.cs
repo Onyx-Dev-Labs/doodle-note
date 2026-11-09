@@ -1755,6 +1755,25 @@ namespace DoodleNote.DictationHelper
             "dataobject", "ole private data"
         };
 
+        /// <summary>
+        /// Round 22: registered formats that are PRESENCE-ONLY by design: their owner sets them with a NULL handle and
+        /// readers test IsClipboardFormatAvailable, never their data. Scintilla (Notepad++, SciTE, and the editors built
+        /// on it) does exactly that in ScintillaWin::CopyToClipboard: ::SetClipboardData(cfColumnSelect, 0) for a
+        /// rectangular copy and ::SetClipboardData(cfLineSelect, 0) plus ::SetClipboardData(cfVSLineTag, 0) for a
+        /// whole-line copy, where cfColumnSelect = RegisterClipboardFormat("MSDEVColumnSelect"), cfLineSelect =
+        /// "MSDEVLineSelect" and cfVSLineTag = "VisualStudioEditorOperationsLineCutCopyClipboardTag" (the names Visual
+        /// Studio uses for the same two semantics), and its paste tests them with IsClipboardFormatAvailable. Saved as
+        /// presence only and put back as presence only (SetClipboardData(format, NULL) from our window: delayed
+        /// rendering that our window never renders, so the format is available with no data, as the editors expect).
+        /// Exactly these names; any other registered format that answers NULL is still a capture failure.
+        /// </summary>
+        internal static readonly HashSet<string> PresenceOnly = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "MSDEVColumnSelect", "MSDEVLineSelect", "VisualStudioEditorOperationsLineCutCopyClipboardTag"
+        };
+        /// <summary>The saved presence-only formats (see PresenceOnly).</summary>
+        readonly List<uint> presenceOnly = new List<uint>();
+
         public static string FormatName(uint format)
         {
             System.Text.StringBuilder name = new System.Text.StringBuilder(256);
@@ -1912,6 +1931,7 @@ namespace DoodleNote.DictationHelper
                 else if (name == PendingClipboard.SentinelFormat) { outcomes.Append(" ours, not saved (policy)"); continue; }
                 else if (Markers.Contains(name)) { saved.PrivacyMarked = true; marker = true; cap = MaxMarkerBytes; }
                 else if (SilentDrop.Contains(name)) { outcomes.Append(" not saved (OLE bookkeeping: policy)"); continue; }
+                else if (PresenceOnly.Contains(name)) { saved.presenceOnly.Add(format); outcomes.Append(" presence only (policy)"); continue; }
                 else cap = Math.Min(MaxFormatBytes, MaxBytes - total);
                 // Round 22: a recognised privacy marker that is skipped for ANY reason forces the conservative exclusion
                 // markers on the put-back (the content must never come back without its exclusion).
@@ -1994,13 +2014,20 @@ namespace DoodleNote.DictationHelper
         /// <summary>The saved formats, for PendingClipboard (registered formats by name, so they re-register).</summary>
         public void WriteTo(System.IO.BinaryWriter writer)
         {
-            writer.Write(items.Count);
+            writer.Write(items.Count + presenceOnly.Count);
             foreach (KeyValuePair<uint, byte[]> item in items)
             {
                 writer.Write(item.Key);
                 writer.Write(item.Key >= 0xC000 ? FormatName(item.Key) : "");
                 writer.Write(item.Value.Length);
                 writer.Write(item.Value);
+            }
+            // Presence-only formats (round 22): written with length -1 and no bytes.
+            foreach (uint format in presenceOnly)
+            {
+                writer.Write(format);
+                writer.Write(FormatName(format));
+                writer.Write(-1);
             }
             // Round 22: the EMF bytes the capture validated (or read back from a record) are written as they are. Only a
             // metafile without them is extracted here, and a failed extraction is written as LOST (-1), never as absent
@@ -2030,7 +2057,15 @@ namespace DoodleNote.DictationHelper
             {
                 uint format = reader.ReadUInt32();
                 string name = reader.ReadString();
-                byte[] bytes = reader.ReadBytes(reader.ReadInt32());
+                int length = reader.ReadInt32();
+                if (length == -1)
+                {
+                    // A presence-only format (round 22): it must name one of the known ones, or the record is incomplete.
+                    uint registered = PresenceOnly.Contains(name) ? Native.RegisterClipboardFormat(name) : 0;
+                    if (registered != 0) saved.presenceOnly.Add(registered); else saved.contentLost = true;
+                    continue;
+                }
+                byte[] bytes = reader.ReadBytes(length);
                 if (format >= 0xC000) format = name.Length > 0 ? Native.RegisterClipboardFormat(name) : 0;
                 // Round 21: a registered format with no name, or one that cannot be registered again, cannot go back:
                 // the record is INCOMPLETE (never "restored", never deleted as already there), not silently smaller.
@@ -2073,6 +2108,14 @@ namespace DoodleNote.DictationHelper
                 if (trace != null) trace.Set(item.Key, item.Value.Length, done, error);
                 set++;
             }
+            foreach (uint format in presenceOnly)
+            {
+                // Presence only: delayed rendering our window never renders (available, no data), as its owner set it.
+                Native.SetClipboardData(format, IntPtr.Zero);
+                bool done = Native.IsClipboardFormatAvailable(format);
+                if (trace != null) trace.Set(format, -1, done, done ? 0 : -1);
+                if (!done) ok = false;
+            }
             if (metafile != IntPtr.Zero)
             {
                 bool done = Native.SetClipboardData(CF_ENHMETAFILE, metafile) != IntPtr.Zero;
@@ -2092,7 +2135,7 @@ namespace DoodleNote.DictationHelper
 
         public int Count { get { return items.Count; } }
         /// <summary>How many formats the save kept (an offer shows formats and size only).</summary>
-        public int FormatCount { get { return items.Count + (metafile != IntPtr.Zero ? 1 : 0); } }
+        public int FormatCount { get { return items.Count + presenceOnly.Count + (metafile != IntPtr.Zero ? 1 : 0); } }
         /// <summary>The saved bytes (an offer shows formats and size only).</summary>
         public long ByteCount
         {
@@ -2110,6 +2153,7 @@ namespace DoodleNote.DictationHelper
             if (contentLost) return false;
             uint sentinel = Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat);
             foreach (KeyValuePair<uint, byte[]> item in items) if (item.Key != sentinel && !present.Contains(item.Key)) return false;
+            foreach (uint format in presenceOnly) if (!present.Contains(format)) return false;
             if (metafile != IntPtr.Zero && !present.Contains(CF_ENHMETAFILE)) return false;
             return items.Count > 0 || metafile != IntPtr.Zero;
         }
@@ -2124,7 +2168,7 @@ namespace DoodleNote.DictationHelper
         {
             if (format == CF_ENHMETAFILE && metafile != IntPtr.Zero) return true;
             foreach (KeyValuePair<uint, byte[]> item in items) if (item.Key == format) return true;
-            return false;
+            return presenceOnly.Contains(format);
         }
 #if DICTATION_TEST
         /// <summary>Test build only: the saved formats by number (registered ones by name), never content.</summary>
@@ -2174,10 +2218,11 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>Tests: a saved clipboard with these items (and a privacy marker or not).</summary>
-        internal static SavedClipboard ForTest(IEnumerable<KeyValuePair<uint, byte[]>> items, bool privacyMarked, bool complete = true, bool reportedSkip = false)
+        internal static SavedClipboard ForTest(IEnumerable<KeyValuePair<uint, byte[]>> items, bool privacyMarked, bool complete = true, bool reportedSkip = false, IEnumerable<uint> presenceOnlyFormats = null)
         {
             SavedClipboard saved = new SavedClipboard();
             saved.items.AddRange(items);
+            if (presenceOnlyFormats != null) saved.presenceOnly.AddRange(presenceOnlyFormats);
             saved.PrivacyMarked = privacyMarked;
             saved.complete = complete;
             saved.reportedSkip = reportedSkip;
@@ -2198,7 +2243,7 @@ namespace DoodleNote.DictationHelper
                 uint size = Native.GetEnhMetaFileBits(metafile, 0, null);
                 if (size > 0) { emf = new byte[size]; if (Native.GetEnhMetaFileBits(metafile, size, emf) != size) emf = null; }
             }
-            return ExplainsPresent(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, items, emf, ReadOpenEmf, forceMarkers);
+            return ExplainsPresent(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, items, emf, ReadOpenEmf, forceMarkers, presenceOnly);
         }
 
         static byte[] ReadOpenEmf()
@@ -2235,12 +2280,13 @@ namespace DoodleNote.DictationHelper
         /// other format, or any differing content, means the clipboard holds something else (a new
         /// screenshot, a new copy). At least one format must have been compared.
         /// </summary>
-        internal static bool ExplainsPresent(IList<uint> present, Func<uint, int, byte[]> read, IList<KeyValuePair<uint, byte[]>> saved, byte[] savedEmf, Func<byte[]> readEmf, bool forcedMarkers = false)
+        internal static bool ExplainsPresent(IList<uint> present, Func<uint, int, byte[]> read, IList<KeyValuePair<uint, byte[]>> saved, byte[] savedEmf, Func<byte[]> readEmf, bool forcedMarkers = false, IList<uint> presenceOnlySaved = null)
         {
             HashSet<uint> compared = new HashSet<uint>();
             List<uint> rest = new List<uint>();
             foreach (uint f in present)
             {
+                if (presenceOnlySaved != null && presenceOnlySaved.Contains(f)) continue; // saved as presence only: present is all it can be
                 byte[] mine = null;
                 foreach (KeyValuePair<uint, byte[]> item in saved) if (item.Key == f) { mine = item.Value; break; }
                 if (mine != null)
