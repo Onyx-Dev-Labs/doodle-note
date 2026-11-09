@@ -214,20 +214,25 @@ function toOffer(value: unknown): ClipboardOffer | null {
     created: typeof o.created === 'string' ? o.created : '',
     likelyOurs: o.likelyOurs === true,
     incomplete: o.incomplete === true,
-    missing: toNames(o.missing)
+    missing: toNames(o.missing),
+    // Round 24: an older helper sends no count: every format is taken as content (the helper still refuses).
+    content: typeof o.content === 'number' && o.content >= 0 ? o.content : o.formats
   }
 }
 
 /**
- * Format names and reasons from the helper (strings only): what a put-back did not include. Round 23
- * (Astra S2): every name is kept (a list beyond 256 keeps its count: "and N more"), never silently cut.
+ * Format names and reasons from the helper (strings only): what a put-back did not include. Rounds 23-24 (Astra
+ * S2): every name is kept (the card counts them: "+N more"), never silently cut; a long one is shortened by code
+ * points, never inside a surrogate pair.
  */
 function toNames(value: unknown): string[] {
   if (!Array.isArray(value)) return []
-  const names = value
+  return value
     .filter((name): name is string => typeof name === 'string' && name.length > 0)
-    .map((name) => (name.length > 160 ? `${name.slice(0, 160)}…` : name))
-  return names.length > 256 ? [...names.slice(0, 256), `and ${names.length - 256} more`] : names
+    .map((name) => {
+      const points = Array.from(name)
+      return points.length > 160 ? `${points.slice(0, 160).join('')}…` : name
+    })
 }
 
 export class DictationHelperClient {

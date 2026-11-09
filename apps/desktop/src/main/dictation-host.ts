@@ -187,7 +187,7 @@ export function createDictationHost(options: DictationHostOptions): {
   // The overlay is built before the service it reports to; actions arrive only after both exist.
   const route: { service: DictationService | null } = { service: null }
   const overlay = new DictationOverlay(
-    (action, gen) => route.service?.onOverlayAction(action, gen),
+    (action, gen, record) => route.service?.onOverlayAction(action, gen, record),
     (edge) => route.service?.onPillEdge(edge)
   )
 

@@ -548,6 +548,19 @@ export class DictationService {
     await this.loadClipboardOffers()
   }
 
+  /**
+   * Round 24 (Opus): a click on an offer's button acts only on the card the user saw: the page names its record,
+   * and an offer that became current since (an offer-gone made another one current) is never acted on for it.
+   */
+  private shownOffer(record: string | undefined): boolean {
+    const current = this.currentOffer()
+    if (!current || record !== current.record) {
+      this.deps.log(`clipboard offer: a click for another card than the one now current; ignored`)
+      return false
+    }
+    return true
+  }
+
   /** The user's Restore: only while the clipboard is as it was offered (or as the "changed" card showed). */
   private async restoreOffer(): Promise<void> {
     const offer = this.currentOffer()
@@ -568,7 +581,21 @@ export class DictationService {
       done.result === 'partial' ||
       done.result === 'skipped' ||
       done.result === 'restored-partially'
+    // Round 24 (Opus nit): no answer in time; the Restore may still finish, and its recovered event names the
+    // offer's delivery: that result is shown when it comes, whatever delivery is current then.
+    if (done.result === 'failed' && offer.delivery) this.restoreAwaiting = offer.delivery
     if (!completed && !this.offers.has(offer.record)) return
+    if (done.result === 'nothing-to-restore') {
+      // Round 24 (Opus, the one rule at Restore): nothing with user content can go back; nothing was emptied.
+      this.offers.set(offer.record, {
+        ...offer,
+        incomplete: true,
+        content: 0,
+        missing: done.missing ?? offer.missing
+      })
+      this.refreshOfferPanel()
+      return
+    }
     if (done.result === 'incomplete') {
       // The helper found it incomplete but the card had not said so: nothing was emptied; the card says it now.
       this.offers.set(offer.record, { ...offer, incomplete: true, missing: done.missing ?? [] })
@@ -1143,7 +1170,7 @@ export class DictationService {
     this.helperStatus = null
   }
 
-  onOverlayAction(action: OverlayAction, gen: number | null): void {
+  onOverlayAction(action: OverlayAction, gen: number | null, record?: string): void {
     switch (action) {
       case 'pill':
         this.begin('pill')
@@ -1174,12 +1201,14 @@ export class DictationService {
         else this.dispatch({ type: 'dismiss' })
         break
       case 'offer-restore':
-        if (this.panel?.kind === 'clipboard-offer') void this.restoreOffer()
+        if (this.panel?.kind === 'clipboard-offer' && this.shownOffer(record))
+          void this.restoreOffer()
         break
       case 'offer-dismiss':
       case 'offer-delete':
       case 'offer-keep':
-        if (this.panel?.kind === 'clipboard-offer') this.offerAction(action)
+        if (this.panel?.kind === 'clipboard-offer' && this.shownOffer(record))
+          this.offerAction(action)
         break
       case 'view':
         this.viewLastChange()

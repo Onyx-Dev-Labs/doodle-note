@@ -63,7 +63,7 @@ export class DictationOverlay {
   } | null = null
 
   constructor(
-    private readonly onAction: (action: OverlayAction, gen: number | null) => void,
+    private readonly onAction: (action: OverlayAction, gen: number | null, record?: string) => void,
     /** The pill was dropped near this edge. */
     private readonly onEdge: (edge: PillEdge) => void
   ) {}
@@ -222,8 +222,9 @@ export class DictationOverlay {
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event, url) => {
       event.preventDefault()
-      const match = /^doodle-dictation:\/\/([a-z-]+)$/.exec(url)
-      if (match) this.handle(match[1] as string)
+      // Round 24: an offer's buttons carry the record of the card the page showed (32 hex digits).
+      const match = /^doodle-dictation:\/\/([a-z-]+)(?:\/([0-9a-f]{32}))?$/.exec(url)
+      if (match) this.handle(match[1] as string, match[2])
     })
     this.loaded = false
     this.sentIcon = null
@@ -240,7 +241,7 @@ export class DictationOverlay {
     return window
   }
 
-  private handle(name: string): void {
+  private handle(name: string, record?: string): void {
     switch (name) {
       case 'drag-start':
         this.beginDrag()
@@ -260,7 +261,7 @@ export class DictationOverlay {
       case 'offer-dismiss':
       case 'offer-delete':
       case 'offer-keep':
-        this.onAction(name, this.lastView?.gen ?? null)
+        this.onAction(name, this.lastView?.gen ?? null, record)
         break
     }
   }

@@ -471,10 +471,12 @@ export const CLIPBOARD_OFFER_COPY = {
     `Delete saved copy removes what you had copied before the dictation (${saved}) for good; your clipboard stays as it is. Keep it brings the offer back.`,
   deleteFailed: 'The saved copy could not be deleted. Try again.',
   // Round 23: at most three names (+N more) so the buttons stay in view; truthful when nothing goes back.
-  incomplete: (missing: string[], formats = 1): string =>
+  incomplete: (missing: string[], formats = 1, total = missing.length): string =>
     formats > 0
-      ? `Part of this clipboard could not be saved${missing.length > 0 ? `: ${listMissing(missing)}` : ''}. Restore puts back the rest.`
-      : `None of this clipboard could be saved${missing.length > 0 ? ` (${listMissing(missing)})` : ''}. Restore cannot put any of it back; Dismiss deletes the saved record.`
+      ? `Part of this clipboard could not be saved${missing.length > 0 ? `: ${listMissing(missing, total)}` : ''}. Restore puts back the rest.`
+      : `None of this clipboard could be saved${missing.length > 0 ? ` (${listMissing(missing, total)})` : ''}. There is nothing to put back; Dismiss deletes the saved record.`,
+  nothingTitle: 'DoodleNote kept a record of your clipboard, but nothing of it can be put back.',
+  nothingDetail: 'Dismiss deletes that record. Your clipboard stays as it is.'
 } as const
 
 /** The view for a panel; `base` supplies the edge and the quiet settings. */
@@ -527,9 +529,14 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
       }
     case 'clipboard-offer': {
       const saved = describeClipboardSize(panel.offer.formats, panel.offer.bytes)
+      // Round 24 (Opus): the buttons name the record this card shows (a click acts on no other).
+      const record = { offerRecord: panel.offer.record }
+      // Round 24 (Opus, the one rule at Restore): an incomplete offer with no user content cannot put anything back.
+      const nothing = panel.offer.incomplete && panel.offer.content === 0
       if (panel.confirmDelete)
         return {
           ...common,
+          ...record,
           tone: 'warn',
           title: CLIPBOARD_OFFER_COPY.confirmTitle,
           detail: CLIPBOARD_OFFER_COPY.confirmDetail(saved),
@@ -537,8 +544,24 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
           controls: { ...NONE, offerDelete: true, offerKeep: true },
           diff: null
         }
+      if (nothing)
+        return {
+          ...common,
+          ...record,
+          tone: 'warn',
+          title: CLIPBOARD_OFFER_COPY.nothingTitle,
+          detail: CLIPBOARD_OFFER_COPY.nothingDetail,
+          warning: CLIPBOARD_OFFER_COPY.incomplete(
+            panel.offer.missing,
+            0,
+            panel.offer.missingTotal
+          ),
+          controls: { ...NONE, offerDismiss: true },
+          diff: null
+        }
       return {
         ...common,
+        ...record,
         tone: 'warn',
         title: panel.changed ? CLIPBOARD_OFFER_COPY.changedTitle : CLIPBOARD_OFFER_COPY.title,
         detail: panel.changed
@@ -549,7 +572,11 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
           : CLIPBOARD_OFFER_COPY.detail(saved),
         // Round 22: an incomplete offer says what a Restore cannot put back, before the user chooses.
         warning: panel.offer.incomplete
-          ? CLIPBOARD_OFFER_COPY.incomplete(panel.offer.missing, panel.offer.formats)
+          ? CLIPBOARD_OFFER_COPY.incomplete(
+              panel.offer.missing,
+              panel.offer.formats,
+              panel.offer.missingTotal
+            )
           : null,
         controls: { ...NONE, offerRestore: true, offerDismiss: true },
         diff: null

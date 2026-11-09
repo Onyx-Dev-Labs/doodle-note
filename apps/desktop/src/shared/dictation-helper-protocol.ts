@@ -258,6 +258,13 @@ export interface ClipboardOffer {
   incomplete: boolean
   /** What an incomplete offer cannot put back, by name and reason. */
   missing: string[]
+  /** How many names there are when `missing` was shortened (absent: its length). */
+  missingTotal?: number
+  /**
+   * Round 24 (Opus): how many formats with the user's CONTENT a Restore can put back (`formats` also counts flags
+   * and CF_LOCALE). 0 on an incomplete offer: nothing can go back, so the card offers no Restore.
+   */
+  content: number
 }
 
 /** Windows: what the user's Restore of an offer did. */

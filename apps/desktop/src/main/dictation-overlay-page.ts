@@ -228,7 +228,12 @@ ${overlayFontCss}
       $('view').hidden = !next.controls.view
       $('undo').hidden = !next.controls.undo
       $('dismiss').hidden = !next.controls.dismiss
-      for (const id of ['offerRestore', 'offerDismiss', 'offerKeep', 'offerDelete']) $(id).hidden = !next.controls[id]
+      for (const id of ['offerRestore', 'offerDismiss', 'offerKeep', 'offerDelete']) {
+        $(id).hidden = !next.controls[id]
+        // Round 24: the button names the offer this card shows, so a click acts on no other.
+        const action = $(id).getAttribute('href').split('://')[1].split('/')[0]
+        $(id).setAttribute('href', 'doodle-dictation://' + action + (next.offerRecord ? '/' + next.offerRecord : ''))
+      }
       const diff = $('diff')
       diff.hidden = !next.diff
       diff.textContent = ''
