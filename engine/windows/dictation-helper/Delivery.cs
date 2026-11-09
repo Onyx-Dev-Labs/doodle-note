@@ -1299,7 +1299,14 @@ namespace DoodleNote.DictationHelper
             if (!string.IsNullOrEmpty(layout)) { previousLayout = Native.GetKeyboardLayout(0); Native.LoadKeyboardLayoutW(layout, 1); } // KLF_ACTIVATE
             uint sequenceBeforeOpen = Native.GetClipboardSequenceNumber(); // the put-back trace (log only)
             PutBackTrace trace = null;
-            if (!Open()) { if (previousLayout != IntPtr.Zero) Native.ActivateKeyboardLayout(previousLayout, 0); return false; }
+            if (TestMode.Env("DICTATION_HELPER_TEST_WRITE_OPEN_FAILS") == "1" || !Open())
+            {
+                // Round 25 (Astra S3): another app holds the clipboard right after the save: nothing emptied; the reason
+                // reaches the app (the typing fallback may still run).
+                ownership.NotStarted = "clipboard-busy";
+                if (previousLayout != IntPtr.Zero) Native.ActivateKeyboardLayout(previousLayout, 0);
+                return false;
+            }
             bool ok = false;
             try
             {
@@ -1327,7 +1334,7 @@ namespace DoodleNote.DictationHelper
                 // its EmptyClipboard), without needing one.
                 int stall = TestMode.Int("DICTATION_HELPER_TEST_EMPTY_STALL_MS", 0);
                 if (stall > 0) Thread.Sleep(stall);
-                if (Native.EmptyClipboard())
+                if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_EMPTY") != "1" && Native.EmptyClipboard())
                 {
                     // Round 23 (B1): the irreversible fact FIRST, on the very next statement: whatever throws from here
                     // on (a journal, a rollback, a trace), the user's content is off the clipboard and every caller knows.
@@ -1385,6 +1392,12 @@ namespace DoodleNote.DictationHelper
                     // Sampled INSIDE the same open/close as our SetClipboardData: nobody else can
                     // write while we hold the clipboard.
                     ownership.SequenceInside = Sequence("inside");
+                }
+                else
+                {
+                    // Round 25 (Astra S3): EmptyClipboard failed: nothing emptied; the reason reaches the app.
+                    ownership.NotStarted = "empty-failed";
+                    Wire.Log("EmptyClipboard failed; not pasting (nothing emptied)");
                 }
             }
             finally

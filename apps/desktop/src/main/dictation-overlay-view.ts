@@ -419,6 +419,14 @@ export const CLIPBOARD_NOT_SAVED_MESSAGES: ReadonlyMap<string, string> = new Map
     'Your clipboard changed while DoodleNote was saving it, so it did not paste with it. Your clipboard was left as it was.'
   ],
   [
+    'clipboard-busy',
+    'Another app was using your clipboard when DoodleNote went to paste, so it did not paste with it. Your clipboard was left as it was.'
+  ],
+  [
+    'empty-failed',
+    'Windows did not let DoodleNote clear your clipboard to paste, so it did not paste with it. Your clipboard was left as it was.'
+  ],
+  [
     'deadline',
     'There was no time left to paste safely, so DoodleNote did not paste with your clipboard. Your clipboard was left as it was.'
   ],

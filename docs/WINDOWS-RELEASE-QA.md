@@ -473,7 +473,8 @@ screenshot), so DoodleNote did not paste with it and left your clipboard as it w
 it adds "Copy something smaller first, or copy the dictated text from DoodleNote and paste it yourself."; after a
 typing fallback that put the text in it does not (round 24: no double paste). Every path that does not paste with
 the clipboard gives the app a reason, and each has its own sentence (round 24): too-large, unrendered,
-nothing-savable, owner-unresponsive, zero-sequence, clipboard-changed (it changed during the save), no-record (the
+nothing-savable, owner-unresponsive, zero-sequence, clipboard-changed (it changed during the save), clipboard-busy
+(another app held it when the write went to open it; round 25), empty-failed (EmptyClipboard failed; round 25), no-record (the
 transaction, or the write's own first journal, could not be written down), deadline, no-window, unreadable; an
 unknown reason falls back to the plain sentence. The one rule applies at the user's Restore too (round 24): an
 incomplete record with no user content (an all-skipped record of an earlier build, or one whose only content format

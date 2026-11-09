@@ -1635,7 +1635,10 @@ async function main() {
     'zero-sequence',
     'zero-sequence-write',
     // Round 24 (Astra S2): the write's own journal (emptying) fails: nothing emptied, and the reason is no-record.
-    'journal-emptying'
+    'journal-emptying',
+    // Round 25 (Astra S3): the write's own open fails (another app holds the clipboard) or EmptyClipboard fails.
+    'write-open-fails',
+    'empty-fails'
   ]) {
     const seeded = copyMulti(user)
     const before = observe()
@@ -1646,9 +1649,13 @@ async function main() {
           ? { DICTATION_HELPER_TEST_EXPECT_ZERO_SEQUENCE: '1' }
           : fault === 'journal-emptying'
             ? { DICTATION_HELPER_TEST_FAIL_JOURNAL: 'emptying' }
-            : fault === 'helper-no-window'
-              ? { DICTATION_HELPER_TEST_NO_WINDOW: '1' }
-              : { DICTATION_HELPER_TEST_READER: fault }
+            : fault === 'write-open-fails'
+              ? { DICTATION_HELPER_TEST_WRITE_OPEN_FAILS: '1' }
+              : fault === 'empty-fails'
+                ? { DICTATION_HELPER_TEST_FAIL_EMPTY: '1' }
+                : fault === 'helper-no-window'
+                  ? { DICTATION_HELPER_TEST_NO_WINDOW: '1' }
+                  : { DICTATION_HELPER_TEST_READER: fault }
     const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
     await a.ready
     // Round 22 (S8): records are watched DURING the transaction, so "no record" means none was ever created.
@@ -1661,9 +1668,18 @@ async function main() {
     const after = observe()
     const lines = a.logs.filter((l) => /saving the clipboard \(attempt/.test(l))
     await a.stop()
-    const written = fault === 'zero-sequence-write' || fault === 'journal-emptying'
-    const expected =
-      fault === 'zero-sequence-write'
+    const notStarted = {
+      'zero-sequence-write': 'zero-sequence',
+      'journal-emptying': 'no-record',
+      'write-open-fails': 'clipboard-busy',
+      'empty-fails': 'empty-failed'
+    }[fault]
+    const written = notStarted !== undefined
+    const expected = written
+      ? new RegExp(`^write-failed/untouched\\|.*\\|not-started=${notStarted}$`).test(
+          String(result && result.result)
+        )
+      : fault === 'zero-sequence-write'
         ? /^write-failed\/untouched\|.*\|not-started=zero-sequence$/.test(
             String(result && result.result)
           )
