@@ -157,6 +157,14 @@ function seed(where, items) {
         )
           problem = `read back: format ${format} is ${back ? back.length + ' bytes, different' : 'absent'}`
       }
+      // An empty seed is checked too (round 21): no format counted, and an enumeration that ends with ERROR_SUCCESS.
+      if (!problem && items.length === 0) {
+        const counted = CountClipboardFormats()
+        const firstFormat = EnumClipboardFormats(0)
+        const error = GetLastError()
+        if (counted !== 0 || firstFormat !== 0 || error !== 0)
+          problem = `the empty seed is not empty: counted ${counted}, first format ${firstFormat}, error ${error}`
+      }
       CloseClipboard()
     }
   }
@@ -1545,10 +1553,32 @@ async function main() {
   // Each reader fault (test-build reader hooks): the enumeration reports an error, lists nothing beside a real count,
   // every get answers "none", a stray line arrives before the reply (a late reply), the reader dies mid-reply. The
   // delivery answers "no-save", the seeded clipboard is byte-identical and its sequence unchanged, no record exists.
-  for (const fault of ['enum-error', 'list-empty', 'get-none', 'stray-line', 'die-mid-reply']) {
+  // Round 21 adds: an enumeration error mid-list, a registered format without a name, a token without a colon, a lost
+  // hold (the open taken away) during the listing and during a get, a GlobalSize of zero, an EOF fragment of the
+  // listing; and a zero sequence at the write's own open (the save is fine; the write refuses).
+  for (const fault of [
+    'enum-error',
+    'list-empty',
+    'get-none',
+    'stray-line',
+    'die-mid-reply',
+    'enum-error-mid',
+    'no-name',
+    'no-colon',
+    'lose-hold-list',
+    'lose-hold-get',
+    'size-zero',
+    'fragment-list',
+    'zero-sequence'
+  ]) {
     const seeded = copyMulti(user)
     const before = observe()
-    const a = start(testops, { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_READER: fault })
+    const a = start(
+      testops,
+      fault === 'zero-sequence'
+        ? { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_EXPECT_ZERO_SEQUENCE: '1' }
+        : { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_READER: fault }
+    )
     await a.ready
     const result = await a.req('__clipboard-txn', { text: 'dictated text H', holdMs: 300 })
     const after = observe()
@@ -1558,7 +1588,9 @@ async function main() {
       `reader fault "${fault}": not established, the delivery never touches the clipboard (byte-identical, sequence unchanged, no record)`,
       seeded &&
         !!result &&
-        result.result === 'no-save' &&
+        (fault === 'zero-sequence'
+          ? /^write-failed\/untouched\|/.test(String(result.result))
+          : result.result === 'no-save') &&
         after.text === user &&
         after.extra === 'extra bytes for ' + user &&
         after.sequence === before.sequence &&
@@ -1566,8 +1598,71 @@ async function main() {
         recordFiles().length === 0,
       `${JSON.stringify(result)}; sequence ${before.sequence} -> ${after.sequence}; ${recordFiles()}; ${lines.join(' / ')}`
     )
-    console.log(`# 32 ${fault}: ${lines[0] || '(no save line)'}`)
+    console.log(
+      `# 32 ${fault}: ${lines[0] || '(no save line)'}${fault === 'zero-sequence' ? ' | ' + (a.logs.find((l) => /not usable evidence/.test(l)) || '(no refusal line)') : ''}`
+    )
     cleanup()
+  }
+
+  // 33b. Round 21: the same stress WITH a concurrent NULL-window poller in another process (the suspected trigger):
+  // it hammers OpenClipboard(NULL)/CloseClipboard. Every save must be either established with exactly the seeded
+  // shape, or not established ("no-save") with the clipboard intact. Counted and quoted.
+  {
+    const poller = spawn(
+      process.execPath,
+      [
+        '-e',
+        `const koffi = require(${JSON.stringify(require.resolve('koffi'))}); const u = koffi.load('user32.dll'); const O = u.func('bool __stdcall OpenClipboard(void* h)'); const C = u.func('bool __stdcall CloseClipboard()'); const E = u.func('uint32 __stdcall EnumClipboardFormats(uint32 f)'); const end = Date.now() + 120000; let n = 0; while (Date.now() < end) { if (O(null)) { E(0); C(); n++ } } console.log(n)`
+      ],
+      { stdio: ['ignore', 'pipe', 'ignore'] }
+    )
+    let polls = ''
+    poller.stdout.on('data', (c) => (polls += c))
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const runs = 400
+    let good = 0
+    let noSave = 0
+    let bad = 0
+    let expected = null
+    const shown = []
+    const started = Date.now()
+    for (let n = 0; n < runs; n++) {
+      if (!copyMulti(user + ' ' + (n % 2))) continue
+      const r = await a.req('__save-only', {})
+      const now = observe()
+      const intact =
+        now.text === user + ' ' + (n % 2) && now.extra === 'extra bytes for ' + user + ' ' + (n % 2)
+      if (r && r.established) {
+        const shape = `${r.items}|${r.shape}|${r.bytes}`
+        if (expected === null) expected = shape
+        if (shape === expected) good++
+        else {
+          bad++
+          if (shown.length < 20)
+            shown.push(`#${n} ESTABLISHED WITH ANOTHER SHAPE ${shape} vs ${expected}: ${r.line}`)
+        }
+      } else {
+        if (intact) noSave++
+        else bad++
+        if (shown.length < 20)
+          shown.push(
+            `#${n} ${intact ? 'no-save, clipboard intact' : 'no-save, CLIPBOARD NOT INTACT'}: ${r && r.line}`
+          )
+      }
+    }
+    await a.stop()
+    poller.kill()
+    tallySaves('33b stress with a NULL-window poller', a.logs)
+    console.log(
+      `# 33b stress with a NULL-window poller: ${runs} saves in ${Date.now() - started} ms; ${good} established with the seeded shape, ${noSave} not established with the clipboard intact, ${bad} bad; poller opens: ${polls.trim() || '(still running)'}`
+    )
+    for (const l of shown) console.log(`# 33b ${l}`)
+    check(
+      'stress with a NULL-window poller: every save established with the seeded shape, or not established with the clipboard intact',
+      bad === 0 && good + noSave > 0,
+      shown.join(' / ')
+    )
   }
 
   // 33. Round 20 stress: the save alone, several hundred times (seeded and read back each time); every save must hold
@@ -1658,6 +1753,29 @@ async function main() {
       )
     }
     await h.stop()
+    cleanup()
+  }
+
+  // 25e'. Round 21: a seed of ONLY an oversize custom format (no text, so nothing synthesized): a true zero-item save
+  // that is SKIPPED (its provenance kept), never taken for an empty clipboard: the live restore reports "skipped".
+  {
+    const seeded = seed('only an oversize custom format', [
+      [RegisterClipboardFormatW(EXTRA), Buffer.from('y'.repeat(200))]
+    ])
+    const a = start(testops, { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_CLIP_MAXBYTES: '64' })
+    await a.ready
+    const live = await a.req('__clipboard-txn', { text: 'dictated text G2', holdMs: 300 })
+    const saving = a.logs.find((l) => /saving the clipboard \(attempt/.test(l))
+    await a.stop()
+    check(
+      'only an oversize custom format: a zero-item save reported "skipped" (never "restored"), the record gone, nothing set back',
+      seeded &&
+        !!live &&
+        /^skipped\|/.test(String(live.result)) &&
+        recordFiles().length === 0 &&
+        CountClipboardFormats() === 0,
+      `${JSON.stringify(live)}; ${recordFiles()}; ${CountClipboardFormats()} formats; ${saving}`
+    )
     cleanup()
   }
 
@@ -1928,6 +2046,44 @@ async function main() {
     )
   }
 
+  // 34. Round 21, the NULL-window open experiment (decides Opus's lead on the runner's Windows build): process A opens
+  // the clipboard with NULL (then with its own message-only window) and holds it; process B calls OpenClipboard(NULL)
+  // once, enumerates, and closes at once (or holds); A enumerates again while B acts. One table row per combination.
+  {
+    copyMulti(user)
+    const A = start(testops, { DICTATION_HELPER_TEST: '1' })
+    const B = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await A.ready
+    await B.ready
+    console.log(
+      '# 34 | A opens with | B then | B opened (error) | B enumeration | A before | A after B | A still the open window | A close (error)'
+    )
+    const rows = []
+    for (const owner of ['null', 'window']) {
+      for (const mode of ['closes at once', 'holds']) {
+        const holding = A.req('__clip-hold', { owner, waitMs: 1500, holdMs: 1000 })
+        await sleep(500)
+        const probe = await B.req('__clip-probe', {
+          owner: 'null',
+          waitMs: mode === 'holds' ? 1500 : 0,
+          holdMs: 0
+        })
+        const held = await holding
+        const stillOpen = held && held.openWindowSecond === held.ownWindow
+        const row = `# 34 | ${owner} | ${mode} | ${probe && probe.opened} (${probe && probe.openError}) | ${probe && probe.first} | ${held && held.first} | ${held && held.second} | ${held ? (owner === 'window' ? stillOpen : 'open window ' + held.openWindowSecond) : '?'} | ${held && held.closed} (${held && held.closeError})`
+        rows.push({ owner, mode, probe, held })
+        console.log(row)
+      }
+    }
+    check(
+      'the NULL-window experiment ran (both owners, both probe modes)',
+      rows.length === 4 && rows.every((r) => r.held && r.held.opened),
+      JSON.stringify(rows)
+    )
+    await A.stop()
+    await B.stop()
+  }
+
   // 31. Several input languages (Opus round 17): the write thread on another layout (test hook: 00000419, 00000415),
   // and this test process's thread on a third: the CF_LOCALE Windows stamps is the one the helper pinned, and the
   // confirmation passes (the dictation is restored, not left as an offer).
@@ -1944,36 +2100,39 @@ async function main() {
     console.log(
       `# this process's thread layout: ${mine ? '00000411 loaded' : 'could not be loaded'}`
     )
-    for (const layout of ['00000419', '00000415', '']) {
-      copyMulti(user)
-      const a = start(testops, {
-        DICTATION_HELPER_TEST: '1',
-        ...(layout ? { DICTATION_HELPER_TEST_KEYBOARD_LAYOUT: layout } : {})
-      })
-      await a.ready
-      const dictated = 'dictated text Ж ' + (layout || 'default')
-      const reply = a.req('__clipboard-txn', { text: dictated, holdMs: 1500 })
-      for (let i = 0; i < 200 && text() !== dictated; i++) await sleep(50)
-      await sleep(500)
-      const stamped = readFormat(16)
-      const result = await reply
-      const forms = await a.req('__text-forms', { text: 'x', locale: 0 })
-      const pinned = forms && forms.lastWriteLocale
-      console.log(
-        `# write thread layout ${layout || '(default)'}: pinned 0x${(pinned || 0).toString(16)}, stamped 0x${stamped && stamped.readUInt32LE(0).toString(16)}`
-      )
-      check(
-        `write thread layout ${layout || '(default)'}: the layout ACTIVATED, Windows stamps the pinned locale (0x${(pinned || 0).toString(16)}) and the confirmation passes`,
-        !!stamped &&
-          (!layout || pinned === (parseInt(layout, 16) & 0xffff)) &&
-          stamped.readUInt32LE(0) === pinned &&
-          !!result &&
-          /^restored\|/.test(String(result.result)),
-        `stamped 0x${stamped && stamped.readUInt32LE(0).toString(16)}; pinned 0x${(pinned || 0).toString(16)}; ${JSON.stringify(result)}`
-      )
-      await a.stop()
+    try {
+      for (const layout of ['00000419', '00000415', '']) {
+        copyMulti(user)
+        const a = start(testops, {
+          DICTATION_HELPER_TEST: '1',
+          ...(layout ? { DICTATION_HELPER_TEST_KEYBOARD_LAYOUT: layout } : {})
+        })
+        await a.ready
+        const dictated = 'dictated text Ж ' + (layout || 'default')
+        const reply = a.req('__clipboard-txn', { text: dictated, holdMs: 1500 })
+        for (let i = 0; i < 200 && text() !== dictated; i++) await sleep(50)
+        await sleep(500)
+        const stamped = readFormat(16)
+        const result = await reply
+        const forms = await a.req('__text-forms', { text: 'x', locale: 0 })
+        const pinned = forms && forms.lastWriteLocale
+        console.log(
+          `# write thread layout ${layout || '(default)'}: pinned 0x${(pinned || 0).toString(16)}, stamped 0x${stamped && stamped.readUInt32LE(0).toString(16)}`
+        )
+        check(
+          `write thread layout ${layout || '(default)'}: the layout ACTIVATED, Windows stamps the pinned locale (0x${(pinned || 0).toString(16)}) and the confirmation passes`,
+          !!stamped &&
+            (!layout || pinned === (parseInt(layout, 16) & 0xffff)) &&
+            stamped.readUInt32LE(0) === pinned &&
+            !!result &&
+            /^restored\|/.test(String(result.result)),
+          `stamped 0x${stamped && stamped.readUInt32LE(0).toString(16)}; pinned 0x${(pinned || 0).toString(16)}; ${JSON.stringify(result)}`
+        )
+        await a.stop()
+      }
+    } finally {
+      if (previousLayout) ActivateKeyboardLayout(previousLayout, 0)
     }
-    if (previousLayout) ActivateKeyboardLayout(previousLayout, 0)
   }
 }
 
