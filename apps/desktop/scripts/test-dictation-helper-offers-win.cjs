@@ -1491,9 +1491,7 @@ async function main() {
     // Every iteration: the seed, the offer's format count and size, and the helper's put-back trace (format ids and
     // lengths of what the saved record held).
     const trace = h.logs.find((l) => /put-back trace: user-restore/.test(l))
-    const saving = a.logs.find((l) =>
-      /saving the clipboard: the reader listed|test: saved formats/.test(l)
-    )
+    const saving = a.logs.find((l) => /saving the clipboard \(attempt|test: saved formats/.test(l))
     if (!ok)
       console.log(
         `# 25 test-ops log: ${a.logs
@@ -1502,10 +1500,77 @@ async function main() {
           .join(' / ')}`
       )
     console.log(
-      `# 25 ${label.replace(/^(\(.\)).*?(, repeat \d+)?$/, '$1$2')}: seed ${seeded ? 'held' : 'FAILED'}; save: ${saving ? saving.replace(/^.*?(saving the clipboard: |test: )/, '') : '(no line)'}; offer ${offer ? offer.formats + ' formats, ' + offer.bytes + ' bytes' : 'none'}; ${trace ? trace.replace(/^.*put-back trace: /, 'trace: ') : '(no put-back trace line)'}`
+      `# 25 ${label.replace(/^(\(.\)).*?(, repeat \d+)?$/, '$1$2')}: seed ${seeded ? 'held' : 'FAILED'}; save: ${saving ? saving.replace(/^.*?(saving the clipboard |test: )/, '') : '(no line)'}; offer ${offer ? offer.formats + ' formats, ' + offer.bytes + ' bytes' : 'none'}; ${trace ? trace.replace(/^.*put-back trace: /, 'trace: ') : '(no put-back trace line)'}`
     )
     await h.stop()
     cleanup()
+  }
+
+  // 32. Round 20, the capture rule: a save that is not POSITIVELY established never lets the helper touch the clipboard.
+  // Each reader fault (test-build reader hooks): the enumeration reports an error, lists nothing beside a real count,
+  // every get answers "none", a stray line arrives before the reply (a late reply), the reader dies mid-reply. The
+  // delivery answers "no-save", the seeded clipboard is byte-identical and its sequence unchanged, no record exists.
+  for (const fault of ['enum-error', 'list-empty', 'get-none', 'stray-line', 'die-mid-reply']) {
+    const seeded = copyMulti(user)
+    const before = observe()
+    const a = start(testops, { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_READER: fault })
+    await a.ready
+    const result = await a.req('__clipboard-txn', { text: 'dictated text H', holdMs: 300 })
+    const after = observe()
+    const lines = a.logs.filter((l) => /saving the clipboard \(attempt/.test(l))
+    await a.stop()
+    check(
+      `reader fault "${fault}": not established, the delivery never touches the clipboard (byte-identical, sequence unchanged, no record)`,
+      seeded &&
+        !!result &&
+        result.result === 'no-save' &&
+        after.text === user &&
+        after.extra === 'extra bytes for ' + user &&
+        after.sequence === before.sequence &&
+        after.count === before.count &&
+        recordFiles().length === 0,
+      `${JSON.stringify(result)}; sequence ${before.sequence} -> ${after.sequence}; ${recordFiles()}; ${lines.join(' / ')}`
+    )
+    console.log(`# 32 ${fault}: ${lines[0] || '(no save line)'}`)
+    cleanup()
+  }
+
+  // 33. Round 20 stress: the save alone, several hundred times (seeded and read back each time); every save must hold
+  // exactly what was seeded (item count and lengths). Any mismatch prints its save line and fails.
+  {
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const runs = 400
+    let mismatches = 0
+    let notEstablished = 0
+    let expected = null
+    const shown = []
+    const started = Date.now()
+    for (let n = 0; n < runs; n++) {
+      if (!copyMulti(user + ' ' + (n % 2))) continue
+      const r = await a.req('__save-only', {})
+      if (!r || !r.established) {
+        notEstablished++
+        if (shown.length < 5) shown.push(`#${n} not established: ${r && r.line}`)
+        continue
+      }
+      const shape = `${r.items}|${r.shape}|${r.bytes}`
+      if (expected === null) expected = shape
+      if (shape !== expected) {
+        mismatches++
+        if (shown.length < 5) shown.push(`#${n} ${shape} vs ${expected}: ${r.line}`)
+      }
+    }
+    await a.stop()
+    console.log(
+      `# 33 save-only stress: ${runs} saves in ${Date.now() - started} ms; expected ${expected}; ${mismatches} mismatch(es), ${notEstablished} not established (no paste would follow)`
+    )
+    for (const l of shown) console.log(`# 33 ${l}`)
+    check(
+      'save-only stress: every established save holds exactly what was seeded',
+      mismatches === 0 && expected !== null && expected.startsWith('5|'),
+      `${mismatches} mismatches; ${shown.join(' / ')}`
+    )
   }
 
   // 25d. Opus round 18 B1 (no coverage before): dictation over an EMPTY clipboard. The live transaction's restore
