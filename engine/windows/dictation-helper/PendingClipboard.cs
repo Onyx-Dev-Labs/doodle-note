@@ -107,7 +107,7 @@ namespace DoodleNote.DictationHelper
     ///
     /// POLICY. The helper writes the user's saved content back on its own ONLY when the clipboard is
     /// provably ours (Decide): (a) our complete write (every format's bytes ours: sentinel with this
-    /// transaction's nonce, our text by its hash and its ANSI, OEM and locale forms, our exact markers) at a
+    /// transaction's nonce, our text by its hash and the ANSI, OEM and locale forms Windows makes of it, our exact markers) at a
     /// sequence within our own operations, or (b) an empty clipboard at exactly the sequence journaled under
     /// our lock right after OUR EmptyClipboard. Ownership of the clipboard is not proof. Every other state is
     /// PENDING: the record is kept, nothing is written, and the app offers the user a Restore (a journaled
@@ -129,8 +129,8 @@ namespace DoodleNote.DictationHelper
         public const int PayloadWaitMs = 250;
         /// <summary>The private format our WRITE carries last ("&lt;record id&gt;:&lt;nonce&gt;"). Restores never set it.</summary>
         public const string SentinelFormat = "DoodleNote.Bark.Transaction";
-        /// <summary>Clipboard operations of our write after its EmptyClipboard (text, its ANSI, OEM and locale forms, three markers, sentinel).</summary>
-        public const int WriteOps = 8;
+        /// <summary>Clipboard operations of our write after its EmptyClipboard (text, three markers, sentinel; the text forms are Windows').</summary>
+        public const int WriteOps = 5;
         /// <summary>Allowance for the sequence moves Windows makes when the clipboard is closed (bounds only).</summary>
         public const int CloseMoves = 2;
         /// <summary>The state-file format this helper writes; older records are removed, never restored from.</summary>

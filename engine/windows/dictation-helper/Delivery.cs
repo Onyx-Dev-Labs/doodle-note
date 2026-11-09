@@ -1175,20 +1175,21 @@ namespace DoodleNote.DictationHelper
                     // Test build only: simulate SetClipboardData failing after the clipboard was emptied.
                     ok = TestMode.Env("DICTATION_HELPER_TEST_FAIL_SET") != "1"
                         && SetBytes(CF_UNICODETEXT, System.Text.Encoding.Unicode.GetBytes(text + "\0"));
-                    // The ANSI, OEM and locale forms of our text, written EXPLICITLY (not left to Windows to synthesize),
-                    // so every format of our write has bytes we know and can compare (ClassifyOurWrite).
-                    if (ok)
-                    {
-                        SetBytes(CF_TEXT_, AnsiBytes(text));
-                        SetBytes(CF_OEMTEXT_, OemBytes(text));
-                        SetBytes(CF_LOCALE_, BitConverter.GetBytes(WriteLocale));
-                    }
+                    // Round 17: only CF_UNICODETEXT, as in round 15. Windows sets CF_LOCALE at our close (this thread's
+                    // input language) and synthesizes CF_TEXT and CF_OEMTEXT from our text on that locale's code pages,
+                    // exactly as it always did: nothing changes in what a target pastes.
                     // Windows' own clipboard history and cloud clipboard, and clipboard
                     // managers that honor it, leave entries with these formats alone.
                     SetConservativeMarkers();
                     // Our transaction's sentinel, LAST (it is never the first format a reader sees): with our
                     // exact markers and our text (by hash) it proves our complete write (Decide).
-                    if (record != null) SetSentinel(record);
+                    // The locale Windows will state at our close: this thread's input language (the sentinel carries it,
+                    // so every later look knows which code pages Windows converted our text with).
+                    ownership.TextLocale = InputLocale();
+                    if (record != null) SetSentinel(record, ownership.TextLocale);
+                    // Windows' own text forms, if it renders them while we still hold the clipboard (nobody else can
+                    // write now): then their exact bytes are what the confirmation compares against.
+                    if (ok) ReadBackForms(ownership);
                     // Sampled INSIDE the same open/close as our SetClipboardData: nobody else can
                     // write while we hold the clipboard.
                     ownership.SequenceInside = Native.GetClipboardSequenceNumber();
@@ -1230,21 +1231,67 @@ namespace DoodleNote.DictationHelper
             SetBytes(Native.RegisterClipboardFormat(MarkerNames[2]), BitConverter.GetBytes(0));
         }
 
-        /// <summary>Our transaction's sentinel format on the open clipboard ("record id:nonce"; no user content).</summary>
-        public static void SetSentinel(PendingRecord record)
+        /// <summary>Our transaction's sentinel format on the open clipboard ("record id:nonce:locale"; no user content).</summary>
+        public static void SetSentinel(PendingRecord record, int locale)
         {
-            SetBytes(Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat), System.Text.Encoding.UTF8.GetBytes(record.Id + ":" + record.Nonce + ":" + WriteLocale));
+            SetBytes(Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat), System.Text.Encoding.UTF8.GetBytes(record.Id + ":" + record.Nonce + ":" + locale));
         }
 
-        /// <summary>The locale our write states (CF_LOCALE); also carried in the sentinel, so a check reads what was written.</summary>
-        static readonly int WriteLocale = System.Globalization.CultureInfo.CurrentCulture.LCID;
-        /// <summary>Our text in the system ANSI code page (as Windows would convert it), NUL-terminated.</summary>
-        internal static byte[] AnsiBytes(string text) { return System.Text.Encoding.Default.GetBytes(text + "\0"); }
-        /// <summary>Our text in the system OEM code page, NUL-terminated.</summary>
-        internal static byte[] OemBytes(string text)
+        /// <summary>This thread's input language: the CF_LOCALE Windows sets when it closes a clipboard with text and no locale.</summary>
+        internal static int InputLocale() { return (int)((long)Native.GetKeyboardLayout(0) & 0xFFFF); }
+
+#if DICTATION_TEST
+        /// <summary>Test build only: what the last write's read-back inside its own open found (reported by __text-forms).</summary>
+        internal static string LastReadBack = "";
+#endif
+
+        /// <summary>Under our write's lock: the text forms as Windows renders them now, if it does (null entries otherwise).</summary>
+        static void ReadBackForms(ClipboardOwnership ownership)
         {
-            try { return System.Text.Encoding.GetEncoding((int)Native.GetOEMCP()).GetBytes(text + "\0"); }
-            catch (Exception) { return System.Text.Encoding.ASCII.GetBytes(text + "\0"); }
+            ownership.ReadBack = new Dictionary<uint, byte[]>();
+            foreach (uint f in new[] { CF_TEXT_, CF_OEMTEXT_, CF_LOCALE_ })
+            {
+                byte[] bytes = ReadBytes(f, 1 << 20);
+                if (bytes != null) ownership.ReadBack[f] = bytes;
+            }
+#if DICTATION_TEST
+            LastReadBack = "ansi:" + ownership.ReadBack.ContainsKey(CF_TEXT_) + ",oem:" + ownership.ReadBack.ContainsKey(CF_OEMTEXT_) + ",locale:" + ownership.ReadBack.ContainsKey(CF_LOCALE_);
+#endif
+        }
+
+        /// <summary>
+        /// The bytes Windows synthesizes for a text form of `text` under `locale` (unit- and CI-tested against Windows' own
+        /// synthesis): CF_LOCALE, the locale; CF_TEXT and CF_OEMTEXT, the text converted on that locale's default ANSI and
+        /// OEM code pages (no terminator). Null when it cannot be converted.
+        /// </summary>
+        internal static byte[] ExpectedTextForm(uint format, string text, int locale)
+        {
+            if (format == CF_LOCALE_) return BitConverter.GetBytes(locale);
+            if (text.Length == 0) return new byte[0];
+            uint codePage = LocaleCodePage(locale, format == CF_OEMTEXT_);
+            int size = Native.WideCharToMultiByte(codePage, 0, text, text.Length, null, 0, IntPtr.Zero, IntPtr.Zero);
+            if (size <= 0) return null;
+            byte[] bytes = new byte[size];
+            return Native.WideCharToMultiByte(codePage, 0, text, text.Length, bytes, size, IntPtr.Zero, IntPtr.Zero) == size ? bytes : null;
+        }
+
+        /// <summary>A locale's default ANSI (or OEM) code page; the system's when the locale has none (Unicode-only locales).</summary>
+        internal static uint LocaleCodePage(int locale, bool oem)
+        {
+            uint value;
+            if (Native.GetLocaleInfoW((uint)locale, (oem ? 0x000Bu : 0x1004u) | 0x20000000u, out value, 2) == 0 || value == 0) return oem ? 1u : 0u;
+            return value;
+        }
+
+        /// <summary>A NUL-terminated text form read back from the clipboard, without its terminator (null when it has none).</summary>
+        internal static byte[] CString(byte[] bytes)
+        {
+            if (bytes == null) return null;
+            int end = Array.IndexOf(bytes, (byte)0);
+            if (end < 0) return null;
+            byte[] text = new byte[end];
+            Array.Copy(bytes, text, end);
+            return text;
         }
 
         const uint CF_TEXT_ = 1, CF_OEMTEXT_ = 7, CF_LOCALE_ = 16;
@@ -1253,20 +1300,23 @@ namespace DoodleNote.DictationHelper
         /// <summary>
         /// The rule (unit-tested): what the open clipboard holds against our write of THIS transaction, comparing the
         /// BYTES of every format present. Complete: our sentinel ("id:nonce:locale", this transaction's nonce), our text
-        /// (its SHA-256 matches the record's), its ANSI and OEM forms exactly as our writer makes them from that text,
-        /// the locale the sentinel states, and our three markers with exactly our values, and nothing else. Partial:
-        /// some of that and nothing else, with matching bytes (a write cut short). None: anything else.
+        /// (its SHA-256 matches the record's), our three markers with exactly our values, and nothing else but the text
+        /// forms Windows synthesizes from our text, each compared too: CF_LOCALE equal to the locale the sentinel states,
+        /// CF_TEXT and CF_OEMTEXT equal (up to their terminator) to `expectedForm` (by default Windows' conversion on
+        /// that locale's code pages, ExpectedTextForm). Partial: some of that and nothing else (a write cut short).
+        /// None: anything else, or a format that cannot be read now.
         /// </summary>
-        internal static OurWrite ClassifyOurWrite(IList<uint> present, Func<uint, int, byte[]> read, string recordId, string nonce, byte[] dictatedHash)
+        internal static OurWrite ClassifyOurWrite(IList<uint> present, Func<uint, int, byte[]> read, string recordId, string nonce, byte[] dictatedHash, Func<uint, string, int, byte[]> expectedForm = null)
         {
             if (present.Count == 0 || string.IsNullOrEmpty(nonce) || dictatedHash == null) return OurWrite.None;
+            if (expectedForm == null) expectedForm = ExpectedTextForm;
             uint sentinelFormat = Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat);
             uint[] markerFormats = new uint[MarkerNames.Length];
             for (int i = 0; i < MarkerNames.Length; i++) markerFormats[i] = Native.RegisterClipboardFormat(MarkerNames[i]);
             string text = null;
             int locale = 0;
             bool sentinel = false;
-            int markers = 0, textForms = 0;
+            int markers = 0;
             // First our text (by hash) and the sentinel (by nonce): the other formats are compared against them.
             if (present.Contains(CF_UNICODETEXT))
             {
@@ -1290,20 +1340,21 @@ namespace DoodleNote.DictationHelper
             foreach (uint f in present)
             {
                 if (f == CF_UNICODETEXT || f == sentinelFormat) continue;
-                if (f == CF_TEXT_ || f == CF_OEMTEXT_)
+                if (f == CF_TEXT_ || f == CF_OEMTEXT_ || f == CF_LOCALE_)
                 {
                     if (text == null) return OurWrite.None; // a text form without our text
-                    byte[] expected = f == CF_TEXT_ ? AnsiBytes(text) : OemBytes(text);
-                    if (!Same(read(f, expected.Length + 1), expected)) return OurWrite.None;
-                    textForms++;
-                    continue;
-                }
-                if (f == CF_LOCALE_)
-                {
-                    if (!sentinel) return OurWrite.None; // the locale is known only from our sentinel
-                    byte[] expected = BitConverter.GetBytes(locale);
-                    if (!Same(read(f, expected.Length + 1), expected)) return OurWrite.None;
-                    textForms++;
+                    if (!sentinel) continue; // the locale is known only from our sentinel: at most Partial
+                    byte[] expected = expectedForm(f, text, locale);
+                    if (expected == null) return OurWrite.None;
+                    if (f == CF_LOCALE_)
+                    {
+                        byte[] value = read(f, 4);
+                        if (value == null || !Same(value, expected)) return OurWrite.None;
+                        continue;
+                    }
+                    // One byte more than the form is read: it must be the terminator (longer text is not ours).
+                    byte[] form = read(f, expected.Length + 1);
+                    if (form == null || form.Length != expected.Length + 1 || form[expected.Length] != 0 || !Same(CString(form), expected)) return OurWrite.None;
                     continue;
                 }
                 int marker = Array.IndexOf(markerFormats, f);
@@ -1316,13 +1367,13 @@ namespace DoodleNote.DictationHelper
                 }
                 return OurWrite.None; // a format our write never sets
             }
-            return sentinel && text != null && textForms == 3 && markers == MarkerNames.Length ? OurWrite.Complete : OurWrite.Partial;
+            return sentinel && text != null && markers == MarkerNames.Length ? OurWrite.Complete : OurWrite.Partial;
         }
 
-        /// <summary>The formats our write sets (never counted as synthesized by Windows).</summary>
+        /// <summary>The formats our write SETS (CF_UNICODETEXT; the text forms are Windows' and count as synthesized).</summary>
         internal static bool OurWriteFormat(uint format)
         {
-            return format == CF_UNICODETEXT || format == CF_TEXT_ || format == CF_OEMTEXT_ || format == CF_LOCALE_;
+            return format == CF_UNICODETEXT;
         }
 
         /// <summary>
@@ -1414,6 +1465,27 @@ namespace DoodleNote.DictationHelper
         public IntPtr Owner;
         /// <summary>The confirmation found our window owning the clipboard with something added to our write.</summary>
         public bool ContentChanged;
+        /// <summary>The CF_LOCALE Windows states for our write (this write thread's input language; also in the sentinel).</summary>
+        public int TextLocale;
+        /// <summary>Windows' text forms as read back inside our write's own open (when Windows rendered them there).</summary>
+        public Dictionary<uint, byte[]> ReadBack;
+
+        /// <summary>
+        /// The text forms a look compares against: Windows' own bytes when our write could read them back inside its own
+        /// open (nobody else can write then), else Windows' conversion on the stated locale's code pages.
+        /// </summary>
+        public Func<uint, string, int, byte[]> ExpectedForms()
+        {
+            Dictionary<uint, byte[]> readBack = ReadBack;
+            int textLocale = TextLocale;
+            return delegate (uint f, string text, int locale)
+            {
+                byte[] seen;
+                if (readBack != null && readBack.TryGetValue(f, out seen) && locale == textLocale)
+                    return f == 16 ? (seen.Length >= 4 ? new[] { seen[0], seen[1], seen[2], seen[3] } : null) : ClipboardText.CString(seen);
+                return ClipboardText.ExpectedTextForm(f, text, locale);
+            };
+        }
         /// <summary>Confirm() proved the clipboard was ours after our write was finalized.</summary>
         public bool Confirmed;
         /// <summary>
@@ -1448,10 +1520,19 @@ namespace DoodleNote.DictationHelper
                 for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
                 int synthesized = 0;
                 foreach (uint f in present) if (SavedClipboard.MaybeSynthesized(f) && !ClipboardText.OurWriteFormat(f)) synthesized++;
-                // Exactly our write: every present format's BYTES ours (our text, its ANSI, OEM and locale forms, our markers,
-                // the sentinel). The sequence is read AFTER those reads (a read that rendered anything would show) and must be
-                // one our close explains. Anything else was changed after our write.
-                bool content = ClipboardText.ClassifyOurWrite(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, record.Id, record.Nonce, record.DictatedHash) == OurWrite.Complete;
+                // Exactly our write: every present format's BYTES ours (our text, our markers, the sentinel) or Windows' from
+                // it (the ANSI, OEM and locale forms it synthesized, each compared). The sequence is read AFTER those reads (a
+                // read that rendered anything would show) and must be one our close and those synthesized forms explain.
+                // Anything else was changed after our write; a read that fails is a rejection too (durable: offer-only).
+                // Test build only: one read of CF_TEXT fails once (a transient read): the rejection must be durable.
+                bool dropOnce = TestMode.Env("DICTATION_HELPER_TEST_CONFIRM_READ_NULL") == "1";
+                Func<uint, int, byte[]> read = delegate (uint f, int cap)
+                {
+                    if (dropOnce && f == 1) { dropOnce = false; return null; }
+                    return ClipboardText.ReadBytes(f, cap);
+                };
+                // Reading every text form here also materializes it, so a later passive reader does not move the sequence.
+                bool content = ClipboardText.ClassifyOurWrite(present, read, record.Id, record.Nonce, record.DictatedHash, ExpectedForms()) == OurWrite.Complete;
                 uint now = Native.GetClipboardSequenceNumber();
                 bool bound = unchecked(now - SequenceInside) <= (uint)(PendingClipboard.CloseMoves + synthesized);
                 if (!content || !bound)
@@ -1983,7 +2064,7 @@ namespace DoodleNote.DictationHelper
             if (Record == null || Record.DictatedHash == null || ours.Owner == IntPtr.Zero || Native.GetClipboardOwner() != ours.Owner) return false;
             List<uint> present = new List<uint>();
             for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
-            if (ClipboardText.ClassifyOurWrite(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, Record.Id, Record.Nonce, Record.DictatedHash) != OurWrite.Complete) return false;
+            if (ClipboardText.ClassifyOurWrite(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, Record.Id, Record.Nonce, Record.DictatedHash, ours.ExpectedForms()) != OurWrite.Complete) return false;
             // And at a sequence our close explains (as the confirmation requires).
             int synthesized = 0;
             foreach (uint f in present) if (MaybeSynthesized(f) && !ClipboardText.OurWriteFormat(f)) synthesized++;

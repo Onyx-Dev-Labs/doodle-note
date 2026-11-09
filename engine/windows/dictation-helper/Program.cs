@@ -499,6 +499,24 @@ namespace DoodleNote.DictationHelper
                     }
 #endif
                     break;
+                case "__text-forms":
+                    // Test build only: the text forms this helper expects Windows to synthesize for a text under a locale
+                    // (compared in CI with Windows' own synthesis), and what the last write's read-back inside its open found.
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+#if DICTATION_TEST
+                    {
+                        string formText = Wire.Str(request, "text") ?? "";
+                        int formLocale = (int)(Wire.Num(request, "locale") ?? 0);
+                        if (formLocale == 0) formLocale = ClipboardText.InputLocale();
+                        byte[] ansi = ClipboardText.ExpectedTextForm(1, formText, formLocale), oem = ClipboardText.ExpectedTextForm(7, formText, formLocale);
+                        Wire.Reply(id, true, Wire.Fields("locale", formLocale, "ansiCodePage", (double)ClipboardText.LocaleCodePage(formLocale, false),
+                            "oemCodePage", (double)ClipboardText.LocaleCodePage(formLocale, true),
+                            "ansi", ansi == null ? null : BitConverter.ToString(ansi).Replace("-", "").ToLowerInvariant(),
+                            "oem", oem == null ? null : BitConverter.ToString(oem).Replace("-", "").ToLowerInvariant(),
+                            "inputLocale", ClipboardText.InputLocale(), "lastReadBack", ClipboardText.LastReadBack));
+                    }
+#endif
+                    break;
                 case "__saturate":
                     // Test build only: act as if the bounded-call cap had just been hit (the busy restart).
                     if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
