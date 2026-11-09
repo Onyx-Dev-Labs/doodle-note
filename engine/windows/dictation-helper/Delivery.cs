@@ -1886,7 +1886,7 @@ namespace DoodleNote.DictationHelper
                 string name;
                 try
                 {
-                    if (colon <= 0 || !uint.TryParse(head[i].Substring(0, colon), out format) || format == 0 || !listedIds.Add(format)) throw new FormatException();
+                    if (colon <= 0 || !uint.TryParse(head[i].Substring(0, colon), out format) || format == 0 || format > 0xFFFF || !listedIds.Add(format)) throw new FormatException();
                     name = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(head[i].Substring(colon + 1)));
                     if (format >= 0xC000 && name.Length == 0) { line = "NOT ESTABLISHED: registered format " + format + " has no name (a privacy marker could not be recognized); not pasting"; return null; }
                 }
@@ -1952,6 +1952,13 @@ namespace DoodleNote.DictationHelper
                 long length;
                 if ((parts[0] == "data" || parts[0] == "emf") && parts.Length == 5 && long.TryParse(parts[3], out length))
                 {
+                    // An EMF is answered only as "emf", everything else only as "data", never above the requested cap.
+                    if ((parts[0] == "emf") != (format == CF_ENHMETAFILE) || length > cap)
+                    {
+                        saved.Discard();
+                        line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " a reply of the wrong kind or above the cap (" + length + " bytes)]); not pasting";
+                        return null;
+                    }
                     byte[] bytes;
                     try { bytes = Convert.FromBase64String(parts[4]); }
                     catch (FormatException) { bytes = null; }
