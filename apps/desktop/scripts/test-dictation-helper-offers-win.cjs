@@ -58,12 +58,81 @@ function open() {
   }
   return false
 }
+let lastSetError = 0
 function setBytes(format, bytes) {
   const g = GlobalAlloc(2, Math.max(1, bytes.length))
   const p = GlobalLock(g)
   RtlMoveMemory(p, bytes, bytes.length)
   GlobalUnlock(g)
-  return SetClipboardData(format, g) !== null
+  const ok = SetClipboardData(format, g) !== null
+  if (!ok) lastSetError = GetLastError()
+  return ok
+}
+const CreateWindowExW = user32.func(
+  'void* __stdcall CreateWindowExW(uint32 ex, str16 cls, str16 name, uint32 style, int x, int y, int w, int h, void* parent, void* menu, void* inst, void* param)'
+)
+const DestroyWindow = user32.func('bool __stdcall DestroyWindow(void* h)')
+const seeds = { ok: 0, failed: 0 }
+/**
+ * Round 19 (Opus's lead on 25(a)): the clipboard is SEEDED with a real owner window (OpenClipboard(NULL) +
+ * EmptyClipboard leaves no owner, and Microsoft documents that SetClipboardData then fails), every SetClipboardData
+ * result is checked, and the seed is read back (content, under one open) before any helper is driven. The window is
+ * destroyed right after (a live owner on this thread, which pumps no messages, would stall other apps' EmptyClipboard).
+ * A failed seed is its own failed check ("seed failed"), never a product failure. Returns true when the seed holds.
+ */
+function seed(where, items) {
+  const owner = CreateWindowExW(
+    0,
+    'STATIC',
+    'DoodleNote CI seed',
+    0,
+    0,
+    0,
+    0,
+    0,
+    null,
+    null,
+    null,
+    null
+  )
+  let problem = owner ? null : `CreateWindowExW failed (error ${GetLastError()})`
+  if (!problem) {
+    let opened = false
+    for (let i = 0; i < 150 && !(opened = OpenClipboard(owner)); i++) {
+      lastOpenError = GetLastError()
+      block(20)
+    }
+    if (!opened) problem = `OpenClipboard failed (error ${lastOpenError})`
+    else {
+      if (!EmptyClipboard()) problem = `EmptyClipboard failed (error ${GetLastError()})`
+      for (const [format, bytes] of items)
+        if (!problem && !setBytes(format, bytes))
+          problem = `SetClipboardData(${format}, ${bytes.length} bytes) failed (error ${lastSetError})`
+      if (!CloseClipboard()) problem = problem || `CloseClipboard failed (error ${GetLastError()})`
+    }
+    DestroyWindow(owner)
+  }
+  if (!problem) {
+    if (!open()) problem = `read-back open failed (error ${lastOpenError})`
+    else {
+      for (const [format, bytes] of items) {
+        const back = readBytes(format)
+        if (
+          !problem &&
+          !(back && back.length >= bytes.length && back.subarray(0, bytes.length).equals(bytes))
+        )
+          problem = `read back: format ${format} is ${back ? back.length + ' bytes, different' : 'absent'}`
+      }
+      CloseClipboard()
+    }
+  }
+  if (problem) {
+    seeds.failed++
+    check(`seed failed (${where})`, false, problem)
+    return false
+  }
+  seeds.ok++
+  return true
 }
 function readBytes(format) {
   const h = GetClipboardData(format)
@@ -78,17 +147,21 @@ function readBytes(format) {
 }
 const EXTRA = 'DoodleNote.CI.Extra'
 function copyMulti(text) {
-  if (!open()) throw new Error('the clipboard could not be opened')
-  EmptyClipboard()
-  setBytes(13, Buffer.from(text + '\0', 'utf16le'))
-  setBytes(RegisterClipboardFormatW(EXTRA), Buffer.from('extra bytes for ' + text))
-  CloseClipboard()
+  return seed('the user copy', [
+    [13, Buffer.from(text + '\0', 'utf16le')],
+    [RegisterClipboardFormatW(EXTRA), Buffer.from('extra bytes for ' + text)]
+  ])
 }
 /** Another app rewrites ONE format of what is on the clipboard (without emptying), `times` times. */
 function replaceFormat(format, bytes, times = 1) {
   for (let i = 0; i < times; i++) {
     if (!open()) throw new Error('the clipboard could not be opened')
-    setBytes(format, bytes)
+    if (!setBytes(format, bytes))
+      check(
+        `the other app's replacement of format ${format} was set`,
+        false,
+        `error ${lastSetError}`
+      )
     CloseClipboard()
   }
 }
@@ -101,7 +174,8 @@ function readFormat(format) {
 }
 function addFormat() {
   if (!open()) throw new Error('the clipboard could not be opened')
-  setBytes(RegisterClipboardFormatW('DoodleNote.CI.Added'), Buffer.from('added later'))
+  if (!setBytes(RegisterClipboardFormatW('DoodleNote.CI.Added'), Buffer.from('added later')))
+    check("the other app's added format was set", false, `error ${lastSetError}`)
   CloseClipboard()
 }
 function names() {
@@ -161,10 +235,7 @@ function replayAll() {
     if (bytes) items.push([f, bytes])
   }
   CloseClipboard()
-  if (!open()) throw new Error('the clipboard could not be opened')
-  EmptyClipboard()
-  for (const [f, bytes] of items) setBytes(f, bytes)
-  CloseClipboard()
+  seed('the clipboard manager replay', items)
   return items.length
 }
 
@@ -1168,13 +1239,12 @@ async function main() {
     for (const locale of [0x0409, 0x0419, 0x0415, 0x0411]) {
       const bad = []
       for (const sample of samples) {
-        if (!open()) throw new Error('the clipboard could not be opened')
-        EmptyClipboard()
-        setBytes(13, Buffer.from(sample + '\0', 'utf16le'))
         const lcid = Buffer.alloc(4)
         lcid.writeUInt32LE(locale)
-        setBytes(16, lcid)
-        CloseClipboard()
+        seed('the text-form sample', [
+          [13, Buffer.from(sample + '\0', 'utf16le')],
+          [16, lcid]
+        ])
         const cstr = (b) =>
           b ? b.subarray(0, b.indexOf(0) < 0 ? b.length : b.indexOf(0)).toString('hex') : null
         const windowsAnsi = cstr(readFormat(1))
@@ -1192,10 +1262,7 @@ async function main() {
       )
     }
     // Unicode only (as our write): the CF_LOCALE Windows chooses is the input language the helper states.
-    if (!open()) throw new Error('the clipboard could not be opened')
-    EmptyClipboard()
-    setBytes(13, Buffer.from('x\0', 'utf16le'))
-    CloseClipboard()
+    seed('a Unicode-only copy', [[13, Buffer.from('x\0', 'utf16le')]])
     const chosen = readFormat(16)
     const forms = await a.req('__text-forms', { text: 'x', locale: 0 })
     check(
@@ -1374,7 +1441,7 @@ async function main() {
       'text'
     ])
   ]) {
-    copyMulti(user)
+    const seeded = copyMulti(user)
     const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
     await a.ready
     void a.req('__clipboard-txn', {
@@ -1406,6 +1473,7 @@ async function main() {
     const restored = offer ? await restoreConfirming(h, offer) : null
     const after = observe()
     const ok =
+      seeded &&
       !!restored &&
       restored.result === 'restored' &&
       after.opened &&
@@ -1420,12 +1488,86 @@ async function main() {
         .slice(-12)
         .join(' / ')}`
     )
-    if (ok) {
-      const trace = h.logs.find((l) => /put-back trace: user-restore/.test(l))
-      if (/repeat 1$/.test(label) || !label.includes('repeat'))
-        console.log(`# ${trace || '(no put-back trace line)'}`)
+    // Every iteration: the seed, the offer's format count and size, and the helper's put-back trace (format ids and
+    // lengths of what the saved record held).
+    const trace = h.logs.find((l) => /put-back trace: user-restore/.test(l))
+    console.log(
+      `# 25 ${label.replace(/^(\(.\)).*?(, repeat \d+)?$/, '$1$2')}: seed ${seeded ? 'held' : 'FAILED'}; offer ${offer ? offer.formats + ' formats, ' + offer.bytes + ' bytes' : 'none'}; ${trace ? trace.replace(/^.*put-back trace: /, 'trace: ') : '(no put-back trace line)'}`
+    )
+    await h.stop()
+    cleanup()
+  }
+
+  // 25d. Opus round 18 B1 (no coverage before): dictation over an EMPTY clipboard. The live transaction's restore
+  // reports "restored" (nothing to set back), no offer, the record gone; and the same after a kill: the restarted
+  // release helper offers it (0 formats) and the user's Restore reports "restored", the clipboard empty, record gone.
+  for (const killed of [false, true]) {
+    const seeded = seed('an empty clipboard', [])
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const reply = a.req('__clipboard-txn', { text: 'dictated text E', holdMs: killed ? 8000 : 300 })
+    for (let i = 0; i < 200 && text() !== 'dictated text E'; i++) await sleep(50)
+    let live = null
+    if (killed) {
+      await sleep(300)
+      await a.kill()
+    } else {
+      live = await reply
+      await a.stop()
+    }
+    const h = start(release)
+    await h.ready
+    await sleep(1000)
+    const listed = await h.req('clipboard-offers')
+    if (!killed) {
+      check(
+        'dictation over an empty clipboard: the live restore reports "restored", no offer, the record gone, the clipboard empty',
+        seeded &&
+          !!live &&
+          /^restored\|/.test(String(live.result)) &&
+          !!listed &&
+          listed.offers.length === 0 &&
+          recordFiles().length === 0 &&
+          CountClipboardFormats() === 0,
+        `${JSON.stringify(live)}; ${JSON.stringify(listed)}; ${recordFiles()}; ${CountClipboardFormats()} formats`
+      )
+    } else {
+      const offer = listed && listed.offers[0]
+      const restored = offer ? await restoreConfirming(h, offer) : null
+      check(
+        'killed over an empty clipboard: offered (0 formats); the user\'s Restore reports "restored", the clipboard empty, the record gone',
+        seeded &&
+          !!offer &&
+          offer.formats === 0 &&
+          !!restored &&
+          restored.result === 'restored' &&
+          CountClipboardFormats() === 0 &&
+          recordFiles().length === 0,
+        `${JSON.stringify(listed)}; ${JSON.stringify(restored)}; ${CountClipboardFormats()} formats; ${recordFiles()}`
+      )
     }
     await h.stop()
+    cleanup()
+  }
+
+  // 25e. Opus round 18 B1: a save in which EVERY format is over the cap (the test-build cap hook stands in for the
+  // real 16 MiB per transaction): nothing could be kept, so the live restore reports "skipped" (the contract since
+  // round 4: content the save itself could not keep) and the record is gone; what did fit is set back.
+  {
+    const big = 'x'.repeat(200)
+    const seeded = seed('an all-oversize copy', [
+      [13, Buffer.from(big + '\0', 'utf16le')],
+      [RegisterClipboardFormatW(EXTRA), Buffer.from(big)]
+    ])
+    const a = start(testops, { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_CLIP_MAXBYTES: '64' })
+    await a.ready
+    const live = await a.req('__clipboard-txn', { text: 'dictated text G', holdMs: 300 })
+    await a.stop()
+    check(
+      'every user format over the cap: the live restore reports "skipped" and the record is gone (only what fit, e.g. the 4-byte CF_LOCALE, is set back)',
+      seeded && !!live && /^skipped\|/.test(String(live.result)) && recordFiles().length === 0,
+      `${JSON.stringify(live)}; ${recordFiles()}; ${CountClipboardFormats()} formats`
+    )
     cleanup()
   }
 
@@ -1682,6 +1824,11 @@ async function main() {
     const LoadKeyboardLayoutW = user32.func(
       'void* __stdcall LoadKeyboardLayoutW(str16 klid, uint32 flags)'
     )
+    const GetKeyboardLayout = user32.func('void* __stdcall GetKeyboardLayout(uint32 thread)')
+    const ActivateKeyboardLayout = user32.func(
+      'void* __stdcall ActivateKeyboardLayout(void* hkl, uint32 flags)'
+    )
+    const previousLayout = GetKeyboardLayout(0) // restored at the end (CI-only: a real desktop's language stays as it was)
     const mine = LoadKeyboardLayoutW('00000411', 1)
     console.log(
       `# this process's thread layout: ${mine ? '00000411 loaded' : 'could not be loaded'}`
@@ -1715,6 +1862,7 @@ async function main() {
       )
       await a.stop()
     }
+    if (previousLayout) ActivateKeyboardLayout(previousLayout, 0)
   }
 }
 
@@ -1725,6 +1873,7 @@ main()
   })
   .finally(() => {
     cleanup()
+    console.log(`# seeds: ${seeds.ok} held, ${seeds.failed} failed`)
     const failed = results.filter((ok) => !ok).length
     console.log(`# ${results.length - failed}/${results.length} passed`)
     process.exit(failed === 0 && results.length > 0 ? 0 : 1)
