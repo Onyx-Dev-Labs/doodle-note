@@ -841,8 +841,11 @@ namespace DoodleNote.DictationHelper.Tests
             // Named skips: only a measured excess over the cap (or a format policy) still establishes the save.
             SavedClipboard skipped = judge("list 100 2 0 100 2" + two, withExtra("oversize " + extra + " 100 999999999"));
             Assert.Equal(true, skipped != null && skipped.Count == 1 && skipped.ReportedSkip, "one format measured over the cap: established, reported as skipped");
+            // Round 23, the one rule (a directed change; round 22 established this as a zero-item "skipped" save): nothing
+            // with the user's content would go back, so it is NOT established and nothing is pasted (a 4K screenshot).
             SavedClipboard allSkipped = judge("list 100 1 0 100 1 " + entry(extra, "DoodleNote.CI.Extra"), withExtra("oversize " + extra + " 100 999999999"));
-            Assert.Equal(true, allSkipped != null && allSkipped.Count == 0 && allSkipped.ReportedSkip && allSkipped.ListedCount == 1, "every format over the cap: zero items, but SKIPPED with its provenance, never an empty clipboard");
+            Assert.Equal(null, allSkipped, "every format over the cap: not established (round 23, the one rule)");
+            Assert.Equal("too-large", SavedClipboard.LastNoSaveReason, "and the reason is too-large");
         }
 
         public static void TheThreeClassesOfFormatsASaveCannotRead()
@@ -898,6 +901,26 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(null, judge("list 100 1 0 100 1" + text, (r) => "emf 13 100 3 " + Convert.ToBase64String(new byte[] { 1, 2, 3 }), true), "an \"emf\" reply for CF_UNICODETEXT: not established");
             Assert.Equal(null, judge("list 100 1 0 100 1 " + entry(14, ""), (r) => data(14), true), "a \"data\" reply for CF_ENHMETAFILE: not established");
             Assert.Equal(null, judge("list 100 1 0 100 1 " + entry(0x10000, ""), (r) => data(0x10000), true), "a format id above 0xFFFF: not established");
+            // Round 23, the one rule: CF_LOCALE, a clean marker or "Preferred DropEffect" are no user content.
+            uint dropEffect = Native.RegisterClipboardFormat("Preferred DropEffect");
+            Assert.Equal(null, judge("list 100 2 0 100 2" + text + " " + entry(16, ""), (r) => r.Contains(" 13 ") ? "none 13 100 0" : data(16), true), "the text unrendered, CF_LOCALE read: not established");
+            Assert.Equal(null, judge("list 100 2 0 100 2 " + entry(marker, "ExcludeClipboardContentFromMonitorProcessing") + " " + entry(extra, "DoodleNote.CI.Extra"), (r) => r.Contains(" " + extra + " ") ? "none " + extra + " 100 0" : data(marker), true), "a clean marker beside an unrendered format: not established");
+            Assert.Equal(null, judge("list 100 2 0 100 2 " + entry(dropEffect, "Preferred DropEffect") + " " + entry(extra, "DoodleNote.CI.Extra"), (r) => r.Contains(" " + extra + " ") ? "none " + extra + " 100 0" : data(dropEffect), true), "Preferred DropEffect beside an unrendered format: not established");
+            Assert.Equal("unrendered", SavedClipboard.LastNoSaveReason, "and the reason is unrendered");
+            // Round 23 (S-D): Clipboard Viewer Ignore keeps the copy off the disk.
+            Assert.Equal(true, flags.PrivacyMarked, "Clipboard Viewer Ignore: privacy-marked (in memory only)");
+            // Round 23 (nits): a negative reply's error field must be numeric; an oversize marker reports nothing.
+            Assert.Equal(null, judge(withExtra, only(extra, "none " + extra + " 100 garbage"), true), "a negative reply with a non-numeric error: malformed, not established");
+            SavedClipboard bigMarker = judge("list 100 2 0 100 2" + text + " " + entry(marker, "ExcludeClipboardContentFromMonitorProcessing"), only(marker, "oversize " + marker + " 100 999999"), false);
+            Assert.Equal(true, bigMarker != null && bigMarker.ForceMarkers && !bigMarker.ReportedSkip, "an oversize marker: the markers forced, no reported skip (class 2 reports nothing)");
+            // Round 23 (S2): a bitmap that cannot be rebuilt is named.
+            SavedClipboard noDib = judge("list 100 2 0 100 2" + text + " " + entry(2, ""), (r) => data(13), false);
+            Assert.Equal(true, noDib != null && noDib.Missing().Contains("CF_BITMAP (no picture to rebuild it from)"), "a bitmap without a DIB: named");
+            // Round 23 (Opus): one more ping for an owner busy at the first one.
+            int pings = 0;
+            bool rr; string ll;
+            SavedClipboard pinged = SavedClipboard.Judge((request, ms) => request == "list" ? "list 100 1 0 100 1" + text : (pings++ == 0 ? "unresponsive" : data(13)), 1500, () => 100u, out rr, out ll);
+            Assert.Equal(true, pinged != null && pings == 2, "an owner busy at the first ping is asked once more: established");
             // S4: no time left: no request at all.
             bool r4; string l4;
             int requests = 0;
@@ -940,11 +963,12 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(true, !whole.Incomplete && whole.Missing().Count == 0 && whole.PutBackResult(true) == "restored", "control: a whole save is restored, nothing missing");
             // The delivery's reply names what was not put back; an unsaved clipboard is said.
             DeliveryResult result = new DeliveryResult(DeliveryOutcome.Delivered, null) { Clipboard = "skipped" };
-            Delivery.ClipboardNotes(result, skipped, false);
+            Delivery.ClipboardNotes(result, skipped, null);
             Assert.Equal("DoodleNote.CI.Extra (not provided by the app that copied it)", result.ClipboardMissing == null ? null : string.Join("|", result.ClipboardMissing.ToArray()), "the reply names the skipped format");
             DeliveryResult notSaved = new DeliveryResult(DeliveryOutcome.Delivered, null) { Clipboard = "untouched" };
-            Delivery.ClipboardNotes(notSaved, null, true);
+            Delivery.ClipboardNotes(notSaved, null, "too-large");
             Assert.Equal("not-saved", notSaved.ClipboardNotice, "a clipboard that could not be saved: the reply says so");
+            Assert.Equal("too-large", notSaved.ClipboardNoticeReason, "and why (round 23)");
         }
 
         public static void AFailedLivenessQueryIsUnknownNeverNotRunning()

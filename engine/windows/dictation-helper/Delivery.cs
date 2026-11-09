@@ -436,7 +436,7 @@ namespace DoodleNote.DictationHelper
             string put = saved.Restore(ours);
             // Round 22: what the delivery's reply would name as not put back (clipboardMissing).
             DeliveryResult notes = new DeliveryResult(DeliveryOutcome.Delivered, null) { Clipboard = put };
-            ClipboardNotes(notes, saved, false);
+            ClipboardNotes(notes, saved, null);
             return put + "|" + savedFormats + (notes.ClipboardMissing != null ? "|missing=" + string.Join(";", notes.ClipboardMissing.ToArray()) : "");
         }
 
