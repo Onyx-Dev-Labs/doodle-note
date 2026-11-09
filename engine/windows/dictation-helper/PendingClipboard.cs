@@ -744,7 +744,7 @@ namespace DoodleNote.DictationHelper
                 Dictionary<string, object> reply = Wire.Fields();
                 string verdict = RecoverOne(id, out result, true, expectSequence, reply);
                 if (verdict != null) Wire.Log("clipboard record " + id.Substring(0, 8) + " (the user's restore): " + verdict);
-                if (result != RecoverResult.Done) ScheduleRetry(id, RetryKind.Check);
+                if (result != RecoverResult.Done && result != RecoverResult.Foreign) ScheduleRetry(id, RetryKind.Check); // never for another session's
                 return reply;
             }
         }
