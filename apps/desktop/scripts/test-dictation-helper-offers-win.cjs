@@ -574,11 +574,13 @@ async function main() {
     const listed = await h.req('clipboard-offers')
     const offer = listed && listed.offers && listed.offers[0]
     check(
-      'release: the kept record is offered (formats and size only)',
+      'release: the kept record is offered (formats and size only; round 22: whether it is incomplete, and the names of what is missing)',
       !!offer &&
         listed.offers.length === 1 &&
         Object.keys(offer).sort().join() ===
-          'bytes,created,delivery,formats,likelyOurs,record,sequence',
+          'bytes,created,delivery,formats,incomplete,likelyOurs,missing,record,sequence' &&
+        offer.incomplete === false &&
+        offer.missing.length === 0,
       JSON.stringify(listed)
     )
     check(
