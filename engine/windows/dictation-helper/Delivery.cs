@@ -402,7 +402,8 @@ namespace DoodleNote.DictationHelper
             {
                 string failed = ours.PutBack ?? (ours.Emptied ? saved.Restore(ours) : "untouched");
                 saved.Settle(failed);
-                return "write-failed/" + failed + "|" + savedFormats;
+                // Round 24: why the write never started (the reason a delivery would send the app).
+                return "write-failed/" + failed + "|" + savedFormats + (ours.PutBack == null && ours.NotStarted != null ? "|not-started=" + ours.NotStarted : "");
             }
             if (TestMode.Env("DICTATION_HELPER_TEST_THROW_AFTER_WRITE") == "1")
             {
@@ -623,6 +624,8 @@ namespace DoodleNote.DictationHelper
                     // The write put the saved content back itself and that rollback COMPLETED (its emptied stage could
                     // not be journaled, or it was abandoned), or it never emptied anything.
                     clipboardAfterFailedWrite = ours.PutBack ?? "untouched";
+                    // Round 24 (Astra S2): a write that never started says why (the typing fallback may still run).
+                    if (ours.PutBack == null && ours.NotStarted != null) deliveryNoSave = ours.NotStarted;
                     saved.Settle(clipboardAfterFailedWrite);
                 }
                 else
@@ -1307,6 +1310,7 @@ namespace DoodleNote.DictationHelper
                 if (TestMode.Env("DICTATION_HELPER_TEST_EXPECT_ZERO_SEQUENCE") == "1") expectSequence = 0; // test build only
                 if (expectSequence == 0 || sequenceNow == 0 || sequenceNow != expectSequence)
                 {
+                    ownership.NotStarted = expectSequence == 0 || sequenceNow == 0 ? "zero-sequence" : "clipboard-changed";
                     Wire.Log(expectSequence == 0 || sequenceNow == 0 ? "the saved sequence is not usable evidence (0); not pasting" : "the clipboard changed after it was saved; not pasting");
                     return false;
                 }
@@ -1316,6 +1320,7 @@ namespace DoodleNote.DictationHelper
                 {
                     Wire.Log("the clipboard transaction could not be journaled; not pasting (nothing emptied)");
                     ownership.JournalFailed = true;
+                    ownership.NotStarted = "no-record";
                     return false;
                 }
                 // Test build only: an owner that stalls in WM_DESTROYCLIPBOARD (or a helper that dies before
@@ -1745,6 +1750,9 @@ namespace DoodleNote.DictationHelper
         public string PutBack;
         /// <summary>The transaction could not be journaled before emptying: nothing was emptied.</summary>
         public bool JournalFailed;
+        /// <summary>Round 24 (Astra S2): why the write did not start (nothing emptied): zero-sequence, clipboard-changed,
+        /// no-record (its journal failed), for the user's notice.</summary>
+        public string NotStarted;
         public uint SequenceInside;
         public uint SequenceFinal;
         public IntPtr Owner;
