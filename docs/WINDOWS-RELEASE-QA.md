@@ -405,10 +405,13 @@ its own: (a) our complete write is on it (our sentinel with this transaction's n
 exact marker values; our text by its hash) AT a sequence within our own operations from the journaled
 write (a clipboard manager that replays every format of our write after a crash is offered, not
 restored), or (b) it is empty at exactly a sequence journaled after OUR EmptyClipboard. Our window owning
-the clipboard is not proof (another process can add a format without emptying it, which keeps our window
-the owner); our write's confirmation therefore checks the content under the lock (exactly our formats,
-at a sequence our close explains) before its sequence is trusted, and every restore that did not
-complete leaves no ownership authority behind. Every other state is pending: the
+the clipboard is never proof (another process can add or replace a format without emptying it, which keeps
+our window the owner). Our write's confirmation therefore compares, under the lock, every format of our
+write byte for byte: the Unicode text, the ANSI (CF_TEXT), OEM (CF_OEMTEXT) and locale (CF_LOCALE) forms,
+which we write ourselves so that they have exact expected bytes, the markers and the sentinel; it reads the
+sequence AFTER those reads and accepts it only within what our close explains (formats Windows synthesizes
+count, formats we wrote do not). A rejection is final for that transaction: nothing is pasted, nothing is
+restored on its own, the record is kept and offered. Every other state is pending: the
 record is kept, nothing is written, and the app shows "DoodleNote may have changed your clipboard while
 dictating. Put back what you had copied before?" with Restore and Dismiss (the card's own buttons; the
 shared dismiss of other cards never touches it). The card names formats and size only, never content.
@@ -419,37 +422,54 @@ the saved clipboard?"); the card goes only once the helper reports the files del
 "The saved copy could not be deleted. Try again." otherwise. Every outstanding offer is kept and the next
 one shows after one is resolved. Offers load at app start and every hour, whether or not Bark is on (it
 is the user's clipboard, not a dictation feature; the helper is started for it only when this identity
-has kept records on disk), and when Bark is turned on. A pending record is deleted only by the user's
-Restore or Dismiss, by the retention, or when that loses nothing (the clipboard already holds exactly the
-saved content, or nothing was emptied); never because the clipboard moved on (the user's later copy, our
-own later dictation, another offer's restore, a live foreign owner). The full deletion contract, stated
-plainly. A kept record is deleted only by: a completed restore (automatic on proof, or the user's
-Restore), reported as restored, partial or skipped; the clipboard already holding exactly the saved
-content (any logon); nothing having been emptied (stage "saved"; or "emptying" with the sequence unchanged,
-same logon only); the user's Dismiss; 24 h after its offer in a boot (tick count; the helper checks every
-30 minutes through the full decision procedure, the app every hour); a second reboot that finds it still
-unanswered (after one reboot it is offered again, because an offer writes only on the user's confirmation
-against the clipboard as it is at the click); and, as demonstrated damage, a
-fully read state file that does not parse, a missing or oversized payload, a payload whose data is
-bad (decryption reports bad data, or it does not parse; a key or profile not available now keeps it), a payload of an earlier format, a payload whose id does not match its state, an orphaned
-payload (no state file, older than 10 minutes) and a round-8 record. Another session's record (same user,
-same boot, shared %TEMP%) is left alone by the decision procedure, which checks that first; only the
-orphan and round-8 sweeps and a corrupt state file act on file evidence alone. Our write's confirmation
-checks its content under the clipboard lock (nothing added) before its sequence is trusted. A state or payload file that cannot be read for the moment is kept and checked again (only a
-file read in full that does not parse or decrypt is corrupt), and a payload is never deleted while its
-state file is kept. A target that reads the synthesized ANSI text formats was measured not to move the
-sequence. Right before Ctrl+V (and before a restore), "user-changed" (someone else's content, left alone) is
-decided only when the clipboard's OWNER changed, and even then the user's saved clipboard is kept and
-offered, never deleted on that guess (another owner proves someone emptied the clipboard, not that the
-user made a newer copy). If our window still owns it but it is not
-exactly our write (an app added a format without emptying), or the clipboard cannot be opened to look,
-nothing is pasted and nothing is settled: the record is kept and offered, and ownership no longer counts
-as proof for it. That look (it opens the clipboard and may wait) comes before the final checks, which
-stay the last step before Ctrl+V. Offers with Bark off: starting the helper for an offer runs the same
+has kept records on disk), and when Bark is turned on. A pending record is deleted only by the user's Restore or Dismiss, by the
+retention and boot-limit policies, or when that loses nothing (the clipboard already holds exactly the saved
+content, or nothing was emptied); never because the clipboard moved on (the user's later copy, our own later
+dictation, another offer's restore, a live foreign owner, the owner changing). The full deletion contract,
+stated plainly. PROOFS (nothing of the user's can be lost): a completed restore (automatic on proof (a) or
+(b), or the user's Restore), reported as restored, partial or skipped; the clipboard already holding exactly
+the saved content (any logon of this session); nothing having been emptied (stage "saved"; or "emptying"
+with the sequence unchanged, same logon only). THE USER: Dismiss (after "Delete the saved clipboard?").
+POLICIES (they can delete content the user might still want; chosen limits, not proofs): retention, 24 h
+after the record's first offer, on the tick count of that boot (the helper checks every 30 minutes through
+the full decision procedure, the app every hour); the boot limit, a record is offered in at most two boots,
+the boot of its first offer and the next one (an offer restarts in the second, because sequence numbers
+restart; a boot that crashed before any offer does not count) and is deleted in a third; and cleanup of
+records that cannot be restored from: a payload whose data is bad (decryption reports bad data, or it does
+not parse; a key or profile not available now keeps it), a payload of an earlier format, a payload whose id
+does not match its state, an orphaned payload (no state file, older than 10 minutes), a stray state .tmp
+(no state file, older than 10 minutes) and a round-8 record. A state file with no payload and no complete
+.bin.tmp is not "corrupt": there is nothing left to restore from, so the state file is removed. A complete
+.bin.tmp (it decrypts and names the record) whose .bin is missing is adopted and offered. A state file read
+in full that does not parse (zeroed, truncated) is NOT a reason to delete a valid payload: the state is
+rebuilt as stage "unknown" and the record is offered (never restored on its own). State writes go through
+to disk (write-through and flush) before they replace the previous file. Deleting is intact-or-gone: every
+file of the record (state, payload and both .tmp files) is first opened exclusively; if any is held,
+nothing is deleted, the record stays as it was and is checked again later, and Dismiss reports it not
+deleted. Another session's record (same user, same boot, shared %TEMP%) is left alone by the decision
+procedure, which checks that first, and by Dismiss, which refuses it; only the orphan and round-8 sweeps act
+on file evidence alone. A state or payload file that cannot be read for the moment is kept and checked
+again (only a file read in full that does not parse or decrypt is damaged), and a payload is never deleted
+while its state file is kept. A target that reads the synthesized ANSI text formats was measured not to
+move the sequence. Right before Ctrl+V (and before a restore), "user-changed" (someone else's content, left
+alone) is decided only when the clipboard's OWNER changed, and even then the user's saved clipboard is kept
+and offered, never deleted on that guess (another owner proves someone emptied the clipboard, not that the
+user made a newer copy). If our window still owns it but it is not exactly our write (an app added or
+replaced a format without emptying), or the clipboard cannot be opened to look, nothing is pasted and
+nothing is settled: the record is kept and offered. That look (it opens the clipboard and may wait) comes
+before the final checks, which stay the last step before Ctrl+V. The check of kept records before a paste
+opens the clipboard once per record; the paste then starts only if it still fits the delivery's deadline
+(otherwise nothing of the user's is touched and the typing fallback decides; chosen over capping the number
+of offers, which would hide records the user is owed). A restore (the user's or on proof) pings a live foreign owner
+(WM_NULL, 200 ms) before its EmptyClipboard, so a hung owner answers "busy" within that instead of holding
+the lock for the ~5 s Windows waits on WM_DESTROYCLIPBOARD.
+Offers with Bark off: starting the helper for an offer runs the same
 integrity check as any start, which uses the speech worker (and so loads the speech model until it
-idles); this happens only when this identity has kept records on disk. Retries use the record's own backoff (3 s, 10 s, 30 s, 60 s, 120 s): a failed attempt
-or a check that is still pending advances it, a busy clipboard stays on its step, and the checks before
-a delivery and at the next helper start never use a step. Payloads without a journal are deleted, never
+idles); this happens only when this identity has kept records on disk. Retries use the record's own backoff
+(3 s, 10 s, 30 s, 60 s, 120 s): every retry that does not settle the record advances it (a failed attempt, a
+check still pending, a busy clipboard, a file or key not readable now), so nothing loops every second;
+another session's record is not retried at all, and the checks before a delivery and at the next helper
+start never use a step. Payloads without a journal are deleted, never
 restored from, and a settled transaction is never published. Records of earlier formats are removed
 with a log line, never restored from. **Content that carries any clipboard privacy
 marker (as password managers set) is never written to disk**: that transaction stays in memory, so a
