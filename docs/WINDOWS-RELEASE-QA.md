@@ -443,10 +443,11 @@ does not match its state, an orphaned payload (no state file, older than 10 minu
 .bin.tmp (it decrypts and names the record) whose .bin is missing is adopted and offered. A state file read
 in full that does not parse (zeroed, truncated) is NOT a reason to delete a valid payload: the state is
 rebuilt as stage "unknown" and the record is offered (never restored on its own). State writes go through
-to disk (write-through and flush) before they replace the previous file. Deleting is intact-or-gone: every
-file of the record (state, payload and both .tmp files) is first opened exclusively; if any is held,
-nothing is deleted, the record stays as it was and is checked again later, and Dismiss reports it not
-deleted. Another session's record (same user, same boot, shared %TEMP%) is left alone by the decision
+to disk (write-through and flush) before they replace the previous file. Deleting is intact-or-gone, as one
+step: every file of the record (state, payload and both .tmp files) is opened with delete access and no
+sharing, every handle is marked for deletion, and only their close removes the files; if any file is held
+or any mark fails (the marks already set are cleared), nothing is deleted, the record stays as it was and
+is checked again later, and Dismiss reports it not deleted. Another session's record (same user, same boot, shared %TEMP%) is left alone by the decision
 procedure, which checks that first, and by Dismiss, which refuses it; only the orphan and round-8 sweeps act
 on file evidence alone. A state or payload file that cannot be read for the moment is kept and checked
 again (only a file read in full that does not parse or decrypt is damaged), and a payload is never deleted

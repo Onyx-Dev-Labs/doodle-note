@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -450,30 +451,46 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Intact or gone: every file of the record is first opened for exclusive access (another process holding any of
-        /// them, an AV scan or an indexer, makes the whole deletion wait), and only then are they deleted, temporary files
-        /// first, then the state, then the payload. False: nothing was deleted (or, if a file was taken between the check
-        /// and its deletion, what is left is reported and kept).
+        /// Intact or gone, as one step: every file of the record (both .tmp files, the state, the payload) is opened with
+        /// delete access and no sharing (another process holding any of them, an AV scan or an indexer, makes the whole
+        /// deletion wait), then every handle is marked for deletion, then all are closed, which is when Windows removes
+        /// them. A file that cannot be opened, or a mark that fails (then every mark already set is cleared again), leaves
+        /// every file as it was: false, nothing deleted. A file that does not exist is skipped (nothing to keep).
         /// </summary>
         static bool DeleteFiles(string id)
         {
             string[] paths = { StatePath(id) + ".tmp", PayloadPath(id) + ".tmp", StatePath(id), PayloadPath(id) };
-            List<FileStream> held = new List<FileStream>();
+            List<Microsoft.Win32.SafeHandles.SafeFileHandle> held = new List<Microsoft.Win32.SafeHandles.SafeFileHandle>();
             try
             {
                 foreach (string path in paths)
                 {
                     if (!File.Exists(path)) continue;
-                    try { held.Add(new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)); }
-                    catch (Exception error)
+                    Microsoft.Win32.SafeHandles.SafeFileHandle handle = Native.CreateFileForDelete(path, Native.DELETE_ACCESS | Native.GENERIC_READ_ACCESS, 0, IntPtr.Zero, Native.OPEN_EXISTING_FILE, Native.FILE_ATTRIBUTE_NORMAL_, IntPtr.Zero);
+                    if (handle.IsInvalid)
                     {
-                        Wire.Log(Path.GetFileName(path) + " is held by another process (" + error.GetType().Name + "): the record is kept whole");
+                        int error = Marshal.GetLastWin32Error();
+                        handle.Dispose();
+                        if (error == 2 || error == 3) continue; // gone meanwhile (ERROR_FILE_NOT_FOUND / PATH_NOT_FOUND)
+                        Wire.Log(Path.GetFileName(path) + " is held by another process (error " + error + "): the record is kept whole");
+                        return false;
+                    }
+                    held.Add(handle);
+                }
+                Native.FILE_DISPOSITION_INFO mark = new Native.FILE_DISPOSITION_INFO { DeleteFile = 1 };
+                for (int i = 0; i < held.Count; i++)
+                {
+                    if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_DELETE_MARK") == (i + 1).ToString() || !Native.SetFileInformationByHandle(held[i], Native.FileDispositionInfo, ref mark, 1))
+                    {
+                        Wire.Log("a record file could not be marked for deletion (error " + Marshal.GetLastWin32Error() + "): the record is kept whole");
+                        Native.FILE_DISPOSITION_INFO keep = new Native.FILE_DISPOSITION_INFO { DeleteFile = 0 };
+                        for (int j = 0; j < i; j++) Native.SetFileInformationByHandle(held[j], Native.FileDispositionInfo, ref keep, 1);
                         return false;
                     }
                 }
             }
-            finally { foreach (FileStream stream in held) stream.Dispose(); }
-            foreach (string path in paths) if (!TryDelete(path)) return false;
+            finally { foreach (Microsoft.Win32.SafeHandles.SafeFileHandle handle in held) handle.Dispose(); }
+            foreach (string path in paths) if (File.Exists(path)) { Wire.Log("ERROR: " + Path.GetFileName(path) + " is still there after its deletion"); return false; }
             return true;
         }
 
@@ -1313,7 +1330,9 @@ namespace DoodleNote.DictationHelper
             for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
             view.FormatCount = present.Count;
             // Present formats Windows may synthesize that neither our write nor the saved content set (our write sets
-            // every text form explicitly): Windows adds them at a close or a first read, one sequence step each.
+            // every text form explicitly): Windows adds them at a close or a first read, one sequence step each. Each one
+            // counted WIDENS the sequence bound within which proof (a) is granted (the permissive direction), so only
+            // formats nobody set are counted.
             foreach (uint f in present) if (SavedClipboard.MaybeSynthesized(f) && !ClipboardText.OurWriteFormat(f) && !saved.Has(f)) view.SynthesizedPresent++;
             // A live owner that is not ours could render on demand: never read its data.
             if (view.OwnerAlive && !view.OwnerIsUs) return view;

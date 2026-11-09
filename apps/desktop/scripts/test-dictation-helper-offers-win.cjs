@@ -800,6 +800,45 @@ async function main() {
     await h.stop()
   }
 
+  // 13b. The deletion is one step: every file is marked for deletion on a handle opened without sharing, and only
+  // the close removes them. When the SECOND mark fails (test hook), the first is cleared again: nothing deleted,
+  // both files byte-identical, Dismiss reports it; the release helper then deletes both.
+  {
+    copyMulti(user)
+    await keptRecord('dictated text L2')
+    const snapshot = () =>
+      recordFiles()
+        .map((f) => f + ':' + fs.readFileSync(path.join(os.tmpdir(), f)).toString('hex'))
+        .join('|')
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_FAIL_DELETE_MARK: '2'
+    })
+    await a.ready
+    const listed = await a.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const before = snapshot() // after the listing (an offer records its first offer in the state file)
+    const first = offer ? await a.req('clipboard-dismiss', { record: offer.record }) : null
+    await a.stop()
+    const after = snapshot()
+    check(
+      'a deletion whose second mark fails deletes nothing (the first mark is undone)',
+      !!first && first.dismissed === false && recordFiles().length === 2 && after === before,
+      `${JSON.stringify(first)}; ${recordFiles()}`
+    )
+    const h = start(release)
+    await h.ready
+    const again = await h.req('clipboard-offers')
+    const o2 = again && again.offers[0]
+    const second = o2 ? await h.req('clipboard-dismiss', { record: o2.record }) : null
+    check(
+      'and the release helper then deletes both files',
+      !!second && second.dismissed === true && recordFiles().length === 0,
+      `${JSON.stringify(second)}; ${recordFiles()}`
+    )
+    await h.stop()
+  }
+
   // 14. A payload left complete under its temporary name (a crash between the writer's write and its move): adopted
   // and offered, never deleted as missing.
   {

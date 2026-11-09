@@ -7,6 +7,18 @@ namespace DoodleNote.DictationHelper
     /// <summary>Win32 entry points the helper uses. Nothing here keeps state.</summary>
     internal static class Native
     {
+        // Deleting a record's files as one step (PendingClipboard.DeleteFiles): open each with DELETE access and no
+        // sharing, mark every handle for deletion, close them all (the files go at the close); undone if any mark fails.
+        public const uint DELETE_ACCESS = 0x00010000, GENERIC_READ_ACCESS = 0x80000000, OPEN_EXISTING_FILE = 3, FILE_ATTRIBUTE_NORMAL_ = 0x80;
+        public const int FileDispositionInfo = 4;
+        [StructLayout(LayoutKind.Sequential)]
+        public struct FILE_DISPOSITION_INFO { public byte DeleteFile; }
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateFileW")]
+        public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileForDelete(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle file, int infoClass, ref FILE_DISPOSITION_INFO info, uint size);
+
         public const int WH_KEYBOARD_LL = 13;
         public const int WH_MOUSE_LL = 14;
         public const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
