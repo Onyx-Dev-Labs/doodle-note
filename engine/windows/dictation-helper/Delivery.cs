@@ -588,7 +588,8 @@ namespace DoodleNote.DictationHelper
         static void RestoreAfterFailure(SavedClipboard saved, ClipboardOwnership ours, Exception error, out string clipboard, out string holds)
         {
             Wire.Log("ERROR: the paste failed after our clipboard write (" + error.GetType().Name + "); restoring the clipboard");
-            clipboard = ours != null && ours.Emptied ? saved.Restore(ours) : "untouched";
+            // Round 23 (B1): a rollback the write completed itself is its own result; emptied otherwise: the restore decides.
+            clipboard = ours == null ? "untouched" : ours.PutBack ?? (ours.Emptied ? saved.Restore(ours) : "untouched");
             saved.Settle(clipboard);
             holds = saved.Holds;
         }
@@ -602,17 +603,19 @@ namespace DoodleNote.DictationHelper
                 // The write failed part-way. If we emptied the clipboard, the user's content is gone from it unless it
                 // is put back now (before any typing fallback). Restore writes only on proof: a partial write of ours is
                 // no proof (another app may have added to it), so then the record is kept as an offer instead.
-                if (ours.Emptied)
+                if (ours.PutBack != null || !ours.Emptied)
                 {
-                    clipboardAfterFailedWrite = saved.Restore(ours);
-                    holdsAfterFailedWrite = saved.Holds;
+                    // The write put the saved content back itself and that rollback COMPLETED (its emptied stage could
+                    // not be journaled, or it was abandoned), or it never emptied anything.
+                    clipboardAfterFailedWrite = ours.PutBack ?? "untouched";
+                    saved.Settle(clipboardAfterFailedWrite);
                 }
                 else
                 {
-                    // The write put the saved content back itself (its emptied stage could not be journaled), or
-                    // never emptied anything.
-                    clipboardAfterFailedWrite = ours.PutBack ?? "untouched";
-                    saved.Settle(clipboardAfterFailedWrite);
+                    // Emptied, and no completed rollback (round 23, B1: also a rollback that threw part-way): the restore
+                    // decides; a transaction that lost its authority keeps its record, as an offer, never "untouched".
+                    clipboardAfterFailedWrite = saved.Restore(ours);
+                    holdsAfterFailedWrite = saved.Holds;
                 }
                 return null;
             }
@@ -1200,13 +1203,16 @@ namespace DoodleNote.DictationHelper
                     string outcome = "unrestored";
                     try
                     {
-                        if (ours.Emptied)
+                        // Round 23 (B1): a rollback the write COMPLETED is its own result; emptied without one (our text
+                        // set, or a rollback that threw part-way): the restore decides (no authority: kept, offered).
+                        string completed = ours.PutBack ?? job.PutBack;
+                        if (completed == null && ours.Emptied)
                         {
                             ConfirmWritten(ours, saved);
                             outcome = saved.Restore(ours);
                             Wire.Log("the late clipboard write was undone: " + outcome);
                         }
-                        else outcome = ours.PutBack ?? job.PutBack ?? "untouched";
+                        else outcome = completed ?? "untouched";
                         // A failed put-back stays "unrestored": its record is kept for a retry, and no warning is cleared.
                         saved.Settle(outcome);
                     }
@@ -1244,7 +1250,7 @@ namespace DoodleNote.DictationHelper
             ownership = job.Ours ?? new ClipboardOwnership();
             // The confirmation re-opens the clipboard while we own it (nothing waits on another app),
             // so it runs here, outside the write's bound ("written" is already journaled inside Write).
-            if (ownership.Emptied) ConfirmWritten(ownership, saved);
+            if (ownership.Emptied && ownership.PutBack == null) ConfirmWritten(ownership, saved);
             return job.Result;
         }
 
@@ -1293,6 +1299,9 @@ namespace DoodleNote.DictationHelper
                 if (stall > 0) Thread.Sleep(stall);
                 if (Native.EmptyClipboard())
                 {
+                    // Round 23 (B1): the irreversible fact FIRST, on the very next statement: whatever throws from here
+                    // on (a journal, a rollback, a trace), the user's content is off the clipboard and every caller knows.
+                    ownership.Emptied = true;
                     // The sequence right after OUR EmptyClipboard, read under the same lock (journaled for diagnostics;
                     // since round 18 no sequence on disk is proof of anything).
                     uint emptiedAt = Native.GetClipboardSequenceNumber();
@@ -1308,7 +1317,15 @@ namespace DoodleNote.DictationHelper
                         PendingClipboard.Stage(record, "restore-emptied", emptiedAt);
                         trace = new PutBackTrace(abandoned ? "write-rollback (late)" : "write-rollback (unjournaled)", sequenceBeforeOpen);
                         trace.Emptied(true, 0); // the write's own EmptyClipboard, just above
-                        ownership.PutBack = saved.PutBackResult(saved.PutBackOpen(trace));
+                        // Test build only (round 23, B1): the rollback throws before its put-back, or after it but before
+                        // its result is assigned.
+                        string rollbackThrow = TestMode.Env("DICTATION_HELPER_TEST_THROW_IN_ROLLBACK");
+                        if (rollbackThrow == "before-set") throw new InvalidOperationException("test: thrown in the write's rollback, before its put-back");
+                        bool rolledBack = saved.PutBackOpen(trace);
+                        if (rollbackThrow == "after-set") throw new InvalidOperationException("test: thrown in the write's rollback, after its put-back");
+                        // PutBack is assigned only for a COMPLETED rollback: it is what distinguishes it from an emptied
+                        // clipboard whose rollback did not finish (Emptied is already set).
+                        ownership.PutBack = saved.PutBackResult(rolledBack);
                         if (job != null) job.PutBack = ownership.PutBack;
                         saved.LoseAuthority("the write put the saved content back itself (" + ownership.PutBack + ")");
                         Wire.Log((abandoned ? "the late clipboard write" : "the unjournaled clipboard write") + " put the user's saved content back: " + ownership.PutBack);
@@ -1696,9 +1713,11 @@ namespace DoodleNote.DictationHelper
     /// </summary>
     internal sealed class ClipboardOwnership
     {
-        /// <summary>Our write emptied the clipboard: the user's content is gone from it until restored.</summary>
+        /// <summary>Our write emptied the clipboard: the user's content is gone from it until restored. Round 23: set on the
+        /// statement right after EmptyClipboard succeeds, before anything that can throw.</summary>
         public bool Emptied;
-        /// <summary>The write emptied the clipboard and put the saved content back itself, in the same open: its result.</summary>
+        /// <summary>The write emptied the clipboard and put the saved content back itself, in the same open, and that rollback
+        /// COMPLETED: its result. Null for a rollback that did not finish (then Emptied alone decides: kept, offered).</summary>
         public string PutBack;
         /// <summary>The transaction could not be journaled before emptying: nothing was emptied.</summary>
         public bool JournalFailed;
