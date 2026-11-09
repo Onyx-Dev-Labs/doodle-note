@@ -246,6 +246,51 @@ process.stdin.on('end', () => process.exit(0))
   }
 })
 
+test('Windows (round 23): a late result names what its put-back did not include, before the reply (carried into it) and after (to the listeners)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-late-names-'))
+  const script = join(dir, 'helper.js')
+  writeFileSync(
+    script,
+    `
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+send({ event: 'ready', pid: process.pid, platform: 'win32' })
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    if (req.op === 'deliver') {
+      send({ event: 'clipboard', phase: 'late-restore', id: req.id, clipboard: 'skipped', missing: ['FileContents (not provided by the app that copied it)'] })
+      send({ event: 'reply', id: req.id, ok: true, outcome: 'uncertain', verified: false, method: 'paste', clipboard: 'unrestored', clipboardHolds: 'unknown' })
+      send({ event: 'clipboard', phase: 'late-restore', id: 'older', clipboard: 'partial', missing: ['CF_BITMAP (no picture to rebuild it from)'] })
+    } else send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`
+  )
+  const client = new DictationHelperClient({
+    command: process.execPath,
+    args: [script],
+    platform: 'win32'
+  })
+  const late: string[] = []
+  client.onClipboardLate((clipboard, id, missing) =>
+    late.push(`${clipboard} ${id} ${(missing ?? []).join('|')}`)
+  )
+  try {
+    const result = await client.deliver('s1', 'x', {}, 'd1')
+    assert.equal(result.clipboard, 'skipped')
+    assert.deepEqual(result.clipboardMissing, [
+      'FileContents (not provided by the app that copied it)'
+    ])
+    assert.ok(await waitFor(() => late.length === 1))
+    assert.deepEqual(late, ['partial older CF_BITMAP (no picture to rebuild it from)'])
+  } finally {
+    await client.dispose()
+  }
+})
+
 test('Windows: deliveries outstanding at once are bounded; a late result of an outstanding one is never evicted', async () => {
   const client = new DictationHelperClient({ ...offerHelper(), platform: 'win32' })
   try {

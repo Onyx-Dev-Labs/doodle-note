@@ -218,13 +218,16 @@ function toOffer(value: unknown): ClipboardOffer | null {
   }
 }
 
-/** Format names and reasons from the helper (strings only, bounded): what a put-back did not include. */
+/**
+ * Format names and reasons from the helper (strings only): what a put-back did not include. Round 23
+ * (Astra S2): every name is kept (a list beyond 256 keeps its count: "and N more"), never silently cut.
+ */
 function toNames(value: unknown): string[] {
   if (!Array.isArray(value)) return []
-  return value
+  const names = value
     .filter((name): name is string => typeof name === 'string' && name.length > 0)
-    .slice(0, 16)
     .map((name) => (name.length > 160 ? `${name.slice(0, 160)}…` : name))
+  return names.length > 256 ? [...names.slice(0, 256), `and ${names.length - 256} more`] : names
 }
 
 export class DictationHelperClient {
@@ -270,7 +273,7 @@ export class DictationHelperClient {
   private gatedChunks: string[] = []
   private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
   private readonly clipboardLateListeners = new Set<
-    (clipboard: string, deliveryId?: string) => void
+    (clipboard: string, deliveryId?: string, missing?: string[]) => void
   >()
   /**
    * Windows: deliveries whose reply has not been consumed yet. A clipboard result for one of them (a late
@@ -281,7 +284,7 @@ export class DictationHelperClient {
   private readonly awaitingDeliver = new Set<string>()
   private readonly offerListeners = new Set<(offer: ClipboardOffer) => void>()
   private readonly offerGoneListeners = new Set<(record: string) => void>()
-  private readonly lateOutcomes = new Map<string, string>()
+  private readonly lateOutcomes = new Map<string, { clipboard: string; missing: string[] }>()
 
   constructor(
     private readonly launch: HelperLaunch,
@@ -428,7 +431,9 @@ export class DictationHelperClient {
     return reply?.dismissed === true
   }
 
-  onClipboardLate(listener: (clipboard: string, deliveryId?: string) => void): () => void {
+  onClipboardLate(
+    listener: (clipboard: string, deliveryId?: string, missing?: string[]) => void
+  ): () => void {
     this.clipboardLateListeners.add(listener)
     return () => this.clipboardLateListeners.delete(listener)
   }
@@ -584,8 +589,9 @@ export class DictationHelperClient {
       late === undefined
         ? null
         : {
-            clipboard: late,
-            ...(late === 'unrestored' ? { clipboardHolds: 'unknown' as const } : {})
+            clipboard: late.clipboard,
+            ...(late.clipboard === 'unrestored' ? { clipboardHolds: 'unknown' as const } : {}),
+            ...(late.missing.length > 0 ? { clipboardMissing: late.missing } : {})
           }
     if (!reply) {
       return {
@@ -600,6 +606,7 @@ export class DictationHelperClient {
       reply.clipboard = lateFields.clipboard
       if (lateFields.clipboardHolds) reply.clipboardHolds = lateFields.clipboardHolds
       else delete reply.clipboardHolds
+      if (lateFields.clipboardMissing) reply.clipboardMissing = lateFields.clipboardMissing
     }
     const outcome = reply.outcome
     return {
@@ -627,7 +634,12 @@ export class DictationHelperClient {
       ...(toNames(reply.clipboardMissing).length > 0
         ? { clipboardMissing: toNames(reply.clipboardMissing) }
         : {}),
-      ...(reply.clipboardNotice === 'not-saved' ? { clipboardNotice: 'not-saved' as const } : {})
+      ...(reply.clipboardNotice === 'not-saved' ? { clipboardNotice: 'not-saved' as const } : {}),
+      ...(reply.clipboardNotice === 'not-saved' &&
+      typeof reply.clipboardNoticeReason === 'string' &&
+      /^[a-z-]{1,32}$/.test(reply.clipboardNoticeReason)
+        ? { clipboardNoticeReason: reply.clipboardNoticeReason }
+        : {})
     }
   }
 
@@ -1180,6 +1192,8 @@ export class DictationHelperClient {
             ? 'restored'
             : 'unknown'
       const id = typeof parsed.id === 'string' ? parsed.id : ''
+      // Round 23 (Astra S1): what the put-back did not include travels with the event (it can precede a reply).
+      const missing = toNames(parsed.missing)
       console.error(`[dictation] clipboard ${parsed.phase} for an earlier delivery: ${clipboard}`)
       const record = typeof parsed.record === 'string' ? parsed.record : ''
       // A kept transaction the helper could not prove its own: offered to the user, nothing written.
@@ -1193,10 +1207,11 @@ export class DictationHelperClient {
       // Its delivery's reply is not consumed yet: that reply carries it (see deliver()).
       if (id && this.awaitingDeliver.has(id)) {
         // Bounded by MAX_DELIVERIES_IN_FLIGHT; it leaves when its delivery settles (never evicted).
-        this.lateOutcomes.set(id, clipboard)
+        this.lateOutcomes.set(id, { clipboard, missing })
         return false
       }
-      for (const listener of this.clipboardLateListeners) listener(clipboard, id || undefined)
+      for (const listener of this.clipboardLateListeners)
+        listener(clipboard, id || undefined, missing.length > 0 ? missing : undefined)
       return false
     }
     if (parsed.event === 'clipboard' && parsed.phase === 'offer-gone') {

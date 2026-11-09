@@ -337,13 +337,37 @@ export const CLIPBOARD_PROBLEM_MESSAGES: Record<ClipboardProblem, string> = {
     'DoodleNote could not save your clipboard, so it did not paste with it. Your clipboard was left as it was.'
 }
 
+/** Round 23: why the clipboard was not used, said to the user (the reason the helper gave). */
+export const CLIPBOARD_NOT_SAVED_MESSAGES: Record<string, string> = {
+  'too-large':
+    'Your clipboard holds something too large to save (such as a large screenshot), so DoodleNote did not paste with it and left your clipboard as it was. Copy something smaller first, or copy the dictated text from DoodleNote and paste it yourself.',
+  unrendered:
+    "The app you copied from did not provide your clipboard's content, so DoodleNote did not paste with it. Your clipboard was left as it was.",
+  'nothing-savable':
+    'Nothing on your clipboard could be saved, so DoodleNote did not paste with it. Your clipboard was left as it was.',
+  'owner-unresponsive':
+    'The app that owns your clipboard is not responding, so DoodleNote did not paste with it. Your clipboard was left as it was.'
+}
+
+/** At most three names on a card or notice, then "+N more" (the window has a fixed size). */
+export function listMissing(missing: string[]): string {
+  const shown = missing.slice(0, 3).map((n) => (n.length > 60 ? `${n.slice(0, 60)}…` : n))
+  return missing.length > 3 ? `${shown.join('; ')} +${missing.length - 3} more` : shown.join('; ')
+}
+
 /**
  * The sentence for a clipboard problem. When the helper named what a put-back did not include, the
  * sentence names it ("Your clipboard was put back except: FileContents (not provided by the app that copied it).").
  */
-export function clipboardProblemMessage(problem: ClipboardProblem, missing?: string[]): string {
+export function clipboardProblemMessage(
+  problem: ClipboardProblem,
+  missing?: string[],
+  reason?: string
+): string {
   if ((problem === 'skipped' || problem === 'partial') && missing && missing.length > 0)
-    return `Your clipboard was put back except: ${missing.join('; ')}.`
+    return `Your clipboard was put back except: ${listMissing(missing)}.`
+  if (problem === 'not-saved' && reason && CLIPBOARD_NOT_SAVED_MESSAGES[reason])
+    return CLIPBOARD_NOT_SAVED_MESSAGES[reason]!
   return CLIPBOARD_PROBLEM_MESSAGES[problem]
 }
 
@@ -369,7 +393,7 @@ export type OverlayPanel =
   | { kind: 'changed'; name: string }
   | { kind: 'diff'; name: string; segments: DiffSegment[] }
   | { kind: 'learned'; pairs: Array<{ from: string; to: string }> }
-  | { kind: 'clipboard'; problem: ClipboardProblem; missing?: string[] }
+  | { kind: 'clipboard'; problem: ClipboardProblem; missing?: string[]; reason?: string }
   /** Windows: a kept clipboard the helper could not prove its own; `changed`: what a restore would overwrite now. */
   | {
       kind: 'clipboard-offer'
@@ -406,8 +430,11 @@ export const CLIPBOARD_OFFER_COPY = {
   confirmDetail: (saved: string): string =>
     `Delete saved copy removes what you had copied before the dictation (${saved}) for good; your clipboard stays as it is. Keep it brings the offer back.`,
   deleteFailed: 'The saved copy could not be deleted. Try again.',
-  incomplete: (missing: string[]): string =>
-    `Part of this clipboard could not be saved${missing.length > 0 ? `: ${missing.join('; ')}` : ''}. Restore puts back the rest.`
+  // Round 23: at most three names (+N more) so the buttons stay in view; truthful when nothing goes back.
+  incomplete: (missing: string[], formats = 1): string =>
+    formats > 0
+      ? `Part of this clipboard could not be saved${missing.length > 0 ? `: ${listMissing(missing)}` : ''}. Restore puts back the rest.`
+      : `None of this clipboard could be saved${missing.length > 0 ? ` (${listMissing(missing)})` : ''}. Restore cannot put any of it back; Dismiss deletes the saved record.`
 } as const
 
 /** The view for a panel; `base` supplies the edge and the quiet settings. */
@@ -454,7 +481,7 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
       return {
         ...common,
         tone: 'warn',
-        title: clipboardProblemMessage(panel.problem, panel.missing),
+        title: clipboardProblemMessage(panel.problem, panel.missing, panel.reason),
         controls: { ...NONE, dismiss: true },
         diff: null
       }
@@ -482,7 +509,7 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
           : CLIPBOARD_OFFER_COPY.detail(saved),
         // Round 22: an incomplete offer says what a Restore cannot put back, before the user chooses.
         warning: panel.offer.incomplete
-          ? CLIPBOARD_OFFER_COPY.incomplete(panel.offer.missing)
+          ? CLIPBOARD_OFFER_COPY.incomplete(panel.offer.missing, panel.offer.formats)
           : null,
         controls: { ...NONE, offerRestore: true, offerDismiss: true },
         diff: null

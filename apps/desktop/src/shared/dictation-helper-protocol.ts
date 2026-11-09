@@ -105,8 +105,13 @@ export interface HelperDelivery {
    * (for example "FileContents (not provided by the app that copied it)").
    */
   clipboardMissing?: string[]
-  /** Windows: not-saved when the clipboard could not be saved, so nothing was pasted. */
+  /** Windows: not-saved when the clipboard could not be saved or used, so nothing was pasted with it. */
   clipboardNotice?: 'not-saved'
+  /**
+   * Windows (round 23): why: too-large, unrendered, nothing-savable, owner-unresponsive, zero-sequence,
+   * no-record, deadline, no-window, unreadable.
+   */
+  clipboardNoticeReason?: string
 }
 
 export type HoldFailure = 'input-monitoring-denied' | 'unknown-key' | 'helper-unavailable'

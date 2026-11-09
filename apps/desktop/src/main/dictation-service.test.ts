@@ -45,8 +45,10 @@ interface Harness {
     delivery: HelperDelivery
     /** Windows: false when the fake helper would not be restarted on its own. */
     willRestart?: boolean
-    clipboardLateListener?: (clipboard: string, deliveryId?: string) => void
+    clipboardLateListener?: (clipboard: string, deliveryId?: string, missing?: string[]) => void
     lastDeliveryId?: string
+    /** Round 23: what the fake helper sends before it answers a Restore (the real event order). */
+    beforeRestoreAnswer?: () => void
     /** Windows clipboard offers: what the fake helper offers, and what the service asked of it. */
     offers: ClipboardOffer[]
     offerListener?: (offer: ClipboardOffer) => void
@@ -249,7 +251,9 @@ function harness(
     helper: {
       available: true,
       willRestart: () => helper.willRestart !== false,
-      onClipboardLate: (listener: (clipboard: string, deliveryId?: string) => void) => {
+      onClipboardLate: (
+        listener: (clipboard: string, deliveryId?: string, missing?: string[]) => void
+      ) => {
         helper.clipboardLateListener = listener
         return () => {}
       },
@@ -272,6 +276,7 @@ function harness(
           sequence,
           ...(acceptIncomplete ? { acceptIncomplete } : {})
         })
+        helper.beforeRestoreAnswer?.()
         return helper.restoreAnswers.shift() ?? { result: 'restored' }
       },
       dismissClipboardOffer: async (record: string) => {
@@ -3029,6 +3034,57 @@ test('Windows (round 22): a Restore the helper finds incomplete empties nothing;
     sequence: 41,
     acceptIncomplete: true
   })
+})
+
+test('Windows (round 23): a completed Restore whose offer was withdrawn first (offer-gone and recovered before the reply) still names what is missing', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const missing = ['FileContents (not provided by the app that copied it)']
+  h.helper.offers = [offer({ incomplete: true, missing })]
+  h.helper.restoreAnswers = [{ result: 'restored-partially', missing }]
+  await h.service.start()
+  await tick()
+  h.helper.offers = []
+  // The helper's order: offer-gone, then recovered (with the names), then the reply.
+  h.helper.beforeRestoreAnswer = () => {
+    h.helper.offerGoneListener!(offer().record)
+    h.helper.clipboardLateListener!('restored-partially', 'd1', missing)
+  }
+  h.service.onOverlayAction('offer-restore', null)
+  await tick()
+  assert.equal(
+    h.overlay.at(-1)!.title,
+    'Your clipboard was put back except: FileContents (not provided by the app that copied it).'
+  )
+})
+
+test('Windows (round 23): a late rollback names what it could not put back; a clipboard too large to save says why', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await h.service.start()
+  h.helper.delivery = {
+    outcome: 'uncertain',
+    reason: 'helper-timeout',
+    verified: false,
+    clipboard: 'unrestored',
+    clipboardHolds: 'unknown'
+  }
+  await speak(h, 'some words')
+  await tick()
+  h.helper.clipboardLateListener!('skipped', h.helper.lastDeliveryId, ['FileContents (too large)'])
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /put back except: FileContents \(too large\)/)
+  const n = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await n.service.start()
+  n.helper.delivery = {
+    outcome: 'delivered',
+    method: 'type',
+    verified: true,
+    clipboard: 'untouched',
+    clipboardNotice: 'not-saved',
+    clipboardNoticeReason: 'too-large'
+  }
+  await speak(n, 'typed words')
+  await tick()
+  assert.match(n.overlay.at(-1)!.title, /too large to save \(such as a large screenshot\)/)
 })
 
 test('Windows (round 22): a paste whose put-back skipped an owner-unrendered format names it; an unsaved clipboard is said too', async () => {

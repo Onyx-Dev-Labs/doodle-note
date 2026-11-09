@@ -320,6 +320,34 @@ test('the learned-word panel names the pair, or counts several, and only offers 
   assert.equal(two.title, 'Added 2 corrections to your dictionary.')
 })
 
+test('Windows (round 23): an incomplete card shows at most three names (+N more), and says so truthfully when nothing goes back', () => {
+  const base = overlayView(initialSessionState(), ctx())
+  const offer = {
+    record: '0'.repeat(32),
+    delivery: '',
+    formats: 2,
+    bytes: 900,
+    sequence: 3,
+    created: '',
+    likelyOurs: false,
+    incomplete: true,
+    missing: ['A (x)', 'B (x)', 'C (x)', 'D (x)', 'E (x)']
+  }
+  const some = panelView({ kind: 'clipboard-offer', offer }, base)
+  assert.equal(
+    some.warning,
+    'Part of this clipboard could not be saved: A (x); B (x); C (x) +2 more. Restore puts back the rest.'
+  )
+  const none = panelView(
+    { kind: 'clipboard-offer', offer: { ...offer, formats: 0, missing: ['A (x)'] } },
+    base
+  )
+  assert.equal(
+    none.warning,
+    'None of this clipboard could be saved (A (x)). Restore cannot put any of it back; Dismiss deletes the saved record.'
+  )
+})
+
 test('Windows: the clipboard offer card names formats and size only, with Restore and Dismiss', () => {
   const base = overlayView(initialSessionState(), ctx())
   const view = panelView(

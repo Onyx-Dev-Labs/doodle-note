@@ -159,7 +159,9 @@ export interface HelperLike {
    * Windows: a delivery's clipboard result arrived after its reply (a late rollback, a recovery of a kept
    * transaction, or a kept one left pending); it names the delivery when known (see the client).
    */
-  onClipboardLate?(listener: (clipboard: string, deliveryId?: string) => void): () => void
+  onClipboardLate?(
+    listener: (clipboard: string, deliveryId?: string, missing?: string[]) => void
+  ): () => void
   /** Windows: a kept clipboard transaction offered to the user, and its withdrawal (see the client). */
   onClipboardOffer?(listener: (offer: ClipboardOffer) => void): () => void
   onClipboardOfferGone?(listener: (record: string) => void): () => void
@@ -449,8 +451,8 @@ export class DictationService {
     // Windows: a hook loss/re-install changes what the permissions panel shows; refresh it.
     if (deps.helper.onClipboardLate) {
       this.unsubscribe.push(
-        deps.helper.onClipboardLate((clipboard, deliveryId) =>
-          this.clipboardLate(clipboard, deliveryId)
+        deps.helper.onClipboardLate((clipboard, deliveryId, missing) =>
+          this.clipboardLate(clipboard, deliveryId, missing)
         )
       )
     }
@@ -559,7 +561,14 @@ export class DictationService {
       offer.incomplete === true
     )
     this.deps.log(`clipboard offer: restore ${done.result}`)
-    if (!this.offers.has(offer.record)) return
+    // Round 23 (Astra S1): a COMPLETED restore is reported even when its offer was withdrawn first (the helper
+    // sends offer-gone and recovered before its reply): the reply carries the names of what is missing.
+    const completed =
+      done.result === 'restored' ||
+      done.result === 'partial' ||
+      done.result === 'skipped' ||
+      done.result === 'restored-partially'
+    if (!completed && !this.offers.has(offer.record)) return
     if (done.result === 'incomplete') {
       // The helper found it incomplete but the card had not said so: nothing was emptied; the card says it now.
       this.offers.set(offer.record, { ...offer, incomplete: true, missing: done.missing ?? [] })
@@ -2025,6 +2034,7 @@ export class DictationService {
     clipboardHolds?: string
     clipboardMissing?: string[]
     clipboardNotice?: string
+    clipboardNoticeReason?: string
     deliveryId?: string
   }): string | null {
     // The newest delivery is the one a later clipboard result may still change.
@@ -2035,9 +2045,18 @@ export class DictationService {
     if (!problem) return null
     // Round 22: what the helper named as not put back is said by name.
     const missing = outcome.clipboardMissing
-    const message = clipboardProblemMessage(problem, missing)
+    const reason = outcome.clipboardNoticeReason
+    const message = clipboardProblemMessage(problem, missing, reason)
     if (outcome.kind === 'delivered') {
-      this.setPanel({ kind: 'clipboard', problem, ...(missing ? { missing } : {}) }, NOTICE_MS)
+      this.setPanel(
+        {
+          kind: 'clipboard',
+          problem,
+          ...(missing ? { missing } : {}),
+          ...(reason ? { reason } : {})
+        },
+        NOTICE_MS
+      )
       return null
     }
     const resting = this.state.resting
@@ -2053,7 +2072,7 @@ export class DictationService {
    * Windows: the warning for the last delivery said the clipboard could not be told; its rollback
    * finished later. The card's line and the panel now say what actually happened (or go away).
    */
-  private clipboardLate(clipboard: string, deliveryId?: string): void {
+  private clipboardLate(clipboard: string, deliveryId?: string, missing?: string[]): void {
     // Only the newest delivery's notice changes: a result for an older one never clears (or sets) it.
     if (deliveryId && this.clipboardDelivery && deliveryId !== this.clipboardDelivery) {
       this.deps.log(
@@ -2065,20 +2084,27 @@ export class DictationService {
     this.deps.log(`clipboard result after the reply: ${clipboard}`)
     if (this.clipboardWarning) {
       this.clipboardWarning = problem
-        ? { gen: this.clipboardWarning.gen, message: clipboardProblemMessage(problem) }
+        ? { gen: this.clipboardWarning.gen, message: clipboardProblemMessage(problem, missing) }
         : null
       this.render()
     }
     if (this.panel?.kind === 'clipboard')
-      this.setPanel(problem ? { kind: 'clipboard', problem } : null, problem ? NOTICE_MS : 0)
+      this.setPanel(
+        problem ? { kind: 'clipboard', problem, ...(missing ? { missing } : {}) } : null,
+        problem ? NOTICE_MS : 0
+      )
     // A problem nobody was told about yet (a kept transaction left pending, a rollback that failed later):
     // the recovery card's warning line when that card shows, else the clipboard panel.
     else if (problem && !this.clipboardWarning) {
       const resting = this.state.resting
       if (resting?.kind === 'recovery') {
-        this.clipboardWarning = { gen: resting.gen, message: clipboardProblemMessage(problem) }
+        this.clipboardWarning = {
+          gen: resting.gen,
+          message: clipboardProblemMessage(problem, missing)
+        }
         this.render()
-      } else this.setPanel({ kind: 'clipboard', problem }, NOTICE_MS)
+      } else
+        this.setPanel({ kind: 'clipboard', problem, ...(missing ? { missing } : {}) }, NOTICE_MS)
     }
   }
 
@@ -2094,6 +2120,7 @@ export class DictationService {
       clipboardHolds?: string
       clipboardMissing?: string[]
       clipboardNotice?: string
+      clipboardNoticeReason?: string
       deliveryId?: string
     }
   > {
@@ -2117,6 +2144,9 @@ export class DictationService {
       ...(result.clipboardHolds ? { clipboardHolds: result.clipboardHolds } : {}),
       ...(result.clipboardMissing ? { clipboardMissing: result.clipboardMissing } : {}),
       ...(result.clipboardNotice ? { clipboardNotice: result.clipboardNotice } : {}),
+      ...(result.clipboardNoticeReason
+        ? { clipboardNoticeReason: result.clipboardNoticeReason }
+        : {}),
       ...(deliveryId ? { deliveryId } : {})
     }
     if (result.outcome === 'delivered') return { kind: 'delivered', ...helper }

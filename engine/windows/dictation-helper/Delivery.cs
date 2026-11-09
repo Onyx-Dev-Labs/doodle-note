@@ -1243,7 +1243,17 @@ namespace DoodleNote.DictationHelper
                         job.Holds = outcome == "unrestored" ? "unknown" : null;
                         job.Outcome = outcome;
                         // Whenever it lands (before or after the reply), the app learns what happened; LateEnd runs whatever.
-                        try { Wire.Send(Wire.Fields("event", "clipboard", "phase", "late-restore", "id", deliveryId ?? "", "clipboard", outcome)); }
+                        try
+                        {
+                            Dictionary<string, object> lateEvent = Wire.Fields("event", "clipboard", "phase", "late-restore", "id", deliveryId ?? "", "clipboard", outcome);
+                            // Round 23 (Astra S1): the late result names what its put-back did not include, as a reply would.
+                            if (outcome == "skipped" || outcome == "partial")
+                            {
+                                List<string> missing = saved.Missing();
+                                if (missing.Count > 0) lateEvent["missing"] = missing;
+                            }
+                            Wire.Send(lateEvent);
+                        }
                         finally { DeliveriesInFlight.LateEnd(); }
                     }
                 }
