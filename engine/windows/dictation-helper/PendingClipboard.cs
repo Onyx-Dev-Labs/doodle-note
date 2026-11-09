@@ -478,9 +478,7 @@ namespace DoodleNote.DictationHelper
                 Wire.Log("the payload writer of record " + record.Id.Substring(0, 8) + " is still running; it will not publish");
             if (!deleted)
             {
-                // Intact (nothing was deleted): the next check finds it settled by its content, or offers it.
-                Wire.Log("clipboard record " + record.Id.Substring(0, 8) + " could not be deleted (" + why + "); kept, checked again later");
-                lock (gate) ScheduleRetry(record.Id, RetryKind.Check);
+                lock (gate) { NotDeleted(record.Id, why); ScheduleRetry(record.Id, RetryKind.Check); }
                 return;
             }
             lock (gate) { CancelRetry(record.Id); OfferGone(record.Id, "settled"); }
@@ -491,15 +489,28 @@ namespace DoodleNote.DictationHelper
         static bool DeleteId(string id, string why)
         {
             bool deleted = DeleteFiles(id);
-            if (!deleted)
-            {
-                Wire.Log("clipboard record " + id.Substring(0, Math.Min(8, id.Length)) + " could not be deleted (" + why + "); kept, tried again later");
-                return false;
-            }
+            if (!deleted) { NotDeleted(id, why); return false; }
             CancelRetry(id);
             OfferGone(id, why);
             Wire.Log("clipboard record " + id.Substring(0, Math.Min(8, id.Length)) + " deleted: " + why);
             return true;
+        }
+
+        /// <summary>
+        /// Under gate: a deletion that did not complete, reported as it is. Intact: kept, checked again later. The state
+        /// positively gone (a completed deletion that left the payload): no longer an offer (the card is withdrawn), the
+        /// payload is an orphan swept after 10 minutes.
+        /// </summary>
+        static void NotDeleted(string id, string why)
+        {
+            string shortId = id.Substring(0, Math.Min(8, id.Length));
+            if (Probe(StatePath(id)) == Presence.Absent)
+            {
+                Wire.Log("clipboard record " + shortId + " was deleted only in part (" + why + "): its state is gone, its payload is left (never restored from; swept after 10 minutes)");
+                OfferGone(id, why);
+                return;
+            }
+            Wire.Log("clipboard record " + shortId + " could not be deleted (" + why + "); kept whole, checked again later");
         }
 
         /// <summary>Under gate: an offer made for this record is withdrawn (the app removes its card).</summary>
@@ -561,11 +572,12 @@ namespace DoodleNote.DictationHelper
                     for (int j = 0; j < i; j++)
                         if (hookUnmark || !Native.SetFileInformationByHandle(held[j], Native.FileDispositionInfo, ref keep, 1)) cleared = false;
                     if (cleared) { Wire.Log("every mark already set was cleared: nothing deleted, the record is kept whole"); return false; }
-                    // A mark that could not be cleared: that file goes at the close. Complete the deletion instead (the
-                    // marks are a prefix of state .tmp, payload .tmp, state, payload: at worst the payload is left alone).
+                    // A mark that could not be cleared: that file goes at the close. Complete the deletion instead, from the
+                    // BEGINNING in the stated order (every handle marked again), so that what the close (or a kill) leaves
+                    // is still a prefix of state .tmp, payload .tmp, state, payload: never a state without its payload.
                     Wire.Log("ERROR: a deletion mark could not be cleared: completing the deletion instead");
                     completing = true;
-                    for (int k = i; k < held.Count; k++) Native.SetFileInformationByHandle(held[k], Native.FileDispositionInfo, ref mark, 1);
+                    for (int k = 0; k < held.Count; k++) Native.SetFileInformationByHandle(held[k], Native.FileDispositionInfo, ref mark, 1);
                     break;
                 }
             }
