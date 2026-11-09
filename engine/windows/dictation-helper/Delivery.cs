@@ -513,9 +513,9 @@ namespace DoodleNote.DictationHelper
             holdsAfterFailedWrite = null;
             if (!written)
             {
-                // The write failed part-way. If we emptied the clipboard, the user's content is gone
-                // from it unless we put it back now (before any typing fallback): ownership comes from
-                // having emptied it, not from the text landing, so an owned partial write is restored.
+                // The write failed part-way. If we emptied the clipboard, the user's content is gone from it unless it
+                // is put back now (before any typing fallback). Restore writes only on proof: a partial write of ours is
+                // no proof (another app may have added to it), so then the record is kept as an offer instead.
                 if (ours.Emptied)
                 {
                     clipboardAfterFailedWrite = saved.Restore(ours);
@@ -2138,9 +2138,9 @@ namespace DoodleNote.DictationHelper
                 bool provenBySequence = ours.Confirmed && ours.StillOurs();
                 if (!provenBySequence && OurWriteStillThere(ours))
                 {
-                    // A target that reads the synthesized ANSI text formats makes Windows render them, which
-                    // moves the sequence (measured: +3). Our window still owning the clipboard with exactly our
-                    // write on it (sentinel with this transaction's nonce, our markers, our text) is ours.
+                    // The sequence moved since our confirmation, but the clipboard still holds exactly our write (every
+                    // format compared byte for byte, at a sequence within our close and the formats Windows synthesizes):
+                    // ours. (Our confirmation materializes the synthesized forms, so a later reader does not move it.)
                     Wire.Log("the clipboard sequence moved since our write, but our window owns it and our complete write is on it (a target read the synthesized formats): restoring");
                     provenBySequence = true;
                 }
