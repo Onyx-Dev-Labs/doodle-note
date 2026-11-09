@@ -384,14 +384,12 @@ Each paste is a clipboard transaction with a record: the saved clipboard (DPAPI-
 user, with whether the save was complete, the transaction's random nonce and the dictated text's
 SHA-256) and a plain journal of its stage in %TEMP% under the app identity (record files are matched
 exactly: identity X never reads X-foo's, and a dev and a production identity never see each other's
-records or offers). Stages journaled BEFORE an EmptyClipboard of ours carry the sequence number before
-it (emptying, restoring, recovering); stages AFTER one carry the sequence read under the same lock
-right after it returned (emptied, restore-emptied, recovering-emptied) and, when the clipboard is
-closed with the record kept, the sequence read again after the close with our window still the owner
-(Windows moves the number at the close). "written" is journaled right after the close and again with
-the confirmed value. A step whose journal could not be written (after a short bounded retry) is not
-taken; a put-back whose stage could not be journaled still puts the content back, and keeps the record.
-A recovery keeps the stage it found as its origin. Every record carries its logon identity: the
+records or offers). Each stage is journaled around every EmptyClipboard of ours (emptying, emptied, written,
+restoring, restore-emptied, recovering, recovering-emptied, settled), with the sequence numbers of that moment
+for diagnostics only: since round 18 no sequence on disk is proof of anything (the confirmed sequence lives in the
+live transaction). A step whose journal could not be written (after a short bounded retry) is not taken, and the
+live transaction then loses its authority; a put-back whose stage could not be journaled still puts the content
+back, and keeps the record (offered). Every record carries its logon identity: the
 window-station session, the logon session (LUID), Windows' boot counter, the tick count and a per-logon
 random key in a volatile registry value (HKCU\Software\DoodleNote.Bark.Session). Volatile means it is
 removed when the user's hive is unloaded (logoff, reboot); the LUID covers a new logon while the hive
@@ -400,110 +398,158 @@ is replaced by a volatile one. The wall clock is not used. Another session or bo
 a key created after the record (deleted by a cleaner, or replaced), another LUID in the same session
 (an elevated helper) or anything missing is "unknown", never a reason to delete.
 
-Policy: the helper writes the user's saved content back on its own ONLY when the clipboard is provably
-its own: (a) our complete write is on it (our sentinel with this transaction's nonce, set last; our
-exact marker values; our text by its hash) AT a sequence within our own operations from the journaled
-write (a clipboard manager that replays every format of our write after a crash is offered, not
-restored), or (b) it is empty at exactly a sequence journaled after OUR EmptyClipboard. Our window owning
-the clipboard is never proof (another process can add or replace a format without emptying it, which keeps
-our window the owner).
+Policy (round 18, an owner decision; a deliberate, conservative behaviour change). Automatic restore authority
+NEVER comes from disk. The only automatic write-back of the user's clipboard is the one made by the live,
+in-memory transaction that wrote the dictated text, in the helper process that wrote it (its restore after the
+paste, or after a failed paste), and only while the clipboard is provably still its write: it was confirmed under
+the clipboard lock and still has our window as owner at the confirmed sequence, or it still holds exactly our
+write (every format compared byte for byte) within the sequence allowance below. Our window owning the clipboard
+is never proof by itself. Every record that the recovery machinery reads back from disk is OFFERED, unconditionally.
+That covers a record after a helper crash, kill or restart, on a retry tick, on a sweep, after an adoption or a
+rebuild, after a failed or interrupted restore, and from another boot, logon or session. The only exceptions:
+another session's record is left alone, and a record whose saved content is already exactly on the clipboard is
+deleted without writing anything. What the user sees: after a helper crash or kill mid-dictation the saved clipboard
+is offered on the card ("Put back what you had copied before?") instead of being put back silently. The user's
+Restore and Dismiss are unchanged.
 
-Text forms (round 17, unchanged from round 15 in what is pasted): our write sets only CF_UNICODETEXT (plus
-the markers and the sentinel). Windows sets CF_LOCALE when we close the clipboard (our write thread's input
-language) and synthesizes CF_TEXT and CF_OEMTEXT from our text on that locale's code pages, exactly as it
-always did. Round 16 wrote the three itself from three independent settings (the .NET culture, the system
-ANSI and OEM code pages), which could disagree and changed what ANSI and RichEdit targets pasted on
-mixed-locale systems; that is undone. The sentinel states the locale Windows will set. Every look compares
-the three forms Windows made with what Windows makes. The preferred source, reading Windows' bytes back
-inside our write's own open (nobody else can write then), does not exist: on the CI runner Windows renders
-none of the three before the clipboard is closed (CF_LOCALE is set at the close; GetClipboardData returns
-nothing for them inside the open). The write still tries and would use them; otherwise, as on the runner,
-the expected bytes are Windows' conversion of our text on the stated locale's default ANSI and OEM code pages
-(GetLocaleInfo, WideCharToMultiByte). CI compares that byte for byte with Windows' own synthesis for
-non-ASCII, best-fit, unmappable and surrogate-pair text under four locales (en-US, ru-RU, pl-PL, ja-JP),
-and checks that the CF_LOCALE Windows chooses for a Unicode-only write is the input language the helper
-states. A difference on some other system would make a write look changed: a false rejection (nothing
-pasted, the record offered), never a wrong paste. Our write's confirmation
-compares, under the lock, every format byte for byte (our text, markers and sentinel, and the three forms),
-which also materializes the forms (a later passive reader does not move the sequence; CI checks it); it reads
-the sequence AFTER those reads and accepts it only within what our close and the formats Windows synthesized
-explain. A read that fails counts as a rejection.
+The one guard. The live transaction carries one flag, set once and never cleared, checked at the top of the only
+in-process path that writes the clipboard after our write (its restore; every caller goes through it: the normal
+restore, the restore after a failed paste or an exception, the late-write thread, the uninspectable path). It is
+set by:
+- a confirmation that rejects our write (not exactly ours, the sequence beyond our close, or a read that failed);
+- every keep-as-offer (an owner change, an owned but changed clipboard);
+- an incomplete put-back;
+- a stage that could not be journaled;
+- the write's own put-back;
+- settlement (the transaction leaving in flight).
 
-OFFER-ONLY (round 17). A rejection, and every other loss of authority, is recorded as a persisted fact on the
-record, set once and never cleared (only the record's deletion removes it): on a confirmation rejection
-(content, sequence, or a failed read), on keeping a record as an offer (an owner change, an owned but changed
-clipboard), on a restore that did not complete or whose stage could not be journaled, on adopting a payload
-from .bin.tmp, on rebuilding an invalid state, on an undecryptable payload, and on being offered at all.
-The decision procedure checks it first (after the session): an offer-only record can only be offered, or be
-deleted when the clipboard already holds exactly the saved content; never restored on its own by (a) or
-(b), in this helper or any later one. The fact is written through the flushed state write; if that write
-fails, this helper keeps it in memory (stated plainly: a later helper then sees the previous state and
-re-derives from the content and the sequence). Automatic restore therefore exists only for a transaction
-that never left the straight path (a crash during our own write or our own restore). A user's Restore
-interrupted by a crash is offered again rather than finished on its own.
+The record's persisted offerOnly field is kept in the state schema as an informational fact. Nothing read from disk
+depends on it being written in time.
 
-STRICT STATE. A state file is valid only when it is exactly one this helper writes: every field present with
-its type and range, nothing else, a known stage, this format and this record's id. No default ever stands in
-for a missing field. Anything else (`{}`, a missing stage, an unknown stage, a missing or mistyped identity,
-extra fields, truncated or zeroed bytes) proves nothing and takes one route: if a payload is there (adopted
-from .bin.tmp if need be) that names the record, or that cannot be decrypted now, the state is rebuilt as
-stage "unknown", OFFER-ONLY, with an UNKNOWN identity (session -1, no logon or key, pid 0) and offered;
-otherwise there is nothing to restore from and the state is removed. An invalid state that still names
-another session, or a running helper, is left alone. A rebuilt record has no session, so it is offered, and
-can be restored or dismissed, in ANY session of this user that shares %TEMP% (the decision procedure's
-session isolation applies only to records whose identity is known). It cannot extend the retention: it is
-offered in the boot it is rebuilt in only (counted as its second offer boot), and an offer tick of this boot
-the damaged state still shows is kept; its delivery id is lost (the card cannot name the dictation). A state
-journaled "settled" (written right before a restored record's deletion, while it is still in flight) is
-deleted on sight, never offered.
+Text forms (unchanged from round 15 in what is pasted): our write sets only CF_UNICODETEXT (plus the markers and the
+sentinel). Windows sets CF_LOCALE when we close the clipboard (the input language of our write thread) and
+synthesizes CF_TEXT and CF_OEMTEXT from our text on that locale's code pages, exactly as it always did. The locale
+Windows will set is pinned in the live transaction and stated in our sentinel. A look compares CF_LOCALE with the
+pinned value, and CF_TEXT and CF_OEMTEXT with Windows' conversion of our exact text on the pinned locale's default
+ANSI and OEM code pages, up to their terminator. A sentinel that states another locale is not ours. Windows renders
+none of the three inside our own open, so there is nothing to read back there (round 17 found this on the runner;
+round 18 removed the attempt). CI checks:
+- the conversion byte for byte against Windows' own synthesis, under en-US, ru-RU, pl-PL and ja-JP, for non-ASCII,
+  best-fit, unmappable and surrogate-pair text;
+- that the CF_LOCALE Windows stamps is the pinned locale, also when the write thread uses another input language
+  and when another thread uses a third.
 
-Every other state is pending: the
-record is kept, nothing is written, and the app shows "DoodleNote may have changed your clipboard while
-dictating. Put back what you had copied before?" with Restore and Dismiss (the card's own buttons; the
-shared dismiss of other cards never touches it). The card names formats and size only, never content.
-Restore runs as a journaled transaction of its own, and only while the clipboard is exactly as it was
-when first offered (the offered sequence is fixed then; a retry never refreshes it); if it changed, the
-card says what a restore would overwrite (formats and size) and asks again. Dismiss asks first ("Delete
-the saved clipboard?"); the card goes only once the helper reports the files deleted, and stays with
-"The saved copy could not be deleted. Try again." otherwise. Every outstanding offer is kept and the next
-one shows after one is resolved. Offers load at app start and every hour, whether or not Bark is on (it
-is the user's clipboard, not a dictation feature; the helper is started for it only when this identity
-has kept records on disk), and when Bark is turned on. A pending record is deleted only by the user's Restore or Dismiss, by the
-policies below, or when that loses nothing (the clipboard already holds exactly the saved
-content, or nothing was emptied); never because the clipboard moved on (the user's later copy, our own later
-dictation, another offer's restore, a live foreign owner, the owner changing).
+A difference on some other system would make a write look changed: a false rejection (nothing pasted, the record
+offered), never a wrong paste.
 
-The full deletion contract, stated plainly. PROOFS (nothing of the user's can be lost): a completed restore
-(automatic on proof (a) or (b), or the user's Restore), reported as restored, partial or skipped; the
-clipboard already holding exactly the saved content (any logon of this session); nothing having been emptied
-(stage "saved"; or "emptying" with the sequence unchanged; same logon, never for an offer-only record). THE
-USER: Dismiss (after "Delete the saved clipboard?"). POLICIES (they can delete content the user might still
-want; chosen limits, not proofs): retention, 24 h after the record's first offer, on the tick count of that
-boot (the helper checks every 30 minutes through the full decision procedure, the app every hour); the boot
-limit, a record is offered in at most two boots, the boot of its first offer and the next one (an offer
-restarts in the second, because sequence numbers restart; a boot that crashed before any offer does not
-count) and is deleted in a third; a rebuilt record, in the boot it is rebuilt in only; the unreadable-payload
-policy, a payload DPAPI cannot decrypt now (not bad data: a key or profile not available, e.g. after a
-password reset) is kept offer-only, its 24 h and boot clock starts at the first failed attempt, and it is
-then deleted as unrecoverable (logged); and cleanup of records that cannot be restored from: a payload whose
-data is bad (decryption reports bad data, or it does not parse), a payload of an earlier format, a payload
-whose id does not match its state, an orphaned payload (no state file at all, older than 10 minutes: it may
-be a record the user dismissed whose deletion was cut short), a stray state .tmp (no state file, older than
-10 minutes) and a round-8 record. A state file with no payload and no complete .bin.tmp is not "corrupt":
-there is nothing left to restore from, so it is removed. A payload next to an INVALID state is rebuilt and
-offered (above); a payload with NO state is an orphan; the two are kept distinct. State writes go through to
-disk (write-through and flush) before they replace the previous file.
+The sequence allowance (a continuity limitation, stated plainly). The confirmation and the later looks accept a
+sequence up to Windows' close moves plus the three forms it synthesizes (2 + 3) beyond the one sampled inside our
+write. Within that allowance, a foreign rewrite of an existing text format with the SAME bytes is not detected
+(the smallest undetected foreign action is one such replacement after the confirmation). It is harmless by
+content: what is pasted or put back is byte-identical. The allowance is not tightened: that cannot be validated
+natively, and a false rejection would leave an offer after an ordinary dictation.
 
-Deletion. Every file of the record is opened with delete access and no sharing (another process holding any
-of them, an AV scan or an indexer, makes the whole deletion wait: nothing deleted, the record stays as it
-was, is checked again later, and Dismiss reports it not deleted), every handle is marked for deletion in the
-order state .tmp, payload .tmp, state, payload, and their close removes the files. It is NOT atomic across
-the helper's death: marks already set are honoured when a killed process's handles close. Every crash point
-therefore ends as the whole record, or as the payload without its state (never restored from, swept as an
-orphan after 10 minutes, which completes a deletion already decided). Never "offered again after Dismiss",
-never "a state kept without its payload offered as restorable". A mark that fails clears the marks already
-set (nothing deleted); if clearing one fails too, that file goes at the close, so the deletion is completed
-instead and reported as such. CI kills a helper between two marks.
+STRICT STATE. A state file is valid only when it is exactly one this helper writes:
+- every field present, with its type and range;
+- nothing else;
+- a known stage;
+- this format and this record's id.
+
+No default ever stands in for a missing field. Anything else proves nothing and takes one route: `{}`, a missing
+stage, an unknown stage, a missing or mistyped identity, extra fields, or truncated or zeroed bytes.
+- If a payload is there (adopted from .bin.tmp if need be) and names the record, or cannot be decrypted or looked at
+  now, the state is rebuilt. The rebuilt state has stage "unknown" and an UNKNOWN identity (session -1, no logon or
+  key, pid 0), and the record is offered.
+- If the payload is positively absent, the state is removed.
+- An invalid state is checked for its boot first, as a valid one is. One of an earlier boot is rebuilt and offered
+  here; one of this boot that names another session, or a running helper, is left alone.
+
+A rebuilt record has no session, so it is offered, and can be restored or dismissed, in ANY session of this user
+that shares %TEMP%. It is offered in the boot it is rebuilt in only (counted as its second offer boot), and an offer
+tick of this boot that the damaged state still shows is kept. So damage cannot extend the retention as long as that
+timing information is recoverable; a state damaged beyond it starts a new, bounded clock. Its delivery id is lost.
+
+A state journaled "settled" is deleted on sight, never offered. "Settled" is written before a restored record's
+file cleanup, for both the transaction's own restore and the user's Restore, and the offer is withdrawn at the same
+moment.
+
+PRESENCE. File.Exists is false on any error, which is no proof of absence. Every destructive or deletion-deciding
+look uses a three-state probe (GetFileAttributesW):
+- ABSENT only for "file not found" and "path not found";
+- PRESENT when attributes are read;
+- UNKNOWN otherwise.
+
+These act only on ABSENT: "missing payload" cleanup (a state is deleted for a missing payload only when both .bin
+and .bin.tmp are positively absent), adoption, the orphan and stray-.tmp sweeps (an unreadable file time is never
+"old"), the deletion's own checks, and Dismiss. UNKNOWN keeps the record whole. A payload that cannot be looked at,
+read or decrypted now is kept offer-only and bounded by the unreadable-payload policy below, so nothing loops for
+ever.
+
+Every other state is pending:
+- The record is kept, nothing is written, and the app shows "DoodleNote may have changed your clipboard while
+  dictating. Put back what you had copied before?" with Restore and Dismiss (the card's own buttons; the shared
+  dismiss of other cards never touches it). The card names formats and size only, never content.
+- Restore runs as a journaled transaction of its own (offer-only from the start: interrupted, it is offered again),
+  and only while the clipboard is exactly as it was when first offered. The offered sequence is fixed then; a retry
+  never refreshes it. If the clipboard changed, the card says what a restore would overwrite (formats and size) and
+  asks again.
+- Dismiss asks first ("Delete the saved clipboard?"). The card goes only once the helper reports the files deleted,
+  and stays with "The saved copy could not be deleted. Try again." otherwise.
+- An offer whose record vanished another way is withdrawn once its state is positively absent.
+- Every outstanding offer is kept, and the next one shows after one is resolved.
+- Offers load at app start and every hour, whether or not Bark is on (it is the user's clipboard, not a dictation
+  feature; the helper is started for it only when this identity has kept records on disk), and when Bark is turned
+  on.
+
+The full deletion contract, stated plainly.
+- PROOFS (nothing of the user's can be lost):
+  - a completed restore (the live transaction's own, or the user's Restore), reported as restored, partial or
+    skipped;
+  - the clipboard already holding exactly the saved content (any logon of this session);
+  - nothing having been emptied (stage "saved": our journal is written before any EmptyClipboard of ours);
+  - a state whose payload is positively absent (nothing to restore from).
+- THE USER: Dismiss (after "Delete the saved clipboard?").
+- POLICIES (they can delete content the user might still want; chosen limits, not proofs):
+  - retention: 24 h after the record's first offer, on the tick count of that boot (the helper checks every 30
+    minutes, the app every hour);
+  - the boot limit: offered in at most two boots, the boot of its first offer and the next one, then deleted (an
+    offer restarts in the second boot, because sequence numbers restart);
+  - a rebuilt record is offered in the boot it is rebuilt in only;
+  - the unreadable-payload policy: a payload that cannot be decrypted (not bad data: a key or profile not available,
+    e.g. after a password reset), looked at or read now is kept offer-only, its 24 h and boot clock starts at the
+    first failed attempt, and it is then deleted as unrecoverable (logged);
+  - cleanup of records that cannot be restored from:
+    - a payload whose data is bad;
+    - a payload of an earlier format;
+    - a payload whose id does not match its state;
+    - an orphaned payload (state positively absent, older than 10 minutes: it may be a record the user dismissed
+      whose deletion was cut short);
+    - a stray state .tmp;
+    - a round-8 record.
+
+A payload next to an INVALID state is rebuilt and offered; a payload with NO state is an orphan; the two are kept
+distinct. State writes go through to disk (write-through and flush) before they replace the previous file.
+
+Deletion.
+- Every file of the record is opened with delete access and no sharing.
+- If any file is held by another process, an AV scan or an indexer, or cannot be looked at, nothing is deleted. The
+  record stays whole and is checked again later, and Dismiss reports it not deleted.
+- Otherwise every handle is marked for deletion in the order state .tmp, payload .tmp, state, payload, and their
+  close removes the files.
+
+It is NOT atomic across the helper's death: marks already set are honoured when a killed process's handles close.
+Every crash point therefore ends as one of two outcomes:
+- The whole record. A kill before the state's mark leaves it intact, so a Dismiss that never completed CAN be
+  offered again.
+- The payload without its state. It is never restored from, and it is swept as an orphan after 10 minutes, which
+  completes a deletion already decided.
+
+It never leaves a state without its payload offered as restorable.
+
+If a mark fails, the marks already set are cleared (nothing deleted). If clearing one fails too, the deletion is
+completed instead, every handle marked again from the beginning in the same order, and reported as such. A deletion
+that did not complete is reported as it is: intact means kept; with the state gone, the offer is withdrawn and the
+payload is an orphan. CI kills a helper between two marks and drives the mixed rollback.
 
 Another session's record (same user, same boot, shared %TEMP%) is left alone by the decision
 procedure, which checks that first, and by Dismiss, which refuses it; the orphan and round-8 sweeps act
@@ -518,7 +564,7 @@ nothing is settled: the record is kept and offered. That look (it opens the clip
 before the final checks, which stay the last step before Ctrl+V. The check of kept records before a paste
 opens the clipboard once per record; the paste then starts only if it still fits the delivery's deadline
 (otherwise nothing of the user's is touched and the typing fallback decides; chosen over capping the number
-of offers, which would hide records the user is owed). A restore (the user's or on proof) pings a live foreign
+of offers, which would hide records the user is owed). A restore (the live transaction's or the user's) pings a live foreign
 owner (WM_NULL, 200 ms) before its EmptyClipboard: an owner that is hung or does not answer is not asked
 (busy, kept). It is a sample: an owner can answer the ping and then stall in WM_DESTROYCLIPBOARD, and then
 the restore holds the lock as long as Windows waits on it (about 5 s).
