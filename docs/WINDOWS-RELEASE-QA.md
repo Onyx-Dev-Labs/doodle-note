@@ -420,7 +420,19 @@ saved formats returned success under our own open, and that open was closed. It 
 clipboard: no instantaneous check can guarantee what the clipboard holds afterwards (round 18 tried one after the
 close and reverted it in round 19; see the PR). Every put-back writes one log line with the native result and error
 of EmptyClipboard, each SetClipboardData and CloseClipboard, the sequence around it and the format count after the
-close (no content).
+close (no content). Two cases follow from that contract (CI 25d, 25e): over an originally EMPTY clipboard there is
+nothing to set back, so the restore reports "restored", leaves the clipboard empty and deletes the record (also
+the user's Restore of one kept after a kill); a save in which every format was over the cap (16 MiB per
+transaction) kept nothing of them, so the restore reports "skipped" (only what fit, if anything, is set back), the
+record is deleted and the app's warning names it.
+
+Known limitation: the user's Restore checks only its own record for being in flight, not whether another delivery
+is under way. If one is, that live transaction's own confirmation or paste-gate look sees the changed clipboard and
+keeps its record as an offer.
+
+Test-build hooks are compiled out of the release helper. One of them, the keyboard-layout hook used by CI 31, is
+CI-only: it activates another input language for the write thread and activates the previous one again when the
+write ends, because on a real desktop with one input method for all apps it could switch the user's language.
 
 The confirmation: a READ that fails under its open rejects the write (the flag below). An open that could not be
 obtained DEFERS: nothing was observed, so nothing is rejected, and any later automatic restore still needs the full
@@ -536,7 +548,10 @@ The full deletion contract, stated plainly.
   - a rebuilt record is offered in the boot it is rebuilt in only;
   - the unreadable-payload policy: a payload that cannot be decrypted (not bad data: a key or profile not available,
     e.g. after a password reset), looked at or read now is kept offer-only, its 24 h and boot clock starts at the
-    first failed attempt, and it is then deleted as unrecoverable (logged);
+    first failed attempt, and it is then deleted as unrecoverable. Stated plainly, this deletion is SILENT for the
+    user: such a payload was never offered (an offer needs its formats and size) and the app is not told; only the
+    helper's log says so. A deletion the files refuse is deferred and retried on the backoff and the 30-minute
+    sweep;
   - cleanup of records that cannot be restored from:
     - a payload whose data is bad;
     - a payload of an earlier format;
