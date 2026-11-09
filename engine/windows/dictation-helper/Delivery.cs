@@ -1838,7 +1838,8 @@ namespace DoodleNote.DictationHelper
             if (metafile != IntPtr.Zero)
             {
                 if (Native.SetClipboardData(CF_ENHMETAFILE, metafile) == IntPtr.Zero) ok = false;
-                metafile = IntPtr.Zero;
+                metafile = IntPtr.Zero; // the clipboard owns it now
+                putBackMetafile = true;
             }
             // A marker was present but unreadable: keep the content out of history and cloud.
             if (forceMarkers) ClipboardText.SetConservativeMarkers();
@@ -1859,6 +1860,33 @@ namespace DoodleNote.DictationHelper
                 return total;
             }
         }
+        /// <summary>
+        /// After a put-back and our close: re-opened, the clipboard holds the saved content (every present format one we
+        /// saved, bytes compared; with `complete`, every saved format present). False when it cannot be opened (kept).
+        /// </summary>
+        public bool PutBackHeld(bool complete)
+        {
+            if (!ClipboardText.Open()) return false;
+            try
+            {
+                List<uint> present = new List<uint>(), compared = new List<uint>();
+                for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
+                // The metafile went to the clipboard as a handle (its bits are no longer ours to compare): present is enough.
+                foreach (uint f in present) if (!(putBackMetafile && (f == CF_ENHMETAFILE || f == CF_METAFILEPICT))) compared.Add(f);
+                if (putBackMetafile && !present.Contains(CF_ENHMETAFILE)) return false;
+                if (items.Count == 0) return putBackMetafile && compared.Count == 0;
+                bool explained = ExplainsPresent(compared, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, items, null, ReadOpenEmf, forceMarkers);
+                if (!explained) return false;
+                uint sentinel = Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat); // never put back
+                if (complete) foreach (KeyValuePair<uint, byte[]> item in items) if (item.Key != sentinel && !present.Contains(item.Key)) return false;
+                return true;
+            }
+            finally { Native.CloseClipboard(); }
+        }
+
+        /// <summary>The put-back set the saved metafile (handed to the clipboard).</summary>
+        bool putBackMetafile;
+
         /// <summary>Every saved format is among the present ones (with MatchesOpenClipboard: the clipboard holds exactly the saved content).</summary>
         public bool AllPresent(IList<uint> present)
         {
@@ -2215,6 +2243,12 @@ namespace DoodleNote.DictationHelper
             }
             finally { Native.CloseClipboard(); }
             string result = RestoreResult(ok, complete, reportedSkip);
+            // Settled (the record deleted) only once the put-back is SEEN after our close: one that did not stick keeps it.
+            if (result != "unrestored" && !PutBackHeld(result == "restored"))
+            {
+                Wire.Log("the put-back is not on the clipboard after our close: kept as an offer");
+                result = "unrestored";
+            }
             if (result == "unrestored") Holds = "unknown";
             // A kept record: the sequence after our close, confirmed with our window still the owner.
             return result;
