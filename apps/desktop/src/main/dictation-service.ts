@@ -423,6 +423,11 @@ export class DictationService {
   private readonly windows: boolean
   /** Windows: the clipboard note for one recovery card (by generation). */
   private clipboardWarning: { gen: number; message: string } | null = null
+  /**
+   * Round 24 (Opus nit): the delivery id of an offer whose Restore got no answer in time. Its later result
+   * (the recovered event, which names that delivery) is shown even though another delivery is now current.
+   */
+  private restoreAwaiting: string | null = null
   /** Windows: the delivery the clipboard notice (warning line or panel) is about, when the helper named it. */
   private clipboardDelivery: string | null = null
 
@@ -2075,14 +2080,17 @@ export class DictationService {
     // Round 22: what the helper named as not put back is said by name.
     const missing = outcome.clipboardMissing
     const reason = outcome.clipboardNoticeReason
-    const message = clipboardProblemMessage(problem, missing, reason)
-    if (outcome.kind === 'delivered') {
+    // Round 24 (Opus): the advice depends on whether the text went in (no "paste it yourself" after typing worked).
+    const delivered = outcome.kind === 'delivered'
+    const message = clipboardProblemMessage(problem, missing, reason, delivered)
+    if (delivered) {
       this.setPanel(
         {
           kind: 'clipboard',
           problem,
           ...(missing ? { missing } : {}),
-          ...(reason ? { reason } : {})
+          ...(reason ? { reason } : {}),
+          delivered: true
         },
         NOTICE_MS
       )
@@ -2102,8 +2110,21 @@ export class DictationService {
    * finished later. The card's line and the panel now say what actually happened (or go away).
    */
   private clipboardLate(clipboard: string, deliveryId?: string, missing?: string[]): void {
-    // Only the newest delivery's notice changes: a result for an older one never clears (or sets) it.
-    if (deliveryId && this.clipboardDelivery && deliveryId !== this.clipboardDelivery) {
+    // A Restore that got no answer in time: its result is shown now (round 24).
+    if (deliveryId && deliveryId === this.restoreAwaiting) {
+      this.restoreAwaiting = null
+      const late = clipboardProblem(clipboard, undefined)
+      this.deps.log(`clipboard: the result of a Restore that had timed out: ${clipboard}`)
+      if (late)
+        this.setPanel(
+          { kind: 'clipboard', problem: late, ...(missing ? { missing } : {}) },
+          NOTICE_MS
+        )
+      return
+    }
+    // Only the newest delivery's notice changes: a result for an older one never clears (or sets) it. Round 24
+    // (Opus nit): nor does a result that names no delivery while one is current.
+    if (this.clipboardDelivery && deliveryId !== this.clipboardDelivery) {
       this.deps.log(
         `clipboard result for an earlier delivery (${clipboard}); the current notice stays`
       )

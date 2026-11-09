@@ -377,22 +377,71 @@ export const CLIPBOARD_PROBLEM_MESSAGES: Record<ClipboardProblem, string> = {
     'DoodleNote could not save your clipboard, so it did not paste with it. Your clipboard was left as it was.'
 }
 
-/** Round 23: why the clipboard was not used, said to the user (the reason the helper gave). */
-export const CLIPBOARD_NOT_SAVED_MESSAGES: Record<string, string> = {
-  'too-large':
-    'Your clipboard holds something too large to save (such as a large screenshot), so DoodleNote did not paste with it and left your clipboard as it was. Copy something smaller first, or copy the dictated text from DoodleNote and paste it yourself.',
-  unrendered:
-    "The app you copied from did not provide your clipboard's content, so DoodleNote did not paste with it. Your clipboard was left as it was.",
-  'nothing-savable':
-    'Nothing on your clipboard could be saved, so DoodleNote did not paste with it. Your clipboard was left as it was.',
-  'owner-unresponsive':
+/**
+ * Rounds 23-24: why the clipboard was not used, said to the user (the reason the helper gave). A Map, so no
+ * reason can reach the object prototype ("constructor"). Every reason the helper sends has its own sentence.
+ */
+export const CLIPBOARD_NOT_SAVED_MESSAGES: ReadonlyMap<string, string> = new Map([
+  [
+    'too-large',
+    'Your clipboard holds something too large to save (such as a large screenshot), so DoodleNote did not paste with it and left your clipboard as it was.'
+  ],
+  [
+    'unrendered',
+    "The app you copied from did not provide your clipboard's content, so DoodleNote did not paste with it. Your clipboard was left as it was."
+  ],
+  [
+    'nothing-savable',
+    'Nothing on your clipboard could be saved, so DoodleNote did not paste with it. Your clipboard was left as it was.'
+  ],
+  [
+    'owner-unresponsive',
     'The app that owns your clipboard is not responding, so DoodleNote did not paste with it. Your clipboard was left as it was.'
+  ],
+  [
+    'zero-sequence',
+    'Windows could not say whether your clipboard changed, so DoodleNote did not paste with it. Your clipboard was left as it was.'
+  ],
+  [
+    'no-record',
+    'DoodleNote could not write down a safe copy of your clipboard first, so it did not paste with it. Your clipboard was left as it was.'
+  ],
+  [
+    'clipboard-changed',
+    'Your clipboard changed while DoodleNote was saving it, so it did not paste with it. Your clipboard was left as it was.'
+  ],
+  [
+    'deadline',
+    'There was no time left to paste safely, so DoodleNote did not paste with your clipboard. Your clipboard was left as it was.'
+  ],
+  [
+    'no-window',
+    "DoodleNote's clipboard window could not be created, so it did not paste with your clipboard. Your clipboard was left as it was."
+  ],
+  [
+    'unreadable',
+    'DoodleNote could not read your clipboard, so it did not paste with it. Your clipboard was left as it was.'
+  ]
+])
+
+/** Round 24 (Opus): only when the text was NOT inserted (no double paste after a typing fallback that worked). */
+const TOO_LARGE_HINT =
+  ' Copy something smaller first, or copy the dictated text from DoodleNote and paste it yourself.'
+
+/** A string cut to `max` code points (never inside a surrogate pair), with an ellipsis. */
+function clip(text: string, max: number): string {
+  const points = Array.from(text)
+  return points.length > max ? `${points.slice(0, max).join('')}…` : text
 }
 
-/** At most three names on a card or notice, then "+N more" (the window has a fixed size). */
-export function listMissing(missing: string[]): string {
-  const shown = missing.slice(0, 3).map((n) => (n.length > 60 ? `${n.slice(0, 60)}…` : n))
-  return missing.length > 3 ? `${shown.join('; ')} +${missing.length - 3} more` : shown.join('; ')
+/**
+ * At most three names on a card or notice, then "+N more" (the window has a fixed size). `total` is the count the
+ * helper reported when the list itself was shortened; by default the list's own length.
+ */
+export function listMissing(missing: string[], total = missing.length): string {
+  const shown = missing.slice(0, 3).map((n) => clip(n, 60))
+  const more = Math.max(total, missing.length) - shown.length
+  return more > 0 ? `${shown.join('; ')} +${more} more` : shown.join('; ')
 }
 
 /**
@@ -402,12 +451,15 @@ export function listMissing(missing: string[]): string {
 export function clipboardProblemMessage(
   problem: ClipboardProblem,
   missing?: string[],
-  reason?: string
+  reason?: string,
+  /** The dictated text went in (by typing): no advice to paste it again. */
+  delivered = false
 ): string {
   if ((problem === 'skipped' || problem === 'partial') && missing && missing.length > 0)
     return `Your clipboard was put back except: ${listMissing(missing)}.`
-  if (problem === 'not-saved' && reason && CLIPBOARD_NOT_SAVED_MESSAGES[reason])
-    return CLIPBOARD_NOT_SAVED_MESSAGES[reason]!
+  const why =
+    problem === 'not-saved' && reason ? CLIPBOARD_NOT_SAVED_MESSAGES.get(reason) : undefined
+  if (why) return reason === 'too-large' && !delivered ? why + TOO_LARGE_HINT : why
   return CLIPBOARD_PROBLEM_MESSAGES[problem]
 }
 
@@ -433,7 +485,14 @@ export type OverlayPanel =
   | { kind: 'changed'; name: string }
   | { kind: 'diff'; name: string; segments: DiffSegment[] }
   | { kind: 'learned'; pairs: Array<{ from: string; to: string }> }
-  | { kind: 'clipboard'; problem: ClipboardProblem; missing?: string[]; reason?: string }
+  | {
+      kind: 'clipboard'
+      problem: ClipboardProblem
+      missing?: string[]
+      reason?: string
+      /** The dictated text went in (by typing), so the notice gives no advice to paste it. */
+      delivered?: boolean
+    }
   /** Windows: a kept clipboard the helper could not prove its own; `changed`: what a restore would overwrite now. */
   | {
       kind: 'clipboard-offer'
@@ -523,7 +582,7 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
       return {
         ...common,
         tone: 'warn',
-        title: clipboardProblemMessage(panel.problem, panel.missing, panel.reason),
+        title: clipboardProblemMessage(panel.problem, panel.missing, panel.reason, panel.delivered),
         controls: { ...NONE, dismiss: true },
         diff: null
       }

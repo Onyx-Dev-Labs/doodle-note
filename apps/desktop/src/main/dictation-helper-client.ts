@@ -611,7 +611,9 @@ export class DictationHelperClient {
       reply.clipboard = lateFields.clipboard
       if (lateFields.clipboardHolds) reply.clipboardHolds = lateFields.clipboardHolds
       else delete reply.clipboardHolds
+      // Round 24 (Opus nit): the late result decides the names too: none on it leaves none of the reply's.
       if (lateFields.clipboardMissing) reply.clipboardMissing = lateFields.clipboardMissing
+      else delete reply.clipboardMissing
     }
     const outcome = reply.outcome
     return {
