@@ -10,7 +10,7 @@ const RELEASES: Array<{
 }> = [
   {
     version: "1.0.0",
-    date: "Unreleased",
+    date: "November 9, 2026",
     highlights: [
       "DoodleNote 1.0: a security-hardening release across the app and the website",
       "Join our community: a new link in the sidebar and in Settings opens the DoodleNote Discord for help, updates, and early testing",
