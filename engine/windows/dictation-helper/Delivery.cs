@@ -1769,60 +1769,65 @@ namespace DoodleNote.DictationHelper
 #if DICTATION_TEST
                 LastSaveLine = "attempt " + attempt + ": " + line;
 #endif
-                if (saved != null || !retry || attempt >= 3 || timeoutMs - (int)watch.ElapsedMilliseconds < 200) return saved;
+                if (saved != null || !retry) return saved;
+                reader.Retire(); // a failed generation is never asked again
+                if (attempt >= 3 || timeoutMs - (int)watch.ElapsedMilliseconds < 200) return null;
             }
         }
 
         /// <summary>
-        /// The rule (unit-tested with hooked replies). ESTABLISHED only when, inside the reader's own open, the listing
-        /// ended with no error, listed exactly as many formats as CountClipboardFormats counted in that open, and the
-        /// sequence did not move across it; and then EVERY listed format ended in a definite outcome: saved, or a named
-        /// skip (over the cap, a format deliberately not saved, an unreadable privacy marker set conservatively), with
-        /// the sequence still unchanged. "Empty" is positive too: listed 0, counted 0, no error. Anything else (an
-        /// enumeration error, listed != counted, a "busy", a malformed or out-of-order reply, a "none" or "unlocked" for
-        /// a listed format, the budget running out) is NOT ESTABLISHED: null, with `retry` set. Null without `retry`:
-        /// a read overran (the reader is abandoned), or the clipboard changed (someone copied: never pasted over).
-        /// `line` is the log line (no content: counts, errors, sequences, per-format outcome by id and length).
+        /// The rule (unit-tested with hooked replies). ESTABLISHED only when the reader, inside its own proven open,
+        /// listed formats with no enumeration error, exactly as many as CountClipboardFormats counted in that open,
+        /// unique and valid ids, every registered format with a name, the sequence non-zero and unchanged across the
+        /// listing; and then EVERY listed format ended in a definite outcome, with the sequence unchanged: saved (a
+        /// complete framed reply, its declared length met), or a NAMED skip, which is only a positively measured excess
+        /// over the cap or an explicit format policy (the bitmap and palette Windows rebuilds from a DIB we retained,
+        /// a metafile picture rebuilt from an EMF we retained, our own sentinel, OLE bookkeeping, a standard format we
+        /// cannot replay). Listed 0 + counted 0 + no error is a POSITIVE EMPTY, the only source of a zero-item save
+        /// that reports "restored". Anything else is NOT ESTABLISHED: null, `retry` set: a lost hold, an enumeration
+        /// error, listed != counted, a zero sequence, busy, a malformed, fragmentary or out-of-order reply, a "none",
+        /// "unlocked" or "nosize" (zero is not a size) for a listed format, a missing registered name, a failed EMF
+        /// rebuild, the deadline running out. Null without `retry`: an overrun, or the clipboard changed.
         /// </summary>
         internal static SavedClipboard Judge(Func<string, int, string> request, int timeoutMs, Func<uint> sequenceNow, out bool retry, out string line)
         {
             retry = true;
+            line = null;
             Stopwatch watch = Stopwatch.StartNew();
             Func<int> left = () => timeoutMs - (int)watch.ElapsedMilliseconds;
-            System.Text.StringBuilder outcomes = new System.Text.StringBuilder();
             string list = request("list", Math.Max(1, Math.Min(PerFormatMs, left())));
             if (list == null) { retry = false; line = "NOT ESTABLISHED: listing the formats overran or the reader ended; not pasting"; return null; }
             string[] head = list.Split(' ');
             uint sequence, sequenceAfter;
-            int counted, enumError;
-            if (head.Length < 7 || head[0] != "list" || !uint.TryParse(head[1], out sequence) || !int.TryParse(head[4], out counted)
-                || !int.TryParse(head[5], out enumError) || !uint.TryParse(head[6], out sequenceAfter))
+            int counted, enumError, declared;
+            if (head.Length < 6 || head[0] != "list" || !uint.TryParse(head[1], out sequence) || !int.TryParse(head[2], out counted)
+                || !int.TryParse(head[3], out enumError) || !uint.TryParse(head[4], out sequenceAfter) || !int.TryParse(head[5], out declared))
             {
-                line = "NOT ESTABLISHED: the reader's listing was " + (head.Length > 0 && head[0] == "busy" ? "busy (the clipboard could not be opened)" : "malformed or out of order") + "; not pasting";
+                line = "NOT ESTABLISHED: the reader's listing was " + (head[0] == "lost" ? "taken with a lost hold (another opener)" : head[0] == "busy" ? "busy (the clipboard could not be opened)" : "malformed, fragmentary or out of order") + "; not pasting";
                 return null;
             }
-            bool hasDib = head[2] == "1";
-            bool hasEnhMetafile = head[3] == "1";
             List<KeyValuePair<uint, string>> formats = new List<KeyValuePair<uint, string>>();
             List<KeyValuePair<uint, string>> renderedLast = new List<KeyValuePair<uint, string>>();
-            for (int i = 7; i < head.Length; i++)
+            HashSet<uint> listedIds = new HashSet<uint>();
+            for (int i = 6; i < head.Length; i++)
             {
                 int colon = head[i].IndexOf(':');
                 uint format;
                 string name;
                 try
                 {
-                    if (colon <= 0 || !uint.TryParse(head[i].Substring(0, colon), out format)) throw new FormatException();
+                    if (colon <= 0 || !uint.TryParse(head[i].Substring(0, colon), out format) || format == 0 || !listedIds.Add(format)) throw new FormatException();
                     name = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(head[i].Substring(colon + 1)));
+                    if (format >= 0xC000 && name.Length == 0) { line = "NOT ESTABLISHED: registered format " + format + " has no name (a privacy marker could not be recognized); not pasting"; return null; }
                 }
-                catch (FormatException) { line = "NOT ESTABLISHED: a malformed format entry in the listing; not pasting"; return null; }
+                catch (FormatException) { line = "NOT ESTABLISHED: a malformed, repeated or invalid format entry in the listing; not pasting"; return null; }
                 KeyValuePair<uint, string> entry = new KeyValuePair<uint, string>(format, name);
                 if (format >= 0xC000 && Array.IndexOf(RenderedLast, name.ToLowerInvariant()) >= 0) renderedLast.Add(entry);
                 else formats.Add(entry);
             }
-            int listed = formats.Count + renderedLast.Count;
+            int listed = listedIds.Count;
             string listing = "listed " + listed + ", counted " + counted + ", enumeration error " + enumError + ", sequence " + sequence + " -> " + sequenceAfter;
-            if (enumError != 0 || listed != counted || sequence != sequenceAfter)
+            if (enumError != 0 || listed != counted || listed != declared || sequence == 0 || sequence != sequenceAfter)
             {
                 line = "NOT ESTABLISHED (" + listing + "): the listing is not proof of what the clipboard holds; not pasting";
                 return null;
@@ -1830,82 +1835,105 @@ namespace DoodleNote.DictationHelper
             formats.AddRange(renderedLast);
             SavedClipboard saved = new SavedClipboard();
             saved.Sequence = sequence;
+            System.Text.StringBuilder outcomes = new System.Text.StringBuilder();
+            List<uint> deferred = new List<uint>(); // bitmap, palette, metafile picture: decided by what was retained
             long total = 0;
             foreach (KeyValuePair<uint, string> entry in formats)
             {
                 uint format = entry.Key;
                 string name = entry.Value;
                 long cap;
-                bool marker = false;
+                if (format == CF_BITMAP || format == CF_PALETTE || format == CF_METAFILEPICT) { deferred.Add(format); continue; }
                 if (outcomes.Length > 0) outcomes.Append(", ");
                 outcomes.Append(format);
-                if (format == CF_BITMAP || format == CF_PALETTE)
-                {
-                    // Windows rebuilds these from the device-independent bitmap.
-                    if (!hasDib) saved.complete = false;
-                    outcomes.Append(hasDib ? " rebuilt from the DIB" : " not saved (no DIB)");
-                    continue;
-                }
-                if (format == CF_METAFILEPICT && hasEnhMetafile) { outcomes.Append(" rebuilt from the EMF"); continue; } // synthesized from the saved EMF
                 if (format < 0xC000)
                 {
                     if (format != CF_ENHMETAFILE && !SafeStandard.Contains(format))
                     {
-                        // A standard format we cannot replay (GDI handles, private/display formats) is a
-                        // real loss and is reported, never dropped silently.
+                        // Policy: a standard format we cannot replay (GDI handles, private/display formats) is a real
+                        // loss and is reported, never dropped silently.
                         saved.reportedSkip = true;
-                        outcomes.Append(" not saved (not replayable)");
+                        outcomes.Append(" not saved (not replayable: policy)");
                         continue;
                     }
                     cap = Math.Min(MaxFormatBytes, MaxBytes - total);
                 }
-                else if (name == PendingClipboard.SentinelFormat) { outcomes.Append(" ours, not saved"); continue; } // a write left by an earlier transaction
-                else if (Markers.Contains(name)) { marker = true; saved.PrivacyMarked = true; cap = MaxMarkerBytes; }
-                else if (SilentDrop.Contains(name)) { outcomes.Append(" not saved (OLE bookkeeping)"); continue; }
+                else if (name == PendingClipboard.SentinelFormat) { outcomes.Append(" ours, not saved (policy)"); continue; }
+                else if (Markers.Contains(name)) { saved.PrivacyMarked = true; cap = MaxMarkerBytes; }
+                else if (SilentDrop.Contains(name)) { outcomes.Append(" not saved (OLE bookkeeping: policy)"); continue; }
                 else cap = Math.Min(MaxFormatBytes, MaxBytes - total);
-                if (cap <= 0) { saved.reportedSkip = true; outcomes.Append(" over the cap"); continue; }
-                if (left() <= 0) { line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " not read: out of time]): not pasting"; retry = false; return null; }
+                if (cap <= 0) { saved.reportedSkip = true; outcomes.Append(" over the cap (the budget is used up)"); continue; }
+                if (left() <= 0) { saved.Discard(); line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " not read: out of time]); not pasting"; return null; }
                 string answer = request("get " + format + " " + cap, Math.Max(1, Math.Min(PerFormatMs, left())));
-                if (answer == null) { retry = false; line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " overran]): its owner is slow to render; not pasting"; return null; }
+                if (answer == null) { saved.Discard(); retry = false; line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " overran]): its owner is slow to render; not pasting"; return null; }
                 string[] parts = answer.Split(' ');
                 uint at;
-                if (parts.Length < 3 || parts[0] == "busy" || !uint.TryParse(parts[2], out at) || parts[1] != format.ToString())
+                if (parts.Length < 3 || parts[1] != format.ToString() || !uint.TryParse(parts[2], out at) || at == 0)
                 {
-                    line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " " + (parts[0] == "busy" ? "busy" : "malformed or out-of-order reply") + "]): not pasting";
+                    saved.Discard();
+                    line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " " + (parts[0] == "lost" ? "lost hold" : parts[0] == "busy" ? "busy" : "malformed, fragmentary or out-of-order reply") + "]); not pasting";
                     return null;
                 }
-                if (at != sequence) { retry = false; line = "the clipboard changed while it was saved (" + listing + ", now " + at + "); not pasting"; return null; }
-                if (parts[0] == "data" && parts.Length == 4)
+                if (at != sequence) { saved.Discard(); retry = false; line = "the clipboard changed while it was saved (" + listing + ", now " + at + "); not pasting"; return null; }
+                long length;
+                if ((parts[0] == "data" || parts[0] == "emf") && parts.Length == 5 && long.TryParse(parts[3], out length))
                 {
-                    byte[] bytes = Convert.FromBase64String(parts[3]);
+                    byte[] bytes;
+                    try { bytes = Convert.FromBase64String(parts[4]); }
+                    catch (FormatException) { bytes = null; }
+                    if (bytes == null || bytes.Length != length || length <= 0) { saved.Discard(); line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " a reply shorter than declared]); not pasting"; return null; }
+                    if (parts[0] == "emf")
+                    {
+                        IntPtr copy = Native.SetEnhMetaFileBits((uint)bytes.Length, bytes);
+                        if (copy == IntPtr.Zero) { saved.Discard(); line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " EMF not rebuilt]); not pasting"; return null; }
+                        saved.metafile = copy;
+                    }
+                    else saved.items.Add(new KeyValuePair<uint, byte[]>(format, bytes));
                     total += bytes.Length;
-                    saved.items.Add(new KeyValuePair<uint, byte[]>(format, bytes));
                     outcomes.Append(":").Append(bytes.Length).Append(" saved");
+                    continue;
                 }
-                else if (parts[0] == "emf" && parts.Length == 4)
+                long size;
+                if (parts[0] == "oversize" && parts.Length == 4 && long.TryParse(parts[3], out size) && size > cap)
                 {
-                    byte[] bits = Convert.FromBase64String(parts[3]);
-                    IntPtr copy = Native.SetEnhMetaFileBits((uint)bits.Length, bits);
-                    if (copy == IntPtr.Zero) { line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " EMF not rebuilt]): not pasting"; return null; }
-                    saved.metafile = copy;
-                    total += bits.Length;
-                    outcomes.Append(":").Append(bits.Length).Append(" saved");
+                    // A positively measured excess: the one named skip a read can give.
+                    saved.reportedSkip = true;
+                    outcomes.Append(" over the cap (" + size + " bytes)");
+                    continue;
                 }
-                else if (parts[0] == "oversize") { saved.reportedSkip = true; outcomes.Append(" over the cap"); }
-                else if (marker) { saved.forceMarkers = true; outcomes.Append(" marker unreadable, set conservatively"); }
-                else
+                saved.Discard();
+                line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " " + parts[0] + (parts.Length > 3 ? " error " + parts[3] : "") + "]): a listed format could not be read; not pasting";
+                return null;
+            }
+            // The formats Windows rebuilds, decided by the representation actually RETAINED (never by availability hints).
+            bool dibRetained = saved.Has(CF_DIB) || saved.Has(CF_DIBV5);
+            foreach (uint format in deferred)
+            {
+                if (outcomes.Length > 0) outcomes.Append(", ");
+                outcomes.Append(format);
+                if (format == CF_METAFILEPICT)
                 {
-                    // "none" or "unlocked" for a format the listing said is there: not proof of anything.
-                    if (saved.metafile != IntPtr.Zero) { Native.DeleteEnhMetaFile(saved.metafile); saved.metafile = IntPtr.Zero; }
-                    line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " " + parts[0] + "]): a listed format could not be read; not pasting";
-                    return null;
+                    if (saved.metafile != IntPtr.Zero) outcomes.Append(" rebuilt from the retained EMF (policy)");
+                    else { saved.reportedSkip = true; outcomes.Append(" not saved (no EMF retained: reported)"); }
                 }
+                else if (dibRetained) outcomes.Append(" rebuilt from the retained DIB (policy)");
+                else { saved.complete = false; outcomes.Append(" not saved (no DIB retained: partial)"); }
             }
             // Someone copied while the save ran: their copy is the user's clipboard now; never paste over it.
             uint now = sequenceNow();
-            if (now != sequence) { retry = false; line = "the clipboard changed while it was saved (" + listing + ", now " + now + "); not pasting"; return null; }
+            if (now != sequence) { saved.Discard(); retry = false; line = "the clipboard changed while it was saved (" + listing + ", now " + now + "); not pasting"; return null; }
+            saved.ListedCount = listed;
             line = "ESTABLISHED (" + listing + "; " + (listed == 0 ? "a positively empty clipboard" : "[" + outcomes + "]") + ")";
             return saved;
+        }
+
+        /// <summary>How many formats the save's listing held (provenance: an all-skipped save is never an empty clipboard).</summary>
+        public int ListedCount;
+
+        /// <summary>A save that is not kept: its metafile handle is freed.</summary>
+        internal void Discard()
+        {
+            if (metafile != IntPtr.Zero) { Native.DeleteEnhMetaFile(metafile); metafile = IntPtr.Zero; }
         }
 
         /// <summary>The saved formats, for PendingClipboard (registered formats by name, so they re-register).</summary>

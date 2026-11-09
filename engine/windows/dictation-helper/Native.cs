@@ -342,8 +342,11 @@ namespace DoodleNote.DictationHelper
         /// <summary>Cleared right before each enumeration step (the reader's listing reads the error it ends with).</summary>
         [DllImport("kernel32.dll", EntryPoint = "SetLastError")]
         public static extern void ClearLastError(uint code);
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr GetClipboardData(uint format);
+        /// <summary>The window that has the clipboard open now (the reader proves its hold with it).</summary>
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetOpenClipboardWindow();
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr SetClipboardData(uint format, IntPtr data);
         [DllImport("user32.dll")]
@@ -356,11 +359,11 @@ namespace DoodleNote.DictationHelper
         public static extern int GetClipboardFormatName(uint format, StringBuilder name, int max);
         [DllImport("kernel32.dll")]
         public static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
-        [DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll", SetLastError = true)]
         public static extern IntPtr GlobalLock(IntPtr mem);
         [DllImport("kernel32.dll")]
         public static extern bool GlobalUnlock(IntPtr mem);
-        [DllImport("kernel32.dll")]
+        [DllImport("kernel32.dll", SetLastError = true)]
         public static extern UIntPtr GlobalSize(IntPtr mem);
         [DllImport("kernel32.dll")]
         public static extern IntPtr GlobalFree(IntPtr mem);

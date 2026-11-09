@@ -16,9 +16,9 @@ namespace DoodleNote.DictationHelper
     /// interrupted. So the reads run in a separate reader process (this same executable, started with
     /// --clipboard-reader, only from the helper's own held image, and inheriting only its own pipes):
     /// one request per format, each OpenClipboard → GetClipboardData → copy → CloseClipboard (in a
-    /// finally) with its own wall-clock bound. The reader opens the clipboard without an owner window,
-    /// and measured on Dev04, another app's OpenClipboard succeeds at once even while the reader waits
-    /// in a render. A read that overruns is abandoned and the save gives up: the reader is NOT killed,
+    /// finally) with its own wall-clock bound. Round 21: the reader opens the clipboard with its own message-only
+    /// window (it opened with NULL before; then another app's OpenClipboard succeeded at once even while the reader
+    /// waited in a render, which is also how the reader could lose its open). A read that overruns is abandoned and the save gives up: the reader is NOT killed,
     /// because ending it mid-render loses the format being rendered; it finishes the render, finds its
     /// stdin closed and exits (verified: the owner's "Embed Source" is still there after the render).
     /// At most MaxAbandoned readers may be waiting like that; reaching it asks for a helper restart
@@ -30,28 +30,57 @@ namespace DoodleNote.DictationHelper
     /// and any change since the list (or before the paste empties the clipboard) discards the save.
     /// The reader exits when its stdin closes, so it never outlives the helper.
     ///
-    /// Reader protocol (one line each way per request; round 20: every request starts with an id the reply echoes,
-    /// so a late reply can never answer a later request):
-    ///   "&lt;id&gt; list"          → "&lt;id&gt; list &lt;seq before&gt; &lt;hasDib 0|1&gt; &lt;hasEmf 0|1&gt; &lt;counted&gt; &lt;enumeration error&gt; &lt;seq after&gt; &lt;format&gt;:&lt;base64 name&gt; …"
-    ///                           (counted: CountClipboardFormats in the same open)   (or "&lt;id&gt; busy")
-    ///   "&lt;id&gt; get &lt;f&gt; &lt;cap&gt;" → "&lt;id&gt; data &lt;f&gt; &lt;seq&gt; &lt;base64&gt;" | "... emf ..." | "&lt;id&gt; none|oversize|unlocked &lt;f&gt; &lt;seq&gt;" | "&lt;id&gt; busy"
+    /// Reader protocol (round 21; one line each way per request, every reply framed and ending with " end", every
+    /// request starting with an id the reply echoes, so a late reply or a fragment can never answer a request):
+    ///   "&lt;id&gt; list"          → "&lt;id&gt; list &lt;seq before&gt; &lt;counted&gt; &lt;enumeration error&gt; &lt;seq after&gt; &lt;listed&gt; &lt;format&gt;:&lt;base64 name&gt; … end"
+    ///                           (counted: CountClipboardFormats inside the reader's own open)
+    ///   "&lt;id&gt; get &lt;f&gt; &lt;cap&gt;" → "&lt;id&gt; data|emf &lt;f&gt; &lt;seq&gt; &lt;length&gt; &lt;base64&gt; end" | "&lt;id&gt; oversize &lt;f&gt; &lt;seq&gt; &lt;size&gt; end"
+    ///                           | "&lt;id&gt; none|unlocked|nosize &lt;f&gt; &lt;seq&gt; &lt;error&gt; end"
+    ///   and "&lt;id&gt; lost end" (another opener took the clipboard over) or "&lt;id&gt; busy end".
+    /// The reader opens the clipboard with its own message-only window and proves the hold before trusting any result
+    /// (round 21: a NULL-window open can be taken over by another opener).
     /// </summary>
     internal static class ClipboardReader
     {
         public const string Argument = "--clipboard-reader";
-        const uint CF_DIB = 8, CF_DIBV5 = 17, CF_ENHMETAFILE = 14;
+        const uint CF_ENHMETAFILE = 14;
+
+        /// <summary>
+        /// Round 21: the reader's OWN message-only window. It opens the clipboard with it (never with a NULL window,
+        /// which another opener can take over) and proves before trusting any result, and before it closes, that it
+        /// still has the clipboard open (GetOpenClipboardWindow() == this window). A lost hold is a failed capture.
+        /// </summary>
+        static System.Windows.Forms.NativeWindow window;
+        static IntPtr Window
+        {
+            get
+            {
+                if (window == null)
+                {
+                    System.Windows.Forms.CreateParams parameters = new System.Windows.Forms.CreateParams();
+                    parameters.Parent = new IntPtr(-3); // HWND_MESSAGE
+                    window = new System.Windows.Forms.NativeWindow();
+                    window.CreateHandle(parameters);
+                }
+                return window.Handle;
+            }
+        }
 
         static bool Open()
         {
+            IntPtr own = Window;
             for (int attempt = 0; attempt < 12; attempt++)
             {
-                if (Native.OpenClipboard(IntPtr.Zero)) return true;
+                if (Native.OpenClipboard(own)) return true;
                 Thread.Sleep(15);
             }
             return false;
         }
 
-        /// <summary>The reader process's main loop.</summary>
+        /// <summary>This reader still has the clipboard open (nobody took the open over).</summary>
+        static bool Holds() { return Window != IntPtr.Zero && Native.GetOpenClipboardWindow() == Window; }
+
+        /// <summary>The reader process's main loop. Its stderr is a separate handle (the NUL device), never the reply pipe.</summary>
         public static int Serve()
         {
             StreamReader input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
@@ -59,35 +88,41 @@ namespace DoodleNote.DictationHelper
             string line;
             while ((line = input.ReadLine()) != null)
             {
+                string trimmed = line.Trim();
+                int space = trimmed.IndexOf(' ');
+                string id = space > 0 ? trimmed.Substring(0, space) : trimmed;
                 string reply;
-                try { reply = Answer(line.Trim()); }
-                catch (Exception) { string t = line.Trim(); int sp = t.IndexOf(' '); reply = (sp > 0 ? t.Substring(0, sp) : t) + " busy"; }
-                byte[] bytes = new UTF8Encoding(false).GetBytes(reply + "\n");
-                // The helper may have exited while this reader finished a render: nobody is listening.
-                try
-                {
-                    output.Write(bytes, 0, bytes.Length);
-                    output.Flush();
-                }
-                catch (IOException) { return 0; }
+                try { reply = id + " " + AnswerRequest(space > 0 ? trimmed.Substring(space + 1) : ""); }
+                catch (Exception) { reply = id + " busy end"; }
+#if DICTATION_TEST
+                string hook = TestMode.Env("DICTATION_HELPER_TEST_READER") ?? "";
+                // Test build only: a stray line before the reply (a late reply), or a fragment and then the end (EOF).
+                if (hook == "stray-line") reply = "0 list 1 0 0 0 0 1 0 end\n" + reply;
+                if (hook == "fragment-list" && reply.Contains(" list ")) { WriteRaw(output, reply.Substring(0, reply.Length / 2)); return 3; }
+#endif
+                if (!WriteRaw(output, reply + "\n")) return 0;
             }
             return 0;
         }
 
-        static string Answer(string request)
+        static bool WriteRaw(Stream output, string text)
         {
-            // "<id> <request>": the id is echoed in front of the reply.
-            int space = request.IndexOf(' ');
-            string id = space > 0 ? request.Substring(0, space) : request;
-            string reply = AnswerRequest(space > 0 ? request.Substring(space + 1) : "");
-#if DICTATION_TEST
-            // Test build only (the reader inherits the helper's environment): simulate a reply that arrives late
-            // (a stray line before this one).
-            if (TestMode.Env("DICTATION_HELPER_TEST_READER") == "stray-line") return "0 list 1 0 0 0 0 1\n" + id + " " + reply;
-#endif
-            return id + " " + reply;
+            byte[] bytes = new UTF8Encoding(false).GetBytes(text);
+            // The helper may have exited while this reader finished a render: nobody is listening.
+            try
+            {
+                output.Write(bytes, 0, bytes.Length);
+                output.Flush();
+                return true;
+            }
+            catch (IOException) { return false; }
         }
 
+        /// <summary>
+        /// One request (without its id). Every reply is framed and ends with " end": "list ...", "data/emf f seq len
+        /// base64", "oversize f seq size", "none|unlocked|nosize f seq error", "lost", "busy". Every result is taken
+        /// only while this reader provably still has the clipboard open.
+        /// </summary>
         static string AnswerRequest(string request)
         {
             string[] parts = request.Split(' ');
@@ -98,16 +133,15 @@ namespace DoodleNote.DictationHelper
 #endif
             if (parts[0] == "list")
             {
-                if (!Open()) return "busy";
+                if (!Open()) return "busy end";
                 try
                 {
                     uint before = Native.GetClipboardSequenceNumber();
-                    string dib = Native.IsClipboardFormatAvailable(CF_DIB) || Native.IsClipboardFormatAvailable(CF_DIBV5) ? "1" : "0";
-                    string emf = Native.IsClipboardFormatAvailable(CF_ENHMETAFILE) ? "1" : "0";
-                    int counted = Native.CountClipboardFormats();
+                    int counted = Native.CountClipboardFormats(); // inside THIS open
                     // Enumerating renders nothing; names are looked up without the clipboard. A 0 is the end only with
-                    // ERROR_SUCCESS (cleared before each step); the helper also compares the count (Judge).
+                    // ERROR_SUCCESS (cleared right before each step, captured right after it).
                     StringBuilder entries = new StringBuilder();
+                    int listed = 0;
                     uint format = 0;
                     int error;
                     for (;;)
@@ -115,55 +149,71 @@ namespace DoodleNote.DictationHelper
                         Native.ClearLastError(0);
                         format = Native.EnumClipboardFormats(format);
                         if (format == 0) { error = Marshal.GetLastWin32Error(); break; }
+                        listed++;
                         entries.Append(' ').Append(format).Append(':').Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(SavedClipboard.FormatName(format))));
+                        if (hook == "enum-error-mid") { error = 1418; break; } // test build only: the enumeration stops after one
                     }
                     uint after = Native.GetClipboardSequenceNumber();
-                    if (hook == "enum-error") { error = 1418; entries.Length = 0; } // test build only: ERROR_CLIPBOARD_NOT_OPEN, nothing listed
-                    if (hook == "list-empty") entries.Length = 0;                    // test build only: listed 0, counted as is
-                    return "list " + before + " " + dib + " " + emf + " " + counted + " " + error + " " + after + entries;
+                    if (hook == "enum-error") { error = 1418; entries.Length = 0; listed = 0; } // test build only
+                    if (hook == "list-empty") { entries.Length = 0; listed = 0; }                 // test build only
+                    if (hook == "no-name") entries.Replace(":" + Convert.ToBase64String(Encoding.UTF8.GetBytes("DoodleNote.CI.Extra")), ":"); // test build only
+                    if (hook == "no-colon") entries.Replace(":", "");                               // test build only
+                    if (hook == "lose-hold-list") Native.CloseClipboard();                         // test build only: the open is gone
+                    if (!Holds()) return "lost end";
+                    return "list " + before + " " + counted + " " + error + " " + after + " " + listed + entries + " end";
                 }
-                finally { Native.CloseClipboard(); }
+                finally { if (Holds()) Native.CloseClipboard(); }
             }
             if (parts[0] == "get" && parts.Length == 3)
             {
                 uint format = uint.Parse(parts[1]);
                 long cap = long.Parse(parts[2]);
-                if (hook == "get-none") return "none " + format + " " + Native.GetClipboardSequenceNumber(); // test build only
-                if (hook == "die-mid-reply") { Stream raw = Console.OpenStandardOutput(); raw.Write(new byte[] { 100, 97, 116 }, 0, 3); raw.Flush(); Environment.Exit(3); } // test build only: "dat", then gone
                 int delay = TestMode.Int("DICTATION_HELPER_TEST_CAPTURE_DELAY_MS", 0);
-                if (!Open()) return "busy";
+                if (hook == "die-mid-reply") { Stream raw = Console.OpenStandardOutput(); raw.Write(new byte[] { 100, 97, 116 }, 0, 3); raw.Flush(); Environment.Exit(3); } // test build only: "dat", then gone
+                if (!Open()) return "busy end";
                 try
                 {
                     // Test build only: a slow read inside the open clipboard, like a slow renderer.
                     if (delay > 0) Thread.Sleep(delay);
-                    IntPtr data = Native.GetClipboardData(format);
-                    // The sequence number is read AFTER the read: a render does not move it, but anyone
-                    // writing meanwhile does, and the helper then discards the whole save.
-                    if (data == IntPtr.Zero) return "none " + format + " " + Native.GetClipboardSequenceNumber();
+                    Native.ClearLastError(0);
+                    IntPtr data = hook == "get-none" ? IntPtr.Zero : Native.GetClipboardData(format);
+                    int error = Marshal.GetLastWin32Error();
+                    if (hook == "lose-hold-get") Native.CloseClipboard(); // test build only: the open is gone
+                    // The sequence number is read AFTER the read: a render does not move it, but anyone writing
+                    // meanwhile does, and the helper then discards the whole save.
+                    uint seq = Native.GetClipboardSequenceNumber();
+                    if (!Holds()) return "lost end";
+                    if (data == IntPtr.Zero) return "none " + format + " " + seq + " " + error + " end";
                     if (format == CF_ENHMETAFILE)
                     {
                         uint size = Native.GetEnhMetaFileBits(data, 0, null);
-                        if (size == 0 || size > cap) return "oversize " + format + " " + Native.GetClipboardSequenceNumber();
+                        if (size == 0) return "nosize " + format + " " + seq + " " + Marshal.GetLastWin32Error() + " end";
+                        if (size > cap) return "oversize " + format + " " + seq + " " + size + " end";
                         byte[] bits = new byte[size];
-                        if (Native.GetEnhMetaFileBits(data, size, bits) != size) return "unlocked " + format + " " + Native.GetClipboardSequenceNumber();
-                        return "emf " + format + " " + Native.GetClipboardSequenceNumber() + " " + Convert.ToBase64String(bits);
+                        if (Native.GetEnhMetaFileBits(data, size, bits) != size) return "unlocked " + format + " " + seq + " 0 end";
+                        if (!Holds()) return "lost end";
+                        return "emf " + format + " " + seq + " " + size + " " + Convert.ToBase64String(bits) + " end";
                     }
-                    long length = (long)Native.GlobalSize(data).ToUInt64();
-                    if (length <= 0 || length > cap) return "oversize " + format + " " + Native.GetClipboardSequenceNumber();
+                    Native.ClearLastError(0);
+                    long length = hook == "size-zero" ? 0 : (long)Native.GlobalSize(data).ToUInt64();
+                    if (length <= 0) return "nosize " + format + " " + seq + " " + Marshal.GetLastWin32Error() + " end"; // zero is not a size
+                    if (length > cap) return "oversize " + format + " " + seq + " " + length + " end";
+                    Native.ClearLastError(0);
                     IntPtr source = Native.GlobalLock(data);
-                    if (source == IntPtr.Zero) return "unlocked " + format + " " + Native.GetClipboardSequenceNumber();
+                    if (source == IntPtr.Zero) return "unlocked " + format + " " + seq + " " + Marshal.GetLastWin32Error() + " end";
                     byte[] bytes = new byte[(int)length];
                     try { Marshal.Copy(source, bytes, 0, (int)length); }
                     finally { Native.GlobalUnlock(data); }
-                    return "data " + format + " " + Native.GetClipboardSequenceNumber() + " " + Convert.ToBase64String(bytes);
+                    if (!Holds()) return "lost end";
+                    return "data " + format + " " + seq + " " + length + " " + Convert.ToBase64String(bytes) + " end";
                 }
-                finally { Native.CloseClipboard(); }
+                finally { if (Holds()) Native.CloseClipboard(); }
             }
-            return "busy";
+            return "busy end";
         }
     }
 
-    /// <summary>The helper's side of the reader process: started on demand, ended on any overrun.</summary>
+    /// <summary>The helper's side of the reader process: started on demand; on an overrun it is ABANDONED (left to finish a render, never killed), and a generation whose capture was not established is retired.</summary>
     internal sealed class ClipboardReaderClient
     {
         static readonly object gate = new object();
@@ -256,6 +306,9 @@ namespace DoodleNote.DictationHelper
 
         int nextId;
 
+        /// <summary>A reader whose capture was not established is retired: never asked again (a fresh one next time).</summary>
+        public void Retire() { End(); } // it answered (it is not waiting in a render): ending it loses nothing
+
         /// <summary>
         /// One request; null when the reader did not answer within timeoutMs (it is then abandoned) or ended. Every
         /// request carries an id the reply must echo (round 20): a line with another id (a late reply, a stray line)
@@ -282,7 +335,9 @@ namespace DoodleNote.DictationHelper
                 Abandon();
                 return null;
             }
-            if (answer.StartsWith(id + " ", StringComparison.Ordinal)) return answer.Substring(id.Length + 1);
+            // A complete framed reply: this request's id first, " end" last (a fragment at EOF has no end).
+            if (answer.StartsWith(id + " ", StringComparison.Ordinal) && answer.EndsWith(" end", StringComparison.Ordinal))
+                return answer.Substring(id.Length + 1, answer.Length - id.Length - 1 - 4);
             Wire.Log("clipboard reader: a reply out of order or malformed (" + Math.Min(answer.Length, 40) + " chars, not this request's id); this reader is ended");
             End();
             return "out-of-order";
@@ -408,6 +463,8 @@ namespace DoodleNote.DictationHelper
         [DllImport("kernel32.dll", SetLastError = true)] static extern bool UpdateProcThreadAttribute(IntPtr list, int flags, IntPtr attribute, IntPtr value, IntPtr size, IntPtr previous, IntPtr returnSize);
         [DllImport("kernel32.dll")] static extern void DeleteProcThreadAttributeList(IntPtr list);
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern IntPtr CreateFileW(string name, uint access, uint share, ref SECURITY_ATTRIBUTES sa, uint disposition, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         static extern bool CreateProcess(string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit, int flags, IntPtr env, string dir, ref STARTUPINFOEX si, out PROCESS_INFORMATION pi);
         [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(IntPtr process, uint code);
         [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(IntPtr handle, uint ms);
@@ -424,26 +481,31 @@ namespace DoodleNote.DictationHelper
             IntPtr inRead, inWrite, outRead, outWrite;
             if (!CreatePipe(out inRead, out inWrite, ref sa, 0)) return null;
             if (!CreatePipe(out outRead, out outWrite, ref sa, 0)) { Native.CloseHandle(inRead); Native.CloseHandle(inWrite); return null; }
+            // Round 21: the reader's stderr is its own handle (the NUL device), never the reply pipe: any line it wrote
+            // there would otherwise be taken as a reply.
+            IntPtr errWrite = CreateFileW("NUL", 0x40000000 /* GENERIC_WRITE */, 3 /* share read|write */, ref sa, 3 /* OPEN_EXISTING */, 0, IntPtr.Zero);
+            if (errWrite == new IntPtr(-1)) { Native.CloseHandle(inRead); Native.CloseHandle(inWrite); Native.CloseHandle(outRead); Native.CloseHandle(outWrite); return null; }
             // Our ends stay here.
             Native.SetHandleInformation(inWrite, Native.HANDLE_FLAG_INHERIT, 0);
             Native.SetHandleInformation(outRead, Native.HANDLE_FLAG_INHERIT, 0);
             IntPtr size = IntPtr.Zero;
             InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);
             IntPtr list = Marshal.AllocHGlobal(size);
-            IntPtr handles = Marshal.AllocHGlobal(IntPtr.Size * 2);
+            IntPtr handles = Marshal.AllocHGlobal(IntPtr.Size * 3);
             try
             {
                 if (!InitializeProcThreadAttributeList(list, 1, 0, ref size)) { Native.CloseHandle(inWrite); Native.CloseHandle(outRead); return null; }
                 Marshal.WriteIntPtr(handles, 0, inRead);
                 Marshal.WriteIntPtr(handles, IntPtr.Size, outWrite);
-                if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles, (IntPtr)(IntPtr.Size * 2), IntPtr.Zero, IntPtr.Zero))
+                Marshal.WriteIntPtr(handles, IntPtr.Size * 2, errWrite);
+                if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles, (IntPtr)(IntPtr.Size * 3), IntPtr.Zero, IntPtr.Zero))
                 { DeleteProcThreadAttributeList(list); Native.CloseHandle(inWrite); Native.CloseHandle(outRead); return null; }
                 STARTUPINFOEX si = new STARTUPINFOEX();
                 si.StartupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFOEX));
                 si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
                 si.StartupInfo.hStdInput = inRead;
                 si.StartupInfo.hStdOutput = outWrite;
-                si.StartupInfo.hStdError = outWrite; // it writes nothing there
+                si.StartupInfo.hStdError = errWrite;
                 si.lpAttributeList = list;
                 PROCESS_INFORMATION pi;
                 StringBuilder command = new StringBuilder("\"" + path + "\" " + argument);
@@ -467,6 +529,7 @@ namespace DoodleNote.DictationHelper
                 // The child's ends belong to the child now (or to nobody, on failure).
                 Native.CloseHandle(inRead);
                 Native.CloseHandle(outWrite);
+                Native.CloseHandle(errWrite);
                 Marshal.FreeHGlobal(handles);
                 Marshal.FreeHGlobal(list);
             }
