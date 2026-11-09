@@ -1211,6 +1211,8 @@ namespace DoodleNote.DictationHelper
         {
             ownership.Confirm(record);
             if (ownership.Confirmed) PendingClipboard.StageClosed(record, ownership.SequenceFinal);
+            // A rejection is durable (round 17): the record is offer-only from now on, in this helper and in any later one.
+            if (ownership.ContentChanged) PendingClipboard.MarkOfferOnly(record, "our write's confirmation rejected it");
         }
 
         public static readonly string[] MarkerNames =
@@ -1966,7 +1968,7 @@ namespace DoodleNote.DictationHelper
                 // the record is kept; the next check finds the saved content on the clipboard and drops it.
                 PendingRecord record = Record;
                 Record = null;
-                PendingClipboard.Keep(record);
+                PendingClipboard.Keep(record, "a restore whose stage could not be journaled");
             }
             else Settle(result);
             return result;
@@ -2021,7 +2023,7 @@ namespace DoodleNote.DictationHelper
             PendingRecord record = Record;
             Record = null;
             if (record == null) return;
-            if (record.Persisted) PendingClipboard.Keep(record);
+            if (record.Persisted) PendingClipboard.Keep(record, "kept as an offer");
             else PendingClipboard.Finish(record, "unrestored");
         }
 
@@ -2034,6 +2036,14 @@ namespace DoodleNote.DictationHelper
             if (ours == null || !ours.Emptied) return "untouched";
             // Someone else emptied the clipboard right after our write: their copy is newer and wins.
             if (ours.ForeignAtConfirm) return "user-changed";
+            // An offer-only record is never restored on its own (whatever the clipboard looks like now): kept, offered.
+            if (PendingClipboard.IsOfferOnly(Record))
+            {
+                Wire.Log("the record is offer-only: not restored on its own (kept as an offer)");
+                Holds = ours.Holds();
+                keepRecord = true;
+                return "unrestored";
+            }
             if (!ClipboardText.Open())
             {
                 // Not looked at: a later retry must find fresh proof (content), never ownership alone (proof c off).

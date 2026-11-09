@@ -53,6 +53,15 @@ namespace DoodleNote.DictationHelper
         public readonly object Gate = new object();
         public bool Settled;
         public Thread PayloadWriter;
+        /// <summary>
+        /// OFFER-ONLY (round 17): once set, never cleared (only the record's deletion removes it). The record can then only
+        /// be offered (or deleted when the clipboard already holds exactly the saved content): no automatic restore, by
+        /// any proof, in this helper or any later one. Persisted with every state write.
+        /// </summary>
+        public bool OfferOnly;
+        public string OfferOnlyWhy = "";
+        /// <summary>A state rebuilt from its payload: written with an UNKNOWN identity (session -1, no logon, pid 0).</summary>
+        public bool IdentityUnknown;
     }
 
     /// <summary>A kept transaction the user may restore (formats and size only; never content).</summary>
@@ -319,15 +328,61 @@ namespace DoodleNote.DictationHelper
         }
 
 
-        /// <summary>A restore ran but the record must be kept (its stage could not be journaled): checked again later.</summary>
-        public static void Keep(PendingRecord record)
+        /// <summary>The record is kept, as an offer only (offer-only is persisted first): checked again later.</summary>
+        public static void Keep(PendingRecord record, string why)
         {
             if (record == null) return;
+            MarkOfferOnly(record, why);
             lock (gate) { inFlight.Remove(record.Id); ScheduleRetry(record.Id, RetryKind.Failed); }
         }
 
-        /// <summary>A restore result that leaves nothing to do later (anything but "unrestored").</summary>
+        /// <summary>A restore result that leaves nothing to do later: anything but "unrestored" and "user-changed" (both keep the record).</summary>
         public static bool Settled(string restoreResult) { return restoreResult != "unrestored" && restoreResult != "user-changed"; }
+
+        /// <summary>Ids this helper treats as offer-only even when the state file could not take the fact (fail safe).</summary>
+        static readonly HashSet<string> offerOnly = new HashSet<string>();
+
+        /// <summary>
+        /// The record can only be offered from now on (see PendingRecord.OfferOnly): set in memory first, then journaled
+        /// (write-through). A journal that fails keeps it offer-only in this helper; stated plainly, a later helper then
+        /// sees the previous state (it re-derives from the content and the sequence, as before round 17).
+        /// </summary>
+        public static void MarkOfferOnly(PendingRecord record, string why)
+        {
+            if (record == null) return;
+            lock (gate) offerOnly.Add(record.Id);
+            if (record.OfferOnly) return;
+            record.OfferOnly = true;
+            record.OfferOnlyWhy = why ?? "";
+            Wire.Log("clipboard record " + record.Id.Substring(0, 8) + ": offer-only from now on (" + why + ")");
+            if (record.Persisted && !Journal(record)) Wire.Log("ERROR: the offer-only fact could not be written down; this helper keeps it in memory");
+        }
+
+        /// <summary>Whether this record may only be offered (persisted or in memory).</summary>
+        public static bool IsOfferOnly(PendingRecord record)
+        {
+            if (record == null) return false;
+            lock (gate) return record.OfferOnly || offerOnly.Contains(record.Id);
+        }
+
+        /// <summary>Under gate: the offer-only fact for a record on disk (its state file is rewritten with it).</summary>
+        static void MarkOfferOnlyOnDisk(string id, RecordFacts facts, string why)
+        {
+            offerOnly.Add(id);
+            if (facts.OfferOnly) return;
+            facts.OfferOnly = true;
+            facts.OfferOnlyWhy = why;
+            try
+            {
+                Dictionary<string, object> state = Wire.Parse(File.ReadAllText(StatePath(id)));
+                if (state == null) return;
+                state["offerOnly"] = true;
+                state["offerOnlyWhy"] = why;
+                WriteStateJson(StatePath(id), Wire.Serialize(state));
+                Wire.Log("clipboard record " + id.Substring(0, 8) + ": offer-only from now on (" + why + ")");
+            }
+            catch (Exception error) { Wire.Log("ERROR: the offer-only fact could not be written down (" + error.GetType().Name + "); this helper keeps it in memory"); }
+        }
 
         /// <summary>
         /// The transaction is over for this delivery: its record is deleted when the restore completed (or
@@ -336,16 +391,24 @@ namespace DoodleNote.DictationHelper
         public static void Finish(PendingRecord record, string restoreResult)
         {
             if (record == null) return;
-            lock (gate) inFlight.Remove(record.Id);
             if (Settled(restoreResult))
             {
-                if (record.Persisted) Delete(record, "restore ran (" + restoreResult + ")");
+                // Journaled "settled" and deleted BEFORE it leaves in-flight: a concurrent check never finds content that
+                // was already put back and offers it (a "settled" state is deleted on sight, never offered).
+                if (record.Persisted)
+                {
+                    if (!Stage(record, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
+                    Delete(record, "restore ran (" + restoreResult + ")");
+                }
+                lock (gate) inFlight.Remove(record.Id);
                 return;
             }
+            lock (gate) inFlight.Remove(record.Id);
             record.Unrestored = true;
+            MarkOfferOnly(record, "a restore that did not complete (" + restoreResult + ")");
             if (record.Persisted)
             {
-                Journal(record);
+                Journal(record); // the unrestored flag (also when the record was offer-only already)
                 lock (gate) ScheduleRetry(record.Id, RetryKind.Failed);
             }
             else Wire.Log("the restore failed and the saved clipboard was memory-only (privacy marker): it cannot be retried later");
@@ -380,6 +443,8 @@ namespace DoodleNote.DictationHelper
                 "offeredBoot", record.OfferedBoot ?? "",
                 "offered", record.OfferedUtc ?? "",
                 "offerBoots", record.OfferBoots,
+                "offerOnly", record.OfferOnly,
+                "offerOnlyWhy", record.OfferOnlyWhy ?? "",
                 "updated", DateTime.UtcNow.ToString("o")));
             WriteStateJson(StatePath(record.Id), json);
         }
@@ -856,7 +921,8 @@ namespace DoodleNote.DictationHelper
                 // Journaled like a delivery, keeping the stage FOUND as its origin (unwrapped only when the found
                 // stage is itself a recovery that never emptied: then the clipboard is as that recovery found it).
                 journal = new PendingRecord(id, nonce) { Persisted = true, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, DictatedHash = dictatedHash,
-                    OfferedSequence = facts.OfferedSequence, OfferedTick = facts.OfferedTick, OfferedBoot = facts.OfferedBoot, OfferedUtc = facts.OfferedUtc, OfferBoots = facts.OfferBoots }; // a failed recovery keeps the first offer
+                    OfferedSequence = facts.OfferedSequence, OfferedTick = facts.OfferedTick, OfferedBoot = facts.OfferedBoot, OfferedUtc = facts.OfferedUtc, OfferBoots = facts.OfferBoots,
+                    OfferOnly = facts.OfferOnly, OfferOnlyWhy = facts.OfferOnlyWhy }; // a failed recovery keeps the first offer, and offer-only
                 Inherit(journal, facts, match, (long)Native.GetTickCount64());
                 if (!Stage(journal, "recovering", view.Sequence))
                 {
@@ -1006,6 +1072,8 @@ namespace DoodleNote.DictationHelper
                 facts.OfferedTick = known.Tick;
                 facts.OfferedBoot = known.Boot;
             }
+            // An offered record is offer-only from then on: whatever later looks like proof, the user decides.
+            MarkOfferOnlyOnDisk(id, facts, "offered");
             if (facts.OfferedSequence == 0)
             {
                 if (facts.OfferBoots == 0) facts.OfferBoots = 1;
@@ -1127,8 +1195,12 @@ namespace DoodleNote.DictationHelper
         public static RecoveryVerdict Decide(RecordFacts facts, ClipboardView view, LogonMatch logonMatch)
         {
             string stage = facts.Stage;
-            if (stage == "saved") return RecoveryVerdict.Untouched;
             if (logonMatch == LogonMatch.OtherSession) return RecoveryVerdict.OtherSession;
+            // OFFER-ONLY first (round 17): a record that was ever rejected, kept as an offer, offered, rebuilt, adopted, or
+            // whose restore did not complete can only be offered, or deleted when that loses nothing (the saved content is
+            // already there). Never (a), never (b): authority is not re-derived from fields once it was given up.
+            if (facts.OfferOnly) return view.HoldsSavedExactly ? RecoveryVerdict.Untouched : RecoveryVerdict.Pending;
+            if (stage == "saved") return RecoveryVerdict.Untouched;
             // Another boot: sequence numbers and ownership mean nothing, so nothing is proven; but an OFFER only needs the
             // user's confirmation against the clipboard as it is now (Restore re-checks at the click): offered.
             if (logonMatch == LogonMatch.Different) return view.HoldsSavedExactly ? RecoveryVerdict.Untouched : RecoveryVerdict.Pending;
@@ -1226,6 +1298,59 @@ namespace DoodleNote.DictationHelper
         public string OfferedBoot = "";
         public string OfferedUtc = "";
         public int OfferBoots;
+        /// <summary>See PendingRecord.OfferOnly.</summary>
+        public bool OfferOnly;
+        public string OfferOnlyWhy = "";
+
+        /// <summary>Every stage this helper journals ("unknown": rebuilt; "settled": its restore ran, deleted on sight).</summary>
+        internal static readonly string[] Stages = { "saved", "emptying", "emptied", "written", "restoring", "restore-emptied", "recovering", "recovering-emptied", "unknown", "settled" };
+
+        /// <summary>The state file's schema: every field, always written. s string, b bool, u uint32, l long >= 0, i int >= -1.</summary>
+        static readonly Dictionary<string, char> Schema = new Dictionary<string, char>
+        {
+            { "format", 'i' }, { "id", 's' }, { "pid", 'i' }, { "pidStart", 'l' }, { "stage", 's' },
+            { "sequenceAtStage", 'u' }, { "sequenceClosed", 'u' }, { "sequenceAfterWrite", 'u' },
+            { "originStage", 's' }, { "originSequenceAtStage", 'u' }, { "originSequenceClosed", 'u' },
+            { "unrestored", 'b' }, { "delivery", 's' }, { "ownerWindow", 's' },
+            { "session", 'i' }, { "logon", 's' }, { "sessionKey", 's' }, { "bootId", 's' }, { "tick", 'l' }, { "boot", 's' },
+            { "created", 's' }, { "offeredSequence", 'u' }, { "offeredTick", 'l' }, { "offeredBoot", 's' }, { "offered", 's' },
+            { "offerBoots", 'i' }, { "offerOnly", 'b' }, { "offerOnlyWhy", 's' }, { "updated", 's' }
+        };
+
+        /// <summary>
+        /// The rule (unit-tested, STRICT): null when the state is exactly one this helper writes for this record (every
+        /// field present with its type, nothing else, a known stage, this format and this id); otherwise why not. An
+        /// invalid state proves nothing: no default ever stands in for a missing field (see RecoverOne).
+        /// </summary>
+        internal static string Validate(Dictionary<string, object> state, string id)
+        {
+            if (state == null) return "it does not parse";
+            foreach (KeyValuePair<string, object> field in state) if (!Schema.ContainsKey(field.Key)) return "an unknown field (" + field.Key + ")";
+            foreach (KeyValuePair<string, char> field in Schema)
+            {
+                object value;
+                if (!state.TryGetValue(field.Key, out value)) return "a missing field (" + field.Key + ")";
+                if (field.Value == 's') { if (!(value is string)) return "a wrong type (" + field.Key + ")"; continue; }
+                if (field.Value == 'b') { if (!(value is bool)) return "a wrong type (" + field.Key + ")"; continue; }
+                double? number = Wire.Num(state, field.Key);
+                if (!number.HasValue || number.Value != Math.Floor(number.Value)) return "a wrong type (" + field.Key + ")";
+                double n = number.Value;
+                if (field.Value == 'u' && (n < 0 || n > uint.MaxValue)) return "out of range (" + field.Key + ")";
+                if (field.Value == 'l' && (n < 0 || n > 9.2e18)) return "out of range (" + field.Key + ")";
+                if (field.Value == 'i' && (n < -1 || n > int.MaxValue)) return "out of range (" + field.Key + ")";
+            }
+            if ((int)Wire.Num(state, "format").Value != PendingClipboard.Format) return "another format";
+            if (Wire.Str(state, "id") != id) return "another record's id";
+            if (Array.IndexOf(Stages, Wire.Str(state, "stage")) < 0) return "an unknown stage";
+            string origin = Wire.Str(state, "originStage");
+            if (origin.Length > 0 && Array.IndexOf(Stages, origin) < 0) return "an unknown origin stage";
+            double boots = Wire.Num(state, "offerBoots").Value;
+            if (boots < 0 || boots > 2) return "out of range (offerBoots)";
+            if ((int)Wire.Num(state, "pid").Value < 0) return "out of range (pid)";
+            DateTime created;
+            if (!DateTime.TryParse(Wire.Str(state, "created"), null, System.Globalization.DateTimeStyles.RoundtripKind, out created)) return "a wrong type (created)";
+            return null;
+        }
 
         public static RecordFacts Of(Dictionary<string, object> state)
         {
@@ -1252,6 +1377,8 @@ namespace DoodleNote.DictationHelper
             facts.OfferedBoot = Wire.Str(state, "offeredBoot") ?? "";
             facts.OfferedUtc = Wire.Str(state, "offered") ?? "";
             facts.OfferBoots = (int)(Wire.Num(state, "offerBoots") ?? 0);
+            facts.OfferOnly = Wire.Bool(state, "offerOnly") ?? true; // only ever read from a validated state; absent would mean offer-only
+            facts.OfferOnlyWhy = Wire.Str(state, "offerOnlyWhy") ?? "";
             DateTime created;
             if (DateTime.TryParse(Wire.Str(state, "created") ?? "", null, System.Globalization.DateTimeStyles.RoundtripKind, out created)) facts.CreatedUtc = created.ToUniversalTime();
             return facts;
