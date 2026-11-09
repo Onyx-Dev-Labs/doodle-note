@@ -552,7 +552,12 @@ namespace DoodleNote.DictationHelper
                 for (int i = 0; i < held.Count; i++)
                 {
                     bool hook = TestMode.Env("DICTATION_HELPER_TEST_FAIL_DELETE_MARK") == (i + 1).ToString();
-                    if (!hook && Native.SetFileInformationByHandle(held[i], Native.FileDispositionInfo, ref mark, 1)) continue;
+                    if (!hook && Native.SetFileInformationByHandle(held[i], Native.FileDispositionInfo, ref mark, 1))
+                    {
+                        // Test build only: be killed between two marks (the marks set so far are honoured at termination).
+                        if (TestMode.Int("DICTATION_HELPER_TEST_DELETE_STALL_AFTER_MARK", 0) == i + 1) Thread.Sleep(15000);
+                        continue;
+                    }
                     Wire.Log("a record file could not be marked for deletion (" + (hook ? "test hook" : "error " + Marshal.GetLastWin32Error()) + ")");
                     bool cleared = true;
                     for (int j = 0; j < i; j++)
