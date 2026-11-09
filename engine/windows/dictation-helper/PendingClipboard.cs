@@ -553,7 +553,8 @@ namespace DoodleNote.DictationHelper
                 }
                 Native.FILE_DISPOSITION_INFO mark = new Native.FILE_DISPOSITION_INFO { DeleteFile = 1 };
                 Native.FILE_DISPOSITION_INFO keep = new Native.FILE_DISPOSITION_INFO { DeleteFile = 0 };
-                bool hookUnmark = TestMode.Env("DICTATION_HELPER_TEST_FAIL_DELETE_UNMARK") == "1";
+                // Test build only: clearing marks fails ("1": every one; otherwise a comma list of 1-based handle indexes).
+                string hookUnmark = TestMode.Env("DICTATION_HELPER_TEST_FAIL_DELETE_UNMARK") ?? "";
                 for (int i = 0; i < held.Count; i++)
                 {
                     bool hook = TestMode.Env("DICTATION_HELPER_TEST_FAIL_DELETE_MARK") == (i + 1).ToString();
@@ -566,7 +567,7 @@ namespace DoodleNote.DictationHelper
                     Wire.Log("a record file could not be marked for deletion (" + (hook ? "test hook" : "error " + Marshal.GetLastWin32Error()) + ")");
                     bool cleared = true;
                     for (int j = 0; j < i; j++)
-                        if (hookUnmark || !Native.SetFileInformationByHandle(held[j], Native.FileDispositionInfo, ref keep, 1)) cleared = false;
+                        if (hookUnmark == "1" || Array.IndexOf(hookUnmark.Split(','), (j + 1).ToString()) >= 0 || !Native.SetFileInformationByHandle(held[j], Native.FileDispositionInfo, ref keep, 1)) cleared = false;
                     if (cleared) { Wire.Log("every mark already set was cleared: nothing deleted, the record is kept whole"); return false; }
                     // A mark that could not be cleared: that file goes at the close. Complete the deletion instead, from the
                     // BEGINNING in the stated order (every handle marked again), so that what the close (or a kill) leaves
