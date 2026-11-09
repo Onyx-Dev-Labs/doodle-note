@@ -1958,6 +1958,7 @@ namespace DoodleNote.DictationHelper
             saved.Sequence = sequence;
             System.Text.StringBuilder outcomes = new System.Text.StringBuilder();
             List<uint> deferred = new List<uint>(); // bitmap, palette, metafile picture: decided by what was retained
+            int unrenderedSkips = 0; // class 3 skips (round 22)
             long total = 0;
             foreach (KeyValuePair<uint, string> entry in formats)
             {
@@ -2054,6 +2055,7 @@ namespace DoodleNote.DictationHelper
                     saved.reportedSkip = true;
                     saved.skippedNames.Add(DisplayName(format, name) + " (not provided by the app that copied it)");
                     outcomes.Append(" " + why + ": not rendered by its owner, skipped (reported)");
+                    unrenderedSkips++;
                     continue;
                 }
                 saved.Discard();
@@ -2073,6 +2075,16 @@ namespace DoodleNote.DictationHelper
                 }
                 else if (dibRetained) outcomes.Append(" rebuilt from the retained DIB (policy)");
                 else { saved.complete = false; outcomes.Append(" not saved (no DIB retained: partial)"); }
+            }
+            // Round 22 (the limit of class 3): a skip is taken only beside content that does go back. When every format
+            // with data went unrendered, nothing would come back: emptying would destroy the user's whole clipboard. That
+            // is NOT ESTABLISHED (no paste), never an established save of nothing.
+            if (unrenderedSkips > 0 && saved.items.Count == 0 && saved.metafile == IntPtr.Zero)
+            {
+                saved.Discard();
+                retry = false;
+                line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + "]): no format with data was provided by its owner, so nothing could be put back; not pasting";
+                return null;
             }
             // Someone copied while the save ran: their copy is the user's clipboard now; never paste over it.
             uint now = sequenceNow();
