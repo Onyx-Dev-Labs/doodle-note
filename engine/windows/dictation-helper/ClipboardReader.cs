@@ -22,13 +22,21 @@ namespace DoodleNote.DictationHelper
     /// because ending it mid-render loses the format being rendered; it finishes the render, finds its
     /// stdin closed and exits (verified: the owner's "Embed Source" is still there after the render).
     /// At most MaxAbandoned readers may be waiting like that; reaching it asks for a helper restart
-    /// through the safe path (between deliveries; the waiting readers are left to finish). A timer
-    /// prunes them every few seconds; one is ended only if it is still waiting after AbandonedMaxMs
-    /// (120 s) AND the owner it was waiting on when the read was sent is reported hung (IsHungAppWindow).
-    /// The helper's own exit (quit or restart) closes their stdin and never kills one. Since
+    /// through the safe path (between deliveries; the waiting readers are left to finish). Since
     /// other apps can write meanwhile, every read reports the clipboard sequence number taken after it,
     /// and any change since the list (or before the paste empties the clipboard) discards the save.
-    /// The reader exits when its stdin closes, so it never outlives the helper.
+    ///
+    /// THE BOUND (round 22, F4/S1) on how long a reader can hold the clipboard open in an owner's render:
+    ///  1. an owner that does not answer a WM_NULL now is never asked to render: the helper checks before the save,
+    ///     and the reader checks again before each read ("unresponsive": not established, no paste);
+    ///  2. Windows itself gives up on a delayed render (WM_RENDERFORMAT) whose owner does not answer;
+    ///  3. the reader's own watchdog: once its stdin closes (the helper abandoned it, or ended), a read still
+    ///     outstanding after StdinClosedExitMs (30 s) ends the reader process itself;
+    ///  4. the helper's ceiling: an abandoned reader is ended once it has waited past AbandonedMaxMs (120 s) with
+    ///     its owner reported hung, or past AbandonedCeilingMs (300 s) whatever the owner reports.
+    /// So a reader never outlives the helper by more than about 30 s. IsHungAppWindow alone is no bound (an owner
+    /// that is busy but pumping is never "hung"). The cost: a reader ended by 3 or 4 mid-render may lose the format
+    /// being rendered for the owner (the owner's other formats and data stay as they were).
     ///
     /// Reader protocol (round 21; one line each way per request, every reply framed and ending with " end", every
     /// request starting with an id the reply echoes, so a late reply or a fragment can never answer a request):
@@ -90,12 +98,41 @@ namespace DoodleNote.DictationHelper
         static bool Holds() { return Window != IntPtr.Zero && Native.GetOpenClipboardWindow() == Window; }
 
         /// <summary>The reader process's main loop. Its stderr is a separate handle (the NUL device), never the reply pipe.</summary>
+        /// <summary>After stdin closes, a read still outstanding this long ends the reader process itself (the bound, 3).</summary>
+        const int StdinClosedExitMs = 30000;
+        /// <summary>Requests read but not yet answered (one may be blocked in an owner's render).</summary>
+        static int outstanding;
+
         public static int Serve()
         {
             StreamReader input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
             Stream output = Console.OpenStandardOutput();
+            // Round 22 (F4): stdin is read on its own thread, so its close is seen even while the main thread waits in a
+            // render; then a read still outstanding after StdinClosedExitMs ends this process (the bound, 3).
+            BlockingCollection<string> requests = new BlockingCollection<string>();
+            Thread stdin = new Thread(delegate ()
+            {
+                try
+                {
+                    string read;
+                    while ((read = input.ReadLine()) != null) { Interlocked.Increment(ref outstanding); requests.Add(read); }
+                }
+                catch (Exception) { }
+                finally { requests.CompleteAdding(); }
+                int closedExitMs = TestMode.Int("DICTATION_HELPER_TEST_READER_EXIT_MS", StdinClosedExitMs);
+                Stopwatch closed = Stopwatch.StartNew();
+                while (closed.ElapsedMilliseconds < closedExitMs)
+                {
+                    Thread.Sleep(100);
+                    if (Volatile.Read(ref outstanding) == 0) return; // nothing outstanding: the main loop ends on its own
+                }
+                if (Volatile.Read(ref outstanding) > 0) Environment.Exit(4); // still blocked in a render 30 s after the helper let go: ended
+            });
+            stdin.IsBackground = true;
+            stdin.Name = "reader-stdin";
+            stdin.Start();
             string line;
-            while ((line = input.ReadLine()) != null)
+            while (requests.TryTake(out line, Timeout.Infinite))
             {
                 string trimmed = line.Trim();
                 int space = trimmed.IndexOf(' ');
@@ -109,7 +146,9 @@ namespace DoodleNote.DictationHelper
                 if (hook == "stray-line") reply = "0 list 1 0 0 0 0 1 0 end\n" + reply;
                 if (hook == "fragment-list" && reply.Contains(" list ")) { WriteRaw(output, reply.Substring(0, reply.Length / 2)); return 3; }
 #endif
-                if (!WriteRaw(output, reply + "\n")) return 0;
+                bool written = WriteRaw(output, reply + "\n");
+                Interlocked.Decrement(ref outstanding); // answered (or nobody listens): the watchdog has nothing to wait for
+                if (!written) return 0;
             }
             return 0;
         }
@@ -179,6 +218,8 @@ namespace DoodleNote.DictationHelper
                 long cap = long.Parse(parts[2]);
                 int delay = TestMode.Int("DICTATION_HELPER_TEST_CAPTURE_DELAY_MS", 0);
                 if (hook == "die-mid-reply") { Stream raw = Console.OpenStandardOutput(); raw.Write(new byte[] { 100, 97, 116 }, 0, 3); raw.Flush(); Environment.Exit(3); } // test build only: "dat", then gone
+                // Round 22 (F4, the bound 1): an owner that does not answer now is never asked to render.
+                if (hook == "unresponsive" || ClipboardText.OwnerUnresponsive() != null) return "unresponsive end";
                 if (!Open()) return "busy end";
                 try
                 {
@@ -230,8 +271,10 @@ namespace DoodleNote.DictationHelper
         /// <summary>Readers given up on while they wait in an owner's render (they exit when it returns).</summary>
         static readonly List<ClipboardReaderClient> abandoned = new List<ClipboardReaderClient>();
         public const int MaxAbandoned = 2;
-        /// <summary>A waiting reader may be ended only past this AND with its owner hung (a hung owner can still finish later).</summary>
+        /// <summary>A waiting reader may be ended past this with its owner hung (a hung owner can still finish later).</summary>
         const int AbandonedMaxMs = 120000;
+        /// <summary>The ceiling (round 22, F4): a waiting reader is ended past this whatever its owner reports.</summary>
+        const int AbandonedCeilingMs = 300000;
         /// <summary>How long an exit waits for the idle shared reader to leave once its stdin is closed.</summary>
         public const int IdleExitWaitMs = 500;
         /// <summary>The clipboard owner when the current request was sent (the render it may wait on).</summary>
@@ -387,16 +430,19 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Waiting past AbandonedMaxMs (120 s) on an owner reported hung (the one it was waiting on when
-        /// the read was sent, not whoever owns the clipboard now). Only the prune timer ends such a
-        /// reader, so that a stuck owner cannot hold readers forever; an exit never does.
+        /// Waiting past AbandonedMaxMs (120 s) on an owner reported hung (the one it was waiting on when the read was
+        /// sent, not whoever owns the clipboard now), or past AbandonedCeilingMs (300 s) whatever it reports (round 22:
+        /// IsHungAppWindow alone is no bound; a busy owner that pumps is never "hung"). Only the prune timer ends such
+        /// a reader (the reader's own watchdog normally ends it first, 30 s after its stdin closed); an exit never does.
         /// </summary>
         bool MayEnd
         {
             get
             {
                 IntPtr owner = waitedOwner;
-                return age.ElapsedMilliseconds > AbandonedMaxMs && owner != IntPtr.Zero
+                long waited = age.ElapsedMilliseconds;
+                if (waited > AbandonedCeilingMs) return true;
+                return waited > AbandonedMaxMs && owner != IntPtr.Zero
                     && Native.IsWindow(owner) && Native.IsHungAppWindow(owner);
             }
         }

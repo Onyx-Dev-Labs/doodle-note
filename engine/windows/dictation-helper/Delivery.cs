@@ -511,6 +511,15 @@ namespace DoodleNote.DictationHelper
             // That check can take a while with several kept records (each opens the clipboard): the paste starts only if it
             // still fits the delivery's deadline (otherwise nothing of the user's is touched; the typing fallback decides).
             if (stillInTime != null && !stillInTime()) { Wire.Log("the paste no longer fits the deadline after the kept-records check; not pasting"); return "deadline"; }
+            // Round 22 (F4, the bound 1): an owner that does not answer a WM_NULL now is never asked to render either (the
+            // save would wait in its render): checked BEFORE the save, and again after it (below) before emptying.
+            string unresponsiveBefore = ClipboardText.OwnerUnresponsive();
+            if (unresponsiveBefore != null)
+            {
+                Wire.Log("the clipboard's owner is not responding before the save (" + unresponsiveBefore + "); not saving, not pasting");
+                deliveryNotSaved = true;
+                return "owner-unresponsive";
+            }
             // Saving the user's clipboard renders lazily-provided formats (OLE "Embed Source" and the
             // like), which can take arbitrarily long; it runs in the reader process, bounded per format.
             saved = SavedClipboard.CaptureBounded(CaptureBudgetMs);
@@ -1997,7 +2006,8 @@ namespace DoodleNote.DictationHelper
                 if (parts.Length < 3 || parts[1] != format.ToString() || !uint.TryParse(parts[2], out at) || at == 0)
                 {
                     saved.Discard();
-                    line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " " + (parts[0] == "lost" ? "lost hold" : parts[0] == "busy" ? "busy" : "malformed, fragmentary or out-of-order reply") + "]); not pasting";
+                    if (parts[0] == "unresponsive") retry = false; // its owner does not answer: never asked to render, not retried
+                    line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " " + (parts[0] == "lost" ? "lost hold" : parts[0] == "busy" ? "busy" : parts[0] == "unresponsive" ? "its owner did not answer, so it was never asked to render" : "malformed, fragmentary or out-of-order reply") + "]); not pasting";
                     return null;
                 }
                 if (at != sequence) { saved.Discard(); retry = false; line = "the clipboard changed while it was saved (" + listing + ", now " + at + "); not pasting"; return null; }
