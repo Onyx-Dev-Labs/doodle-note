@@ -298,16 +298,19 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * the text is written and the file keeps the mode it has just before the rename. A change made before it
  * fails the open and the base's write decides. A new file is linked into place
  * (link(2), never replacing a file that appeared meanwhile). If a step on the way
- * fails for want of permission or support (the open, the temporary file, the link
- * or the rename; BASE_DECIDES), or the name no longer holds the opened file
- * (replaced meanwhile), the original is untouched and the base's in-place write
- * decides: it succeeds or fails (same error) exactly as it would have at that
+ * fails for want of permission or support, or because the name no longer leads
+ * to a file (the open, the temporary file, the link or the rename; BASE_DECIDES),
+ * or the name no longer holds the opened file (replaced meanwhile), the original
+ * is untouched and the base's in-place write decides: it succeeds or fails (same
+ * error, truncating first as it always did) exactly as it would have at that
  * moment. Any other failure (a full disk, EDQUOT, EIO) is thrown with the original
- * untouched, where the base's write would have truncated it first (round 12: the
- * one difference in failure, disclosed). Round 13: the checks before the replace
- * (resolving the path, the stat, the folder's access check and the open) are
- * classified the same way: a BASE_DECIDES failure there leads to the base's
- * in-place write, any other is thrown before anything is written or created.
+ * untouched and the temporary file removed (unless that removal fails, below),
+ * where the base's write would have truncated it first (round 12: the one
+ * difference in failure, disclosed, for the owner to acknowledge). Round 13: the
+ * checks before the replace (resolving the path, the stat, the folder's access
+ * check and the open) are classified the same way: a BASE_DECIDES failure there
+ * leads to the base's in-place write, any other is thrown before anything is
+ * written or created.
  *
  * The temporary file is created exclusively (createTemporaryBeside: a taken name
  * is retried with a fresh one, then the base's write decides), and only a file
@@ -317,12 +320,14 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * the file's mode bits made in the interval between the last fstat (the
  * descriptor is released there) and the rename lands on the replaced file, not
  * the new one (the owner, group and any ACL of the original are not carried over
- * at all: disclosed). As with any replace by rename, another writer's content is
+ * at all: the new file has only the ACL entries its folder passes on, if any;
+ * disclosed). As with any replace by rename, another writer's content is
  * lost when it lands meanwhile: another client's own atomic rewrite between the
  * identity check (lstat) and the rename is replaced by ours, and another
  * process's in-place write to the file between the open and the rename goes to
  * the replaced file. And the temporary file remains whenever its removal fails
- * (removeOwnTemporary: the failure is not reported, the result stands), for
+ * (removeOwnTemporary: the failure is not reported, the result stands; it is
+ * attempted on every failure path, a failed close included, round 13), for
  * example when the folder became read-only before the rename or, for a new file,
  * before the link. It is `.dn-<8 hex>.tmp` in the config's folder.
  */

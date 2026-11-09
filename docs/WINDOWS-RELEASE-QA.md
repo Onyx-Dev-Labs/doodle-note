@@ -550,13 +550,13 @@ starts at login) until the item is toggled in Task Manager or Open at login is
 turned on in Settings.
 
 "Launched the old exe" is decided with 8.3 short names expanded on both sides
-(`isInsideFolder`; round 11: always on the resolved forms, so a path written
-inside the old folder counts only once it resolves there, and a junction inside
-it leading elsewhere does not, when its destination exists. A dangling junction,
-whose destination is missing, is expanded like any missing part (see below), so
-its path counts as written: inside the old folder. That is harmless: nothing
-exists there to start either):
-an MCP command or Run value the old app wrote while it was started through a
+(`isInsideFolder`). Since round 11 it is decided on the resolved forms: a path
+written inside the old folder counts only once it resolves there, and a junction
+inside it that leads elsewhere does not count, when its destination exists. A
+dangling junction, whose destination is missing, is expanded like any missing
+part (see below), so its path counts as written, inside the old folder. That is
+harmless, because nothing exists there to start either. So an MCP command or Run
+value the old app wrote while it was started through a
 short path (`C:\Users\PATRIC~1\...\desktop\DoodleNote.exe`) still matches, since
 the old folder's parent exists and expands; in the old folder's own place exactly
 one unexpanded alias counts, the 8.3 name the installer recorded for it before
@@ -640,7 +640,10 @@ a symbolic link is followed to the file the file system itself reaches,
 to the name inside its folder's real path, where `writeFileSync` would create it;
 where that cannot be determined, nothing is written), only when their content changes, and not at all if
 the client rewrote the file in the meantime (the update starts over from the new
-text).
+text). A temporary file whose removal fails stays beside the config as
+`.dn-<8 hex>.tmp` (not reported; the write's own result stands). Round 13: a
+removal refused while another process, such as a virus scanner, holds the new
+file is retried first, as the rename is (5 more attempts, 50 ms apart).
 
 Those rules, and the strict Codex reading (a `config.toml` the TOML 1.0 statement
 scanner cannot read is refused and left unchanged; every definition of our server
@@ -655,16 +658,24 @@ write). The replace is used only where the base's write would have been allowed
 too: the folder writable, and the file opened for writing first, as the base's
 write opened it (round 11: that descriptor, not an earlier access check, is the
 authority; a new file is linked into place, never over one that appeared
-meanwhile). A failure on the way for want of permission or support (`EACCES`,
-`EPERM`, `EROFS`, `EXDEV`, `ENOTSUP`, `EINVAL`, `EMLINK`, `ENAMETOOLONG`, every
-temporary name taken or a file that appeared before the link: `EEXIST`, a file
-removed meanwhile: `ENOENT`), or a file replaced meanwhile, falls back to the
-base's in-place write. Round 12: any other failure (`ENOSPC`, `EDQUOT`, `EIO`,
-`ENOMEM`, ...) is reported with the config untouched and the temporary file
-removed. **Owner-acknowledged deviation:** there the base's in-place write would
-have truncated the file first, so on a full disk it failed with the config empty
-or cut short (or, rarely, succeeded in the blocks it had just freed); the macOS
-build fails with the config intact. The temporary file's name is short and fixed
+meanwhile). A failure on the way for want of permission or support, or of a name
+that no longer leads to a file (`BASE_DECIDES`, exactly: `EACCES`, `EPERM`,
+`EROFS`, `EXDEV`, `ENOTSUP`, `EOPNOTSUPP`, `EINVAL`, `EMLINK`, `ENAMETOOLONG`,
+`EEXIST` (every temporary name taken, or a file that appeared before the link),
+`ENOENT` (a file or folder removed meanwhile), and since round 13 `ENOTDIR`,
+`EISDIR`, `ELOOP`), or a file replaced meanwhile, falls back to the base's
+in-place write, which then succeeds or fails as the base's write would have
+(truncating first, as it always did). Round 12: any other failure of the replace
+(`ENOSPC`, `EDQUOT`, `EIO`, `ENOMEM`, `EMFILE`, ...) is reported with the config
+untouched, and the temporary file is removed (it remains only if its removal
+fails, see below). Round 13: the checks before the replace (resolving the path, the
+`stat`, the folder's access check and the open for writing) are classified the
+same way. A `BASE_DECIDES` failure there falls back to the base's in-place write
+as before; any other is reported before anything is written or created.
+**Deviation (disclosed; for the owner to acknowledge):** in those cases the base's
+in-place write would have truncated the file first, so on a full disk it failed
+with the config empty or cut short (or, rarely, succeeded in the blocks it had
+just freed); the macOS build fails with the config intact. The temporary file's name is short and fixed
 (`.dn-<8 hex>.tmp`), whatever the config is called, so it no longer names its
 config (the accepted cost of round 11's B2). It is created exclusively; a taken
 name is drawn again (8 names in all), and only a file this write created is ever
@@ -672,14 +683,17 @@ removed (round 12: round 11 removed a taken name's file, someone else's).
 Concurrency contract (tested where it can be): a change to the file's mode bits
 made before that open behaves as for the base (the base's write decides); one made
 after it is kept on the new file; one made in the interval between the last
-`fstat` and the rename lands on the replaced file instead (owner, group and ACLs
-are not carried over at all: the new file is owned by the user, with no ACL;
-a disclosed difference). As with any replace by rename,
+`fstat` and the rename lands on the replaced file instead. The owner, group and
+ACL of the original are not preserved at all: the new file is owned by the user,
+and it has only the ACL entries its folder passes on to a new file, if any (a
+disclosed difference). As with any replace by rename,
 another writer's content can be lost: another client's own atomic rewrite landing
 between the identity check (`lstat`) and the rename is replaced by ours, and
 another process's in-place write to the file between the open and the rename
 goes to the replaced file. And the temporary file remains whenever its removal
-fails, which is not reported (the write's own result stands): for example when the
+fails, which is not reported (the write's own result stands). Its removal is
+attempted on every failure path, also when closing a descriptor failed (round
+13: such a close is never repeated). It fails, for example, when the
 folder is made read-only between the temporary file and the rename (the in-place
 write still succeeds) or, for a new file, the link (`EACCES`, as the base's
 create). `src/main/agent-access-darwin.test.ts` compares a darwin service
