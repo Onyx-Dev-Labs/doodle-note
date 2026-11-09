@@ -419,8 +419,8 @@ namespace DoodleNote.DictationHelper
             string json = Wire.Serialize(Wire.Fields(
                 "format", Format,
                 "id", record.Id,
-                "pid", Process.GetCurrentProcess().Id,
-                "pidStart", (double)Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks,
+                "pid", record.IdentityUnknown ? 0 : Process.GetCurrentProcess().Id,
+                "pidStart", record.IdentityUnknown ? 0.0 : (double)Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks,
                 "stage", record.Stage,
                 "sequenceAtStage", (double)record.SequenceAtStage,
                 "sequenceClosed", (double)record.SequenceClosed,
@@ -431,10 +431,10 @@ namespace DoodleNote.DictationHelper
                 "unrestored", record.Unrestored,
                 "delivery", record.DeliveryId ?? "",
                 "ownerWindow", Ui.ClipboardWindow.ToInt64().ToString("x"),
-                "session", session,
-                "logon", logon,
-                "sessionKey", SessionKey.Key,
-                "bootId", bootId,
+                "session", record.IdentityUnknown ? -1 : session,
+                "logon", record.IdentityUnknown ? "" : logon,
+                "sessionKey", record.IdentityUnknown ? "" : SessionKey.Key,
+                "bootId", record.IdentityUnknown ? "" : bootId,
                 "tick", (double)record.CreatedTick,
                 "boot", Native.BootTimeUtc.ToString("o"),
                 "created", record.CreatedUtc.ToString("o"),
@@ -767,8 +767,11 @@ namespace DoodleNote.DictationHelper
             result = RecoverResult.Done;
             if (reply == null) reply = Wire.Fields();
             reply["result"] = "gone";
+            // In flight here, or its payload still being written here: nothing is judged (also not a damaged state).
+            if (inFlight.Contains(id)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "in flight here"; }
+            if (writing.Contains(id)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its payload is still being written; checked again later"; }
             // A read that fails (another process holds the file: an AV scan, the helper writing it) is never
-            // corruption: the record is kept and checked again. Only a fully read file that does not parse is.
+            // corruption: the record is kept and checked again. Only a fully read file that is not a valid state is.
             string text;
             try { text = File.ReadAllText(StatePath(id)); }
             catch (Exception error)
@@ -778,23 +781,34 @@ namespace DoodleNote.DictationHelper
                 return "its state file could not be read now (" + error.GetType().Name + "); kept";
             }
             Dictionary<string, object> state = Wire.Parse(text);
-            if (state == null)
+            string invalid = RecordFacts.Validate(state, id);
+            if (invalid != null)
             {
-                // A state file read in full that does not parse. Its payload may still be whole: then the record is kept and
-                // OFFERED (a fresh journal with no stage authority, stamped with this helper's identity), never deleted.
-                string kept = RebuildState(id);
-                if (kept == "busy") { result = RecoverResult.Busy; reply["result"] = "busy"; return "a corrupt state file; its payload could not be read now; kept"; }
-                if (kept != "rebuilt") { DeleteId(id, "a corrupt state file and no usable payload (" + kept + ")"); return "corrupt state, no usable payload; deleted"; }
-                Wire.Log("clipboard record " + id.Substring(0, 8) + ": a corrupt state file was rebuilt from its payload (no stage authority); offered");
+                // STRICT (round 17): a state that does not parse, or is not exactly a state this helper writes (a missing
+                // or extra field, a wrong type, an unknown stage), proves nothing; no default may stand in for a field.
+                // What it still says about isolation is honoured: another session's, or a running helper's, is left alone.
+                if (state != null)
+                {
+                    double? otherSession = Wire.Num(state, "session"), otherPid = Wire.Num(state, "pid"), otherStart = Wire.Num(state, "pidStart");
+                    if (otherSession.HasValue && otherSession.Value >= 0 && (int)otherSession.Value != session) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "an invalid state naming another session (" + invalid + "); left to it"; }
+                    if (otherPid.HasValue && otherPid.Value > 0 && (int)otherPid.Value != Process.GetCurrentProcess().Id && HelperRunning((int)otherPid.Value, (long)(otherStart ?? 0))) { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state whose helper still runs (" + invalid + "); left to it"; }
+                }
+                // Its payload may still be whole: then the record is rebuilt OFFER-ONLY with an unknown identity and offered,
+                // never deleted and never restored on its own. Without a usable payload there is nothing to restore from.
+                string kept = RebuildState(id, state, invalid);
+                if (kept == "busy") { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state (" + invalid + "); its payload could not be read now; kept"; }
+                if (kept != "rebuilt") { DeleteId(id, "an invalid state (" + invalid + ") and no usable payload (" + kept + ")"); return "invalid state, no usable payload; deleted"; }
+                Wire.Log("clipboard record " + id.Substring(0, 8) + ": an invalid state (" + invalid + ") was rebuilt from its payload (offer-only, unknown identity)");
                 return RecoverOne(id, out result, byUser, expectSequence, reply);
             }
             RecordFacts facts = RecordFacts.Of(state);
+            if (offerOnly.Contains(id)) facts.OfferOnly = true;
             // First of all: another session's record (same user, same boot, shared %TEMP%) is never touched here.
             if (facts.Compare(Now()) == LogonMatch.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record; left to it"; }
             if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid, facts.PidStart)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its helper (pid " + facts.Pid + ") still runs; left to it"; }
-            if (inFlight.Contains(id)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "in flight here"; }
-            if (facts.Stage == "saved") { DeleteId(id, "nothing had been emptied"); return "stage saved: nothing to put back"; }
-            if (writing.Contains(id)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its payload is still being written; checked again later"; }
+            // Its restore had run (journaled before the deletion): deleted on sight, never offered.
+            if (facts.Stage == "settled") { DeleteId(id, "settled: its restore had run"); return "settled earlier; deleted (never offered)"; }
+            if (facts.Stage == "saved" && !facts.OfferOnly) { DeleteId(id, "nothing had been emptied"); return "stage saved: nothing to put back"; }
             SavedClipboard saved;
             string nonce;
             byte[] dictatedHash;
@@ -976,17 +990,22 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Under gate: a state file that does not parse is replaced by a fresh one with stage "unknown" (it proves nothing: the
-        /// record can only be offered) when the payload decrypts and names this record. rebuilt | busy | none | corrupt.
+        /// Under gate: an invalid state file (see RecordFacts.Validate) is replaced by a fresh one with stage "unknown",
+        /// OFFER-ONLY and an UNKNOWN identity (session -1, no logon or key, pid 0: it can be offered and dismissed in any
+        /// session of this user, and proves nothing anywhere), when a payload is there (adopted from .bin.tmp if need be)
+        /// that names this record, or that cannot be decrypted NOW (then the unreadable-payload policy bounds it). Bounded,
+        /// so that damage cannot extend the retention: it is offered in this boot only (counted as its second offer boot),
+        /// and an offer tick of this boot that the damaged state still shows is kept. Its delivery id is lost (the card
+        /// cannot name the dictation). rebuilt | busy | none | corrupt.
         /// </summary>
-        static string RebuildState(string id)
+        static string RebuildState(string id, Dictionary<string, object> old, string why)
         {
             string payload = PayloadPath(id);
             if (!File.Exists(payload)) { string adopted = AdoptPayload(id); if (adopted != "adopted") return adopted; }
             byte[] bytes;
             try { bytes = File.ReadAllBytes(payload); }
             catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
-            string nonce;
+            string nonce = "";
             try
             {
                 byte[] plain = ProtectedData.Unprotect(bytes, Entropy, DataProtectionScope.CurrentUser);
@@ -998,16 +1017,32 @@ namespace DoodleNote.DictationHelper
             }
             catch (CryptographicException error)
             {
-                int hr = System.Runtime.InteropServices.Marshal.GetHRForException(error);
-                return hr == unchecked((int)0x80090005) || hr == unchecked((int)0x8007000D) ? "corrupt" : "busy";
+                int hr = Marshal.GetHRForException(error);
+                if (hr == unchecked((int)0x80090005) || hr == unchecked((int)0x8007000D)) return "corrupt";
+                // Not decryptable now: rebuilt all the same (nothing is restored from it unless it decrypts and names this record later).
             }
             catch (EndOfStreamException) { return "corrupt"; }
-            PendingRecord record = new PendingRecord(id, nonce) { Persisted = true, Stage = "unknown" };
+            PendingRecord record = new PendingRecord(id, nonce)
+            {
+                Persisted = true, Stage = "unknown", OfferOnly = true, OfferOnlyWhy = "rebuilt from its payload (" + why + ")",
+                IdentityUnknown = true, OfferBoots = 2
+            };
+            if (old != null)
+            {
+                double? tick = Wire.Num(old, "offeredTick");
+                string boot = Wire.Str(old, "offeredBoot");
+                if (tick.HasValue && tick.Value > 0 && !string.IsNullOrEmpty(boot) && boot == bootId) { record.OfferedTick = (long)tick.Value; record.OfferedBoot = boot; }
+            }
+            lock (gate) offerOnly.Add(id);
             try { WriteState(record); return "rebuilt"; }
             catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
         }
 
-        /// <summary>Under gate: a complete .bin.tmp (decrypts, names this record) is moved into place. adopted | busy | none | corrupt.</summary>
+        /// <summary>
+        /// Under gate: a complete .bin.tmp whose .bin is missing is moved into place (the caller makes the record
+        /// offer-only). Complete: it decrypts and names this record, or it cannot be decrypted NOW (checked again when it
+        /// can; it then has to name this record). adopted | busy | none | corrupt.
+        /// </summary>
         static string AdoptPayload(string id)
         {
             string tmp = PayloadPath(id) + ".tmp";
