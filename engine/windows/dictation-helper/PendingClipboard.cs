@@ -870,7 +870,16 @@ namespace DoodleNote.DictationHelper
                 // profile not available now, access denied) is transient: the record is kept.
                 int hr = System.Runtime.InteropServices.Marshal.GetHRForException(error);
                 if (hr == unchecked((int)0x80090005) || hr == unchecked((int)0x8007000D)) corrupt = "CryptographicException " + hr.ToString("x8");
-                else { result = RecoverResult.Busy; reply["result"] = "busy"; return "its payload could not be decrypted now (0x" + hr.ToString("x8") + "); kept"; }
+                else
+                {
+                    // Not the payload's own damage (a key or profile not available now, e.g. after a password reset): kept,
+                    // offer-only, and bounded by the same policies as an offer (24 h from the first failed attempt in a
+                    // boot, at most two boots), then deleted as unrecoverable. It never lives for ever.
+                    string ended = UnreadablePolicy(id, facts, hr);
+                    if (ended != null) return ended;
+                    result = RecoverResult.Busy; reply["result"] = "busy";
+                    return "its payload could not be decrypted now (0x" + hr.ToString("x8") + "); kept (offer-only; the retention runs from the first failed attempt)";
+                }
             }
             catch (EndOfStreamException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
             catch (FormatException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
@@ -1141,9 +1150,13 @@ namespace DoodleNote.DictationHelper
                 if (facts.OfferBoots == 0) facts.OfferBoots = 1;
                 offers.Remove(id); // a fresh offer (after a reboot) is announced again
                 facts.OfferedSequence = view.Sequence;
-                facts.OfferedTick = (long)Native.GetTickCount64();
-                facts.OfferedBoot = bootId;
-                facts.OfferedUtc = DateTime.UtcNow.ToString("o");
+                // The retention clock is set once per boot (an unreadable payload may have started it already).
+                if (facts.OfferedTick == 0)
+                {
+                    facts.OfferedTick = (long)Native.GetTickCount64();
+                    facts.OfferedBoot = bootId;
+                    facts.OfferedUtc = DateTime.UtcNow.ToString("o");
+                }
                 PersistOffer(id, facts);
             }
             ClipboardOffer offer = new ClipboardOffer
@@ -1194,6 +1207,8 @@ namespace DoodleNote.DictationHelper
             if (facts.OfferBoots >= 2) return "delete";
             facts.OfferBoots = 2;
             facts.OfferedSequence = 0;
+            facts.OfferedTick = 0; // this boot's offer sets its own tick (the retention runs per boot)
+            facts.OfferedBoot = "";
             return "reoffer";
         }
 
