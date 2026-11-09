@@ -1159,9 +1159,12 @@ namespace DoodleNote.DictationHelper
             {
                 // Under the lock: the clipboard must still be exactly what was saved, or emptying it
                 // would discard a copy the user made after the save (it would never come back).
-                if (expectSequence != 0 && Native.GetClipboardSequenceNumber() != expectSequence)
+                // A zero is no evidence (round 21): it refuses, it never skips the comparison.
+                uint sequenceNow = Native.GetClipboardSequenceNumber();
+                if (TestMode.Env("DICTATION_HELPER_TEST_EXPECT_ZERO_SEQUENCE") == "1") expectSequence = 0; // test build only
+                if (expectSequence == 0 || sequenceNow == 0 || sequenceNow != expectSequence)
                 {
-                    Wire.Log("the clipboard changed after it was saved; not pasting");
+                    Wire.Log(expectSequence == 0 || sequenceNow == 0 ? "the saved sequence is not usable evidence (0); not pasting" : "the clipboard changed after it was saved; not pasting");
                     return false;
                 }
                 // Journaled BEFORE emptying (with the sequence before it). A transaction that cannot be
