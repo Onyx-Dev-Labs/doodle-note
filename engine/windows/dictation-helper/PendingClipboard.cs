@@ -516,16 +516,20 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Intact or gone, as one step: every file of the record (both .tmp files, the state, the payload) is opened with
-        /// delete access and no sharing (another process holding any of them, an AV scan or an indexer, makes the whole
-        /// deletion wait), then every handle is marked for deletion, then all are closed, which is when Windows removes
-        /// them. A file that cannot be opened, or a mark that fails (then every mark already set is cleared again), leaves
-        /// every file as it was: false, nothing deleted. A file that does not exist is skipped (nothing to keep).
+        /// A record's deletion. Every file (state .tmp, payload .tmp, state, payload, in that order) is opened with delete
+        /// access and no sharing (another process holding any of them, an AV scan or an indexer, makes the whole deletion
+        /// wait: nothing deleted), every handle is marked for deletion, and the close removes them. NOT atomic across the
+        /// helper's death: the marks are honoured when a killed process's handles close, and they are set in that order,
+        /// so a deletion cut short leaves either the whole record, or the payload WITHOUT its state, which is never restored
+        /// from and is swept after 10 minutes (it completes a deletion already decided; never offered again). A mark that
+        /// fails clears the marks already set; if clearing one fails too, that file goes at the close, so the deletion is
+        /// completed instead (reported as such). False: something is left.
         /// </summary>
         static bool DeleteFiles(string id)
         {
             string[] paths = { StatePath(id) + ".tmp", PayloadPath(id) + ".tmp", StatePath(id), PayloadPath(id) };
             List<Microsoft.Win32.SafeHandles.SafeFileHandle> held = new List<Microsoft.Win32.SafeHandles.SafeFileHandle>();
+            bool completing = false;
             try
             {
                 foreach (string path in paths)
@@ -537,26 +541,36 @@ namespace DoodleNote.DictationHelper
                         int error = Marshal.GetLastWin32Error();
                         handle.Dispose();
                         if (error == 2 || error == 3) continue; // gone meanwhile (ERROR_FILE_NOT_FOUND / PATH_NOT_FOUND)
-                        Wire.Log(Path.GetFileName(path) + " is held by another process (error " + error + "): the record is kept whole");
+                        Wire.Log(Path.GetFileName(path) + " is held by another process (error " + error + "): nothing deleted, the record is kept whole");
                         return false;
                     }
                     held.Add(handle);
                 }
                 Native.FILE_DISPOSITION_INFO mark = new Native.FILE_DISPOSITION_INFO { DeleteFile = 1 };
+                Native.FILE_DISPOSITION_INFO keep = new Native.FILE_DISPOSITION_INFO { DeleteFile = 0 };
+                bool hookUnmark = TestMode.Env("DICTATION_HELPER_TEST_FAIL_DELETE_UNMARK") == "1";
                 for (int i = 0; i < held.Count; i++)
                 {
-                    if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_DELETE_MARK") == (i + 1).ToString() || !Native.SetFileInformationByHandle(held[i], Native.FileDispositionInfo, ref mark, 1))
-                    {
-                        Wire.Log("a record file could not be marked for deletion (error " + Marshal.GetLastWin32Error() + "): the record is kept whole");
-                        Native.FILE_DISPOSITION_INFO keep = new Native.FILE_DISPOSITION_INFO { DeleteFile = 0 };
-                        for (int j = 0; j < i; j++) Native.SetFileInformationByHandle(held[j], Native.FileDispositionInfo, ref keep, 1);
-                        return false;
-                    }
+                    bool hook = TestMode.Env("DICTATION_HELPER_TEST_FAIL_DELETE_MARK") == (i + 1).ToString();
+                    if (!hook && Native.SetFileInformationByHandle(held[i], Native.FileDispositionInfo, ref mark, 1)) continue;
+                    Wire.Log("a record file could not be marked for deletion (" + (hook ? "test hook" : "error " + Marshal.GetLastWin32Error()) + ")");
+                    bool cleared = true;
+                    for (int j = 0; j < i; j++)
+                        if (hookUnmark || !Native.SetFileInformationByHandle(held[j], Native.FileDispositionInfo, ref keep, 1)) cleared = false;
+                    if (cleared) { Wire.Log("every mark already set was cleared: nothing deleted, the record is kept whole"); return false; }
+                    // A mark that could not be cleared: that file goes at the close. Complete the deletion instead (the
+                    // marks are a prefix of state .tmp, payload .tmp, state, payload: at worst the payload is left alone).
+                    Wire.Log("ERROR: a deletion mark could not be cleared: completing the deletion instead");
+                    completing = true;
+                    for (int k = i; k < held.Count; k++) Native.SetFileInformationByHandle(held[k], Native.FileDispositionInfo, ref mark, 1);
+                    break;
                 }
             }
             finally { foreach (Microsoft.Win32.SafeHandles.SafeFileHandle handle in held) handle.Dispose(); }
-            foreach (string path in paths) if (File.Exists(path)) { Wire.Log("ERROR: " + Path.GetFileName(path) + " is still there after its deletion"); return false; }
-            return true;
+            if (completing) foreach (string path in paths) TryDelete(path);
+            bool left = false;
+            foreach (string path in paths) if (File.Exists(path)) { Wire.Log("ERROR: " + Path.GetFileName(path) + " is still there after the deletion" + (path == PayloadPath(id) && !File.Exists(StatePath(id)) ? " (a payload without its state: never restored from, swept after 10 minutes)" : "")); left = true; }
+            return !left;
         }
 
         /// <summary>What a check of a kept record came to (it decides the retry schedule).</summary>
