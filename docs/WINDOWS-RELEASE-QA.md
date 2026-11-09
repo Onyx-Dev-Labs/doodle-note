@@ -373,8 +373,10 @@ with nothing that can block in between. The same limit applies: checks are sampl
 between two samples or after Ctrl+V is queued cannot be seen, and a cross-process check and the
 input it guards are never one atomic step.
 
-Clipboard: the user's content is preserved (a copy made during our save is never overwritten), but
-how long that copy takes is bounded by the slow owner, not by us. Our own write (open, empty, set,
+Clipboard: the helper writes to the clipboard only over a save that is POSITIVELY established (round 20-21,
+below); otherwise it does not touch the clipboard at all, and the text is typed (classic text boxes) or kept for
+copying. A copy the user makes while we save is never overwritten. How long the save takes is bounded by a slow
+owner's render, not by us. Our own write (open, empty, set,
 close) runs on its own thread for at most 1 s; an owner that answered the WM_NULL probe and then
 stalls in WM_DESTROYCLIPBOARD makes the paste give up (typing may still run), and when the owner
 returns the late write puts the user's content back, never ours (and tells the app, which updates
@@ -416,11 +418,34 @@ is offered on the card ("Put back what you had copied before?") instead of being
 Restore and Dismiss are unchanged.
 
 What "restored" means (stated exactly; unchanged since round 17): EmptyClipboard and every SetClipboardData for the
-saved formats returned success under our own open, and that open was closed. It is not a later observation of the
+saved formats returned success under our own open, and then we closed it (CloseClipboard's result is logged, not
+used: a failed close does not change the answer). It is not a later observation of the
 clipboard: no instantaneous check can guarantee what the clipboard holds afterwards (round 18 tried one after the
 close and reverted it in round 19; see the PR). Every put-back writes one log line with the native result and error
 of EmptyClipboard, each SetClipboardData and CloseClipboard, the sequence around it and the format count after the
-close (no content). Two cases follow from that contract (CI 25d, 25e): over an originally EMPTY clipboard there is
+close (no content; neither count nor sequence needs an open, but the log line itself is a synchronous write).
+
+The save (rounds 20-21; the cause of the one loss of the user's clipboard CI ever showed, ESTABLISHED). The reader
+process used to open the clipboard with a NULL window. CI 34 shows on the runner's Windows build that another
+process's OpenClipboard(NULL) then SUCCEEDS while the reader holds it, and the reader's own EnumClipboardFormats
+fails with ERROR_CLIPBOARD_NOT_OPEN (1418): the listing came back empty while Windows counted 5 formats, and that
+empty save let our write destroy the only copy (round 19, CI 25(a)). Caught in round 20 as "listed 0, counted 5,
+enumeration error 1418" before a retry. With its own window the reader keeps its open: the other OpenClipboard
+fails with access denied. So: the reader opens with its own message-only window and proves before trusting any
+result, and before it closes, that it still has the clipboard open; a lost hold is a failed capture. A save is
+ESTABLISHED only when its listing ended with no error, listed exactly as many formats as CountClipboardFormats
+counted in the reader's own open, named every registered format, and the sequence was non-zero and unchanged; and
+then every listed format was saved (a complete framed reply of its declared length) or skipped for a named reason
+(a measured excess over the cap, or an explicit format policy). Listed 0, counted 0, no error is a positive empty,
+the only zero-item save that can report "restored"; an all-skipped save keeps its provenance and reports
+"skipped". Anything else is retried as a whole under the same 1.5 s deadline with a fresh reader, then the paste
+does not happen (nothing emptied, nothing written). Stated plainly, the cost: while the reader waits in an owner's
+render it now holds the clipboard with its own window, so another app's OpenClipboard fails meanwhile, as it does
+while any app reads a format rendered on demand. Every other proof (the confirmation, the paste gate, the
+"untouched" check, the size shown on a changed offer) uses one complete enumeration (no error at the end, the
+count matching): an incomplete one proves nothing. A record that cannot go back whole (a registered format whose
+name is lost, a metafile that cannot be rebuilt) is incomplete: a put-back of it is never "restored" and never
+deletes it. A zero sequence is no evidence: the write refuses. Two cases follow from that contract (CI 25d, 25e): over an originally EMPTY clipboard there is
 nothing to set back, so the restore reports "restored", leaves the clipboard empty and deletes the record (also
 the user's Restore of one kept after a kill); a save in which every format was over the cap (16 MiB per
 transaction) kept nothing of them, so the restore reports "skipped" (only what fit, if anything, is set back), the
