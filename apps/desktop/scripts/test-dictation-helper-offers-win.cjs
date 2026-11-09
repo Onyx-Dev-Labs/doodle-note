@@ -1491,8 +1491,18 @@ async function main() {
     // Every iteration: the seed, the offer's format count and size, and the helper's put-back trace (format ids and
     // lengths of what the saved record held).
     const trace = h.logs.find((l) => /put-back trace: user-restore/.test(l))
+    const saving = a.logs.find((l) =>
+      /saving the clipboard: the reader listed|test: saved formats/.test(l)
+    )
+    if (!ok)
+      console.log(
+        `# 25 test-ops log: ${a.logs
+          .filter((l) => /saving the clipboard|saved formats|record|clipboard/.test(l))
+          .slice(0, 12)
+          .join(' / ')}`
+      )
     console.log(
-      `# 25 ${label.replace(/^(\(.\)).*?(, repeat \d+)?$/, '$1$2')}: seed ${seeded ? 'held' : 'FAILED'}; offer ${offer ? offer.formats + ' formats, ' + offer.bytes + ' bytes' : 'none'}; ${trace ? trace.replace(/^.*put-back trace: /, 'trace: ') : '(no put-back trace line)'}`
+      `# 25 ${label.replace(/^(\(.\)).*?(, repeat \d+)?$/, '$1$2')}: seed ${seeded ? 'held' : 'FAILED'}; save: ${saving ? saving.replace(/^.*?(saving the clipboard: |test: )/, '') : '(no line)'}; offer ${offer ? offer.formats + ' formats, ' + offer.bytes + ' bytes' : 'none'}; ${trace ? trace.replace(/^.*put-back trace: /, 'trace: ') : '(no put-back trace line)'}`
     )
     await h.stop()
     cleanup()
