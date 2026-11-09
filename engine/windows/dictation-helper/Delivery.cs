@@ -1893,6 +1893,7 @@ namespace DoodleNote.DictationHelper
                 uint format = entry.Key;
                 string name = entry.Value;
                 long cap;
+                bool marker = false;
                 if (format == CF_BITMAP || format == CF_PALETTE || format == CF_METAFILEPICT) { deferred.Add(format); continue; }
                 if (outcomes.Length > 0) outcomes.Append(", ");
                 outcomes.Append(format);
@@ -1909,10 +1910,12 @@ namespace DoodleNote.DictationHelper
                     cap = Math.Min(MaxFormatBytes, MaxBytes - total);
                 }
                 else if (name == PendingClipboard.SentinelFormat) { outcomes.Append(" ours, not saved (policy)"); continue; }
-                else if (Markers.Contains(name)) { saved.PrivacyMarked = true; cap = MaxMarkerBytes; }
+                else if (Markers.Contains(name)) { saved.PrivacyMarked = true; marker = true; cap = MaxMarkerBytes; }
                 else if (SilentDrop.Contains(name)) { outcomes.Append(" not saved (OLE bookkeeping: policy)"); continue; }
                 else cap = Math.Min(MaxFormatBytes, MaxBytes - total);
-                if (cap <= 0) { saved.reportedSkip = true; outcomes.Append(" over the cap (the budget is used up)"); continue; }
+                // Round 22: a recognised privacy marker that is skipped for ANY reason forces the conservative exclusion
+                // markers on the put-back (the content must never come back without its exclusion).
+                if (cap <= 0) { saved.reportedSkip = true; if (marker) saved.forceMarkers = true; outcomes.Append(" over the cap (the budget is used up)" + (marker ? "; exclusion markers forced" : "")); continue; }
                 if (left() <= 0) { saved.Discard(); line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " not read: out of time]); not pasting"; return null; }
                 string answer = request("get " + format + " " + cap, Math.Max(1, Math.Min(PerFormatMs, left())));
                 if (answer == null) { saved.Discard(); retry = false; line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " overran]): its owner is slow to render; not pasting"; return null; }
@@ -1949,7 +1952,8 @@ namespace DoodleNote.DictationHelper
                 {
                     // A positively measured excess: the one named skip a read can give.
                     saved.reportedSkip = true;
-                    outcomes.Append(" over the cap (" + size + " bytes)");
+                    if (marker) saved.forceMarkers = true;
+                    outcomes.Append(" over the cap (" + size + " bytes)" + (marker ? "; exclusion markers forced" : ""));
                     continue;
                 }
                 saved.Discard();
