@@ -1,4 +1,4 @@
-/** Native requests bind the callback to one browser attempt. Desktop port callbacks remain compatible. */
+/** Native requests bind the callback to one browser attempt. Desktop port callbacks echo a state when the client sent one. */
 export function validLinkState(value: unknown): string | null {
   return typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value)
     ? value
@@ -41,5 +41,9 @@ export function deviceLinkCallback(options: {
       options.port! < 1024 || options.port! > 65535) {
     throw new Error("invalid_callback");
   }
+  // Desktop builds that bind their loopback listener to an attempt send a state;
+  // echo it so they can reject callbacks that did not come from their own browser.
+  const state = validLinkState(options.state);
+  if (state) params.set("state", state);
   return `http://127.0.0.1:${options.port}/callback?${params}`;
 }

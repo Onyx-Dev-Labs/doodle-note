@@ -62,7 +62,9 @@ function setup(t: TestContext): {
   return { service, events, dir, cycles: () => cycles }
 }
 function callback(url: string): string {
-  return `http://127.0.0.1:${new URL(url).searchParams.get('port')}/callback?token=dnsy_fixture&email=qa%40example.test`
+  // The web page echoes the attempt's state back, as the real browser flow does.
+  const { searchParams } = new URL(url)
+  return `http://127.0.0.1:${searchParams.get('port')}/callback?token=dnsy_fixture&email=qa%40example.test&state=${searchParams.get('state')}`
 }
 
 test('duplicate connect uses one listener; cancelled old continuation cannot retire retry', async (t) => {

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { eq, getDb, verifiedCallerIds } from "@repo/db";
+import { and, eq, getDb, ne, verifiedCallerIds } from "@repo/db";
 
-import { authenticateSyncRequest } from "@/lib/sync-auth";
+import { authenticateEntitledSyncRequest, authenticateSyncRequest } from "@/lib/sync-auth";
 import {
   createValidationRequest,
+  deleteOutgoingCallerId,
   findVerifiedCallerId,
   twilioConfig,
 } from "@/lib/twilio";
@@ -18,10 +19,9 @@ const E164 = /^\+[1-9][0-9]{6,14}$/;
  * DELETE clears the stored number.
  */
 export async function POST(request: Request) {
-  const device = await authenticateSyncRequest(request);
-  if (!device) {
-    return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
-  }
+  const authed = await authenticateEntitledSyncRequest(request);
+  if (authed.response) return authed.response;
+  const device = authed.device;
   const config = twilioConfig();
   if (!config) {
     return NextResponse.json(
@@ -46,11 +46,30 @@ export async function POST(request: Request) {
 
   const db = getDb();
 
-  // Already verified on the Twilio account (e.g. re-adding after unlink)?
+  // The Twilio account is shared, so "verified on Twilio" does not mean
+  // "verified by THIS user". A number may only be reused if this user's own row
+  // already holds it; one claimed by another user is refused, and an orphan
+  // (no row owns it) is removed so its keypad code has to be entered again.
+  if (await claimedByAnotherUser(db, device.userId, phoneNumber)) {
+    return NextResponse.json(
+      { error: "That number is already linked to another DoodleNote account" },
+      { status: 409 },
+    );
+  }
   const existingSid = await findVerifiedCallerId(config, phoneNumber);
   if (existingSid) {
-    await upsert(db, device.userId, phoneNumber, "verified", existingSid);
-    return NextResponse.json({ status: "verified", phoneNumber });
+    const [mine] = await db
+      .select()
+      .from(verifiedCallerIds)
+      .where(eq(verifiedCallerIds.userId, device.userId))
+      .limit(1);
+    if (mine?.phoneNumber === phoneNumber && mine.outgoingCallerIdSid === existingSid) {
+      await upsert(db, device.userId, phoneNumber, "verified", existingSid);
+      return NextResponse.json({ status: "verified", phoneNumber });
+    }
+    if (!(await deleteOutgoingCallerId(config, existingSid))) {
+      return NextResponse.json({ error: "Verification failed" }, { status: 502 });
+    }
   }
 
   try {
@@ -91,7 +110,7 @@ export async function GET(request: Request) {
     const sid = config
       ? await findVerifiedCallerId(config, row.phoneNumber)
       : null;
-    if (sid) {
+    if (sid && !(await claimedByAnotherUser(db, device.userId, row.phoneNumber))) {
       await upsert(db, device.userId, row.phoneNumber, "verified", sid);
       return NextResponse.json({ status: "verified", phoneNumber: row.phoneNumber });
     }
@@ -105,6 +124,17 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
   }
   const db = getDb();
+  const [row] = await db
+    .select()
+    .from(verifiedCallerIds)
+    .where(eq(verifiedCallerIds.userId, device.userId))
+    .limit(1);
+  // Also release the number on Twilio, or the next account to submit it would
+  // inherit the verification without proving it controls the phone.
+  const config = twilioConfig();
+  if (config && row?.outgoingCallerIdSid) {
+    await deleteOutgoingCallerId(config, row.outgoingCallerIdSid).catch(() => false);
+  }
   await db
     .delete(verifiedCallerIds)
     .where(eq(verifiedCallerIds.userId, device.userId));
@@ -112,6 +142,21 @@ export async function DELETE(request: Request) {
 }
 
 type Db = ReturnType<typeof getDb>;
+
+async function claimedByAnotherUser(db: Db, userId: string, phoneNumber: string): Promise<boolean> {
+  const rows = await db
+    .select({ userId: verifiedCallerIds.userId })
+    .from(verifiedCallerIds)
+    .where(
+      and(
+        eq(verifiedCallerIds.phoneNumber, phoneNumber),
+        eq(verifiedCallerIds.status, "verified"),
+        ne(verifiedCallerIds.userId, userId),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
 
 async function upsert(
   db: Db,

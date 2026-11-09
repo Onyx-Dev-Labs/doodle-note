@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import { NextResponse } from "next/server";
-import { agentTokens, eq, getDb } from "@repo/db";
+import { agentTokens, and, eq, getDb, member } from "@repo/db";
 
 import { entitlementFor } from "@/lib/billing";
 
@@ -42,6 +42,12 @@ export async function authenticateAgentRequest(
       organizationId: agentTokens.organizationId,
     })
     .from(agentTokens)
+    // Like sync device tokens, an agent token is not a permanent grant once
+    // workspace membership is revoked.
+    .innerJoin(member, and(
+      eq(member.organizationId, agentTokens.organizationId),
+      eq(member.userId, agentTokens.userId),
+    ))
     .where(eq(agentTokens.tokenHash, hashAgentToken(token)))
     .limit(1);
   const found = rows[0];

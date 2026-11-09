@@ -126,6 +126,15 @@ nsis:
   perMachine: false
   deleteAppDataOnUninstall: false
   artifactName: ${productName}-${version}-setup.${ext}
+# Electron fuses, flipped on the packaged binary. runAsNode must stay on: the
+# bundled MCP server is launched as `DoodleNote` with ELECTRON_RUN_AS_NODE=1.
+# NODE_OPTIONS and the inspector flags let another local process inject code
+# into that launch, and nothing in the app needs them.
+electronFuses:
+  runAsNode: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
 npmRebuild: false
 # Auto-update feed: electron-updater reads latest-mac.yml from here.
 # scripts/publish-release.mjs uploads the artifacts after packaging.

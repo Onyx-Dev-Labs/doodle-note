@@ -22,11 +22,14 @@ import {
  * MeetingSource backed by the cloud database — the hosted twin of the local
  * MCP server's file-store source. Every query is scoped to ONE workspace
  * (organizationId from the agent token), which is the tenant-isolation
- * boundary: an agent can never see another workspace's meetings. Cloud rows
- * only exist for non-trashed meetings (deletion removes the row), and
- * pushed segments already exclude echo-flagged ones, so both invariants of
- * the contract hold by construction.
+ * boundary: an agent can never see another workspace's meetings. Legacy rows
+ * linger for notes that sync v2 moved to Trash (they are removed only on
+ * purge), so every query also filters those out explicitly. Pushed segments
+ * already exclude echo-flagged ones, so that invariant holds by construction.
  */
+/** Excludes meetings that sync v2 has trashed or purged (legacy rows persist until purge). */
+const notTrashed = sql`not exists (select 1 from sync_notes sn where sn.id = ${meetings.id} and sn.state <> 'active')`;
+
 export class CloudMeetingSource implements MeetingSource {
   constructor(
     private readonly db: Db,
@@ -35,7 +38,7 @@ export class CloudMeetingSource implements MeetingSource {
 
   async listRecent(limit: number): Promise<AgentMeetingSummary[]> {
     const rows = await this.baseSelect()
-      .where(eq(meetings.organizationId, this.organizationId))
+      .where(and(eq(meetings.organizationId, this.organizationId), notTrashed))
       .orderBy(desc(meetings.createdAt))
       .limit(limit);
     return rows.map((r) => toSummary(r));
@@ -52,6 +55,7 @@ export class CloudMeetingSource implements MeetingSource {
       .where(
         and(
           eq(meetings.organizationId, this.organizationId),
+          notTrashed,
           or(titleMatch, notesMatch, transcriptMatch),
         ),
       )
@@ -141,6 +145,7 @@ export class CloudMeetingSource implements MeetingSource {
         and(
           eq(meetings.id, meetingId),
           eq(meetings.organizationId, this.organizationId),
+          notTrashed,
         ),
       )
       .limit(1);

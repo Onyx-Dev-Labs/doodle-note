@@ -37,6 +37,7 @@ export async function POST(
       .set({
         shareToken: null,
         shareExpiresAt: null,
+        shareIncludeTranscript: false,
         updatedAt: new Date(),
       })
       .where(eq(meetings.id, access.meeting.id));

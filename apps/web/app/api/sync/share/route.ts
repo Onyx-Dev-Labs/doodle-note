@@ -53,7 +53,7 @@ export async function POST(request: Request) {
   if (!enable) {
     await db
       .update(meetings)
-      .set({ shareToken: null })
+      .set({ shareToken: null, shareExpiresAt: null, shareIncludeTranscript: false })
       .where(eq(meetings.id, meetingId));
     return NextResponse.json({ ok: true, url: null });
   }
@@ -62,7 +62,9 @@ export async function POST(request: Request) {
   if (!meeting.shareToken) {
     await db
       .update(meetings)
-      .set({ shareToken: token })
+      // A fresh link starts notes-only: never inherit an earlier web share's
+      // transcript flag or expiry (this action offers no transcript option).
+      .set({ shareToken: token, shareExpiresAt: null, shareIncludeTranscript: false })
       .where(eq(meetings.id, meetingId));
   }
   return NextResponse.json({ ok: true, url: `${shareOrigin(request)}/share/${token}` });

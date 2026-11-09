@@ -63,6 +63,12 @@ mac:
     CFBundleIconFile: doodlenote-opaque-v0411.icns
     NSMicrophoneUsageDescription: DoodleNote Dev captures audio on this Mac to transcribe meetings and dictation. Nothing leaves your Mac.
     NSAudioCaptureUsageDescription: DoodleNote Dev captures meeting audio on this Mac to transcribe it on-device.
+# Same fuses as the shipping build (see electron-builder.yml).
+electronFuses:
+  runAsNode: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
 npmRebuild: false
 # Deliberately no `publish` block: electron-builder then writes no app-update.yml,
 # so even a stray updater call has no feed to contact.
