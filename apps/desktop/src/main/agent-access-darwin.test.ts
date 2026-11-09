@@ -1772,3 +1772,71 @@ test('round 13: a close that fails is not repeated; its error stands and nothing
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('round 13: the Windows writer retries a refused removal of its temporary file', (t) => {
+  // Opus N3: a scanner holding the fresh temporary file refuses its removal for
+  // milliseconds; retried as the rename is (5 more attempts, 50 ms apart). The
+  // darwin writer does not retry (there EACCES or EPERM is the folder's permission).
+  const root = mkdtempSync(join(tmpdir(), 'dn-temp-retry-'))
+  try {
+    const cases: {
+      writer: Writer
+      code: string
+      refusals: number
+      attempts: number
+      left: number
+    }[] = [
+      { writer: 'windows', code: 'EBUSY', refusals: 2, attempts: 3, left: 0 },
+      { writer: 'windows', code: 'EPERM', refusals: 5, attempts: 6, left: 0 },
+      { writer: 'windows', code: 'EACCES', refusals: Infinity, attempts: 6, left: 1 },
+      { writer: 'windows', code: 'ENOENT', refusals: Infinity, attempts: 1, left: 1 },
+      { writer: 'darwin', code: 'EPERM', refusals: Infinity, attempts: 1, left: 1 }
+    ]
+    let n = 0
+    for (const c of cases)
+      for (const after of c.writer === 'windows'
+        ? ['a stale read', 'a failed rename']
+        : ['EXDEV']) {
+        const label = `${c.writer}, ${c.code} x ${c.refusals}, after ${after}`
+        const folder = join(root, String(n++))
+        mkdirSync(folder)
+        const path = join(folder, 'config.json')
+        writeFileSync(path, '{"a":1}')
+        let attempts = 0
+        let result: boolean | string | null = null
+        withFsHook(
+          (name, args) => {
+            if (name === 'unlinkSync' && String(args[0]).endsWith('.tmp'))
+              if (attempts++ < c.refusals) throw fsError(c.code)
+            // darwin: the rename refused -> the base's write; Windows: thrown.
+            if (name === 'renameSync' && after !== 'a stale read') throw fsError('EXDEV')
+          },
+          () => {
+            try {
+              if (c.writer === 'darwin') replaceConfigFileBase(path, '{"b":2}')
+              else
+                result = replaceConfigFile(
+                  path,
+                  after === 'a stale read' ? '{"stale":1}' : '{"a":1}',
+                  '{"b":2}'
+                )
+            } catch (error) {
+              result = (error as NodeJS.ErrnoException).code ?? null
+            }
+          }
+        )
+        const left = temporaries(folder)
+        t.diagnostic(`${label}: ${attempts} removal attempts, ${left.length} left, ${result}`)
+        assert.equal(attempts, c.attempts, `${label}: attempts`)
+        assert.equal(left.length, c.left, `${label}: left`)
+        // The write's own result stands either way.
+        if (c.writer === 'darwin') assert.equal(readFileSync(path, 'utf8'), '{"b":2}', label)
+        else {
+          assert.equal(result, after === 'a stale read' ? false : 'EXDEV', label)
+          assert.equal(readFileSync(path, 'utf8'), '{"a":1}', label)
+        }
+      }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
