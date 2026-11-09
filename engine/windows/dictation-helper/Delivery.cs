@@ -550,8 +550,9 @@ namespace DoodleNote.DictationHelper
             // The clipboard must still be our write, or Ctrl+V would paste someone else's content (another app
             // copied between our write and now). This look can block (it opens the clipboard), so it comes BEFORE
             // the final checks. A moved sequence alone is not someone else's copy: our window owning the clipboard
-            // with our complete write on it is still ours. Someone else's content: nothing is pasted, their copy is
-            // left alone (settled). A clipboard that could not be looked at: nothing is pasted, nothing settled.
+            // with our complete write on it (every format compared) is still ours. Someone else's content: nothing is
+            // pasted, their copy is left alone and the saved clipboard is kept as an offer. A clipboard that could not be
+            // looked at: nothing is pasted, nothing settled.
             bool sequenceProof = true;
             uint inspectedSequence = 0;
             if (unsafeReason == null && !ours.LooksOurs())

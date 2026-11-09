@@ -342,18 +342,14 @@ namespace DoodleNote.DictationHelper
         /// <summary>A restore result that leaves nothing to do later: anything but "unrestored" and "user-changed" (both keep the record).</summary>
         public static bool Settled(string restoreResult) { return restoreResult != "unrestored" && restoreResult != "user-changed"; }
 
-        /// <summary>Ids this helper treats as offer-only even when the state file could not take the fact (fail safe).</summary>
-        static readonly HashSet<string> offerOnly = new HashSet<string>();
-
         /// <summary>
-        /// The record can only be offered from now on (see PendingRecord.OfferOnly): set in memory first, then journaled
-        /// (write-through). A journal that fails keeps it offer-only in this helper; stated plainly, a later helper then
-        /// sees the previous state (it re-derives from the content and the sequence, as before round 17).
+        /// The record's offer-only fact, journaled (write-through). INFORMATIONAL since round 18: no record read from disk
+        /// grants authority whatever it says; the live transaction's guard is SavedClipboard.LoseAuthority. A journal that
+        /// fails is healed by the record's next state write.
         /// </summary>
         public static void MarkOfferOnly(PendingRecord record, string why)
         {
             if (record == null) return;
-            lock (gate) offerOnly.Add(record.Id);
             if (record.OfferOnly) return;
             record.OfferOnly = true;
             record.OfferOnlyWhy = why ?? "";
@@ -364,10 +360,7 @@ namespace DoodleNote.DictationHelper
         /// <summary>Under gate: the offer-only fact for a record on disk (its state file is rewritten with it).</summary>
         static void MarkOfferOnlyOnDisk(string id, RecordFacts facts, string why)
         {
-            offerOnly.Add(id);
-            if (facts.OfferOnly) return;
-            facts.OfferOnly = true;
-            facts.OfferOnlyWhy = why;
+            if (facts.OfferOnly) return; // already on disk
             try
             {
                 Dictionary<string, object> state = Wire.Parse(File.ReadAllText(StatePath(id)));
@@ -375,6 +368,8 @@ namespace DoodleNote.DictationHelper
                 state["offerOnly"] = true;
                 state["offerOnlyWhy"] = why;
                 WriteStateJson(StatePath(id), Wire.Serialize(state));
+                facts.OfferOnly = true;
+                facts.OfferOnlyWhy = why;
                 Wire.Log("clipboard record " + id.Substring(0, 8) + ": offer-only from now on (" + why + ")");
             }
             catch (Exception error) { Wire.Log("ERROR: the offer-only fact could not be written down (" + error.GetType().Name + "); this helper keeps it in memory"); }
@@ -399,9 +394,10 @@ namespace DoodleNote.DictationHelper
                 lock (gate) inFlight.Remove(record.Id);
                 return;
             }
-            lock (gate) inFlight.Remove(record.Id);
+            // Marked BEFORE it leaves in-flight: no concurrent check sees it unmarked.
             record.Unrestored = true;
             MarkOfferOnly(record, "a restore that did not complete (" + restoreResult + ")");
+            lock (gate) inFlight.Remove(record.Id);
             if (record.Persisted)
             {
                 Journal(record); // the unrestored flag (also when the record was offer-only already)
@@ -731,7 +727,23 @@ namespace DoodleNote.DictationHelper
                         try { ScheduleRetry(id, RetryKind.Check); } catch (Exception) { }
                     }
                 }
+                // An offer whose record vanished another way (another session's Dismiss of a rebuilt record, a cleaner):
+                // withdrawn, only when its state is positively absent.
+                foreach (string id in new List<string>(offers.Keys))
+                    if (!states.Contains(id) && Probe(StatePath(id)) == Presence.Absent) OfferGone(id, "its record is gone");
             }
+        }
+
+        /// <summary>A file's last write is readable and more than 10 minutes ago (an unreadable time is never "old").</summary>
+        static bool OlderThanTenMinutes(string path)
+        {
+            try
+            {
+                DateTime written = File.GetLastWriteTimeUtc(path);
+                if (written.Year <= 1601) return false; // the "could not be read" value
+                return DateTime.UtcNow - written >= TimeSpan.FromMinutes(10);
+            }
+            catch (Exception) { return false; }
         }
 
         /// <summary>The offers this helper's records stand for now (checked again first).</summary>
@@ -791,7 +803,7 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>Under gate. Null when there was nothing to say. `byUser`: the user's restore of an offer (reply filled).</summary>
-        static string RecoverOne(string id, out RecoverResult result, bool byUser, uint expectSequence, Dictionary<string, object> reply = null)
+        static string RecoverOne(string id, out RecoverResult result, bool byUser, uint expectSequence, Dictionary<string, object> reply = null, int depth = 0)
         {
             result = RecoverResult.Done;
             if (reply == null) reply = Wire.Fields();
@@ -811,6 +823,7 @@ namespace DoodleNote.DictationHelper
             }
             Dictionary<string, object> state = Wire.Parse(text);
             string invalid = RecordFacts.Validate(state, id);
+            if (invalid != null && depth > 0) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its rebuilt state is still invalid (" + invalid + "); kept, checked again later"; }
             if (invalid != null)
             {
                 // STRICT (round 17): a state that does not parse, or is not exactly a state this helper writes (a missing
@@ -833,10 +846,9 @@ namespace DoodleNote.DictationHelper
                 if (kept == "busy") { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state (" + invalid + "); its payload could not be read now; kept"; }
                 if (kept != "rebuilt") { DeleteId(id, "an invalid state (" + invalid + ") and no usable payload (" + kept + ")"); return "invalid state, no usable payload; deleted"; }
                 Wire.Log("clipboard record " + id.Substring(0, 8) + ": an invalid state (" + invalid + ") was rebuilt from its payload (offer-only, unknown identity)");
-                return RecoverOne(id, out result, byUser, expectSequence, reply);
+                return RecoverOne(id, out result, byUser, expectSequence, reply, depth + 1);
             }
-            RecordFacts facts = RecordFacts.Of(state);
-            if (offerOnly.Contains(id)) facts.OfferOnly = true;
+            RecordFacts facts = RecordFacts.Of(state); // facts.OfferOnly is the ON-DISK value (a later write heals a failed one)
             // First of all: another session's record (same user, same boot, shared %TEMP%) is never touched here.
             if (facts.Compare(Now()) == LogonMatch.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record; left to it"; }
             if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid, facts.PidStart)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its helper (pid " + facts.Pid + ") still runs; left to it"; }
@@ -1092,7 +1104,6 @@ namespace DoodleNote.DictationHelper
                 string boot = Wire.Str(old, "offeredBoot");
                 if (tick.HasValue && tick.Value > 0 && !string.IsNullOrEmpty(boot) && boot == bootId) { record.OfferedTick = (long)tick.Value; record.OfferedBoot = boot; }
             }
-            lock (gate) offerOnly.Add(id);
             try { WriteState(record); return "rebuilt"; }
             catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
         }
@@ -1229,7 +1240,10 @@ namespace DoodleNote.DictationHelper
                 state["offeredBoot"] = facts.OfferedBoot ?? "";
                 state["offered"] = facts.OfferedUtc;
                 state["offerBoots"] = facts.OfferBoots;
+                state["offerOnly"] = true; // an offered record is offer-only (informational: disk never grants authority)
+                if (!facts.OfferOnly) state["offerOnlyWhy"] = "offered";
                 WriteStateJson(StatePath(id), Wire.Serialize(state));
+                facts.OfferOnly = true;
             }
             catch (Exception error) { Wire.Log("the offer could not be recorded in the state file (" + error.GetType().Name + "); offered from memory"); }
         }
