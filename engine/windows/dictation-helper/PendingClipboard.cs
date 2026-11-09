@@ -825,7 +825,9 @@ namespace DoodleNote.DictationHelper
                     string adopted = AdoptPayload(id);
                     if (adopted == "busy") { result = RecoverResult.Busy; reply["result"] = "busy"; return "its payload (.tmp) could not be read now; kept"; }
                     if (adopted != "adopted") { DeleteId(id, "no payload (" + adopted + ")"); return "ERROR: stage " + facts.Stage + " but no payload (" + adopted + "); cannot put back"; }
-                    Wire.Log("clipboard record " + id.Substring(0, 8) + ": a complete payload left under its temporary name was adopted");
+                    // Adopted, but it proves nothing about the stage it is next to: offer-only (never restored on its own).
+                    MarkOfferOnlyOnDisk(id, facts, "its payload was adopted from .bin.tmp");
+                    Wire.Log("clipboard record " + id.Substring(0, 8) + ": a complete payload left under its temporary name was adopted (offer-only)");
                     info = new FileInfo(PayloadPath(id));
                 }
                 if (info.Length > MaxRecordBytes) { DeleteId(id, "payload over the size cap"); return "ERROR: payload of " + info.Length + " bytes over the cap; not read"; }
@@ -1058,12 +1060,37 @@ namespace DoodleNote.DictationHelper
             }
             catch (CryptographicException error)
             {
-                int hr = System.Runtime.InteropServices.Marshal.GetHRForException(error);
-                return hr == unchecked((int)0x80090005) || hr == unchecked((int)0x8007000D) ? "corrupt" : "busy";
+                int hr = Marshal.GetHRForException(error);
+                if (hr == unchecked((int)0x80090005) || hr == unchecked((int)0x8007000D)) return "corrupt";
             }
             catch (EndOfStreamException) { return "corrupt"; }
+            lock (gate) offerOnly.Add(id);
             try { File.Move(tmp, PayloadPath(id)); return "adopted"; }
             catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
+        }
+
+        /// <summary>
+        /// Under gate. The unreadable-payload POLICY (not a proof): a payload DPAPI cannot decrypt for a reason other than
+        /// bad data is kept offer-only, its retention clock starts at the first failed attempt (the first-offer fields),
+        /// and the boot limit and the 24 h retention apply as to an offer; then it is deleted as unrecoverable. Null while
+        /// it is kept.
+        /// </summary>
+        static string UnreadablePolicy(string id, RecordFacts facts, int hr)
+        {
+            long nowTick = (long)Native.GetTickCount64();
+            string step = OfferBootStep(facts, bootId, nowTick);
+            if (step == "delete") { DeleteId(id, "its payload could not be decrypted in two boots (0x" + hr.ToString("x8") + "): unrecoverable, deleted (the boot limit is a policy)"); return "unrecoverable payload, two boots; deleted"; }
+            if (facts.OfferedTick == 0)
+            {
+                if (facts.OfferBoots == 0) facts.OfferBoots = 1;
+                facts.OfferedTick = nowTick;
+                facts.OfferedBoot = bootId;
+                facts.OfferedUtc = DateTime.UtcNow.ToString("o");
+                PersistOffer(id, facts);
+            }
+            MarkOfferOnlyOnDisk(id, facts, "its payload could not be decrypted");
+            if (Expired(facts, Now())) { DeleteId(id, "its payload could not be decrypted for the " + Retention.TotalHours + " h retention (0x" + hr.ToString("x8") + "): unrecoverable, deleted (a policy)"); return "unrecoverable payload, retention over; deleted"; }
+            return null;
         }
 
         /// <summary>
