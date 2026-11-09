@@ -744,27 +744,78 @@ namespace DoodleNote.DictationHelper.Tests
             uint[] markers = ClipboardText.MarkerNames.Select(n => Native.RegisterClipboardFormat(n)).ToArray();
             string id = "0123456789abcdef0123456789abcdef", nonce = "fedcba9876543210fedcba9876543210";
             byte[] hash = PendingClipboard.Hash("dictated");
+            // Our write: every format with bytes we know (the text forms written explicitly; the locale stated in the sentinel).
             var ours = new Dictionary<uint, byte[]>
             {
                 { 13, System.Text.Encoding.Unicode.GetBytes("dictated\0") },
+                { 1, ClipboardText.AnsiBytes("dictated") }, { 7, ClipboardText.OemBytes("dictated") }, { 16, BitConverter.GetBytes(1033) },
                 { markers[0], new byte[] { 0 } }, { markers[1], BitConverter.GetBytes(0) }, { markers[2], BitConverter.GetBytes(0) },
-                { sentinel, System.Text.Encoding.UTF8.GetBytes(id + ":" + nonce) }
+                { sentinel, System.Text.Encoding.UTF8.GetBytes(id + ":" + nonce + ":1033") }
             };
             Func<Dictionary<uint, byte[]>, Func<uint, int, byte[]>> reader = (now) => (f, cap) => now.ContainsKey(f) ? now[f].Take(Math.Min(cap, now[f].Length)).ToArray() : null;
-            Func<Dictionary<uint, byte[]>, uint[], OurWrite> classify = (now, extra) => ClipboardText.ClassifyOurWrite(now.Keys.Concat(extra).ToList(), reader(now), id, nonce, hash);
-            Assert.Equal(OurWrite.Complete, classify(ours, new uint[] { 1, 7, 16 }), "our text, markers and sentinel (and what Windows synthesizes from the text)");
-            var noSentinel = new Dictionary<uint, byte[]>(ours); noSentinel.Remove(sentinel);
-            Assert.Equal(OurWrite.Partial, classify(noSentinel, new uint[0]), "cut short before the sentinel (set last)");
+            Func<Dictionary<uint, byte[]>, OurWrite> classify = (now) => ClipboardText.ClassifyOurWrite(now.Keys.ToList(), reader(now), id, nonce, hash);
+            Assert.Equal(OurWrite.Complete, classify(ours), "every format ours, bytes compared");
+            var noSentinel = new Dictionary<uint, byte[]>(ours); noSentinel.Remove(sentinel); noSentinel.Remove(16);
+            Assert.Equal(OurWrite.Partial, classify(noSentinel), "cut short before the locale and the sentinel");
             Assert.Equal(OurWrite.None, ClipboardText.ClassifyOurWrite(ours.Keys.ToList(), reader(ours), id, "00000000000000000000000000000000", hash), "another nonce (a replayed older sentinel)");
             var otherText = new Dictionary<uint, byte[]>(ours); otherText[13] = System.Text.Encoding.Unicode.GetBytes("dictatee\0");
-            Assert.Equal(OurWrite.None, classify(otherText, new uint[0]), "other text with our sentinel");
+            Assert.Equal(OurWrite.None, classify(otherText), "other text with our sentinel");
+            // Round 16 (Astra P1-A): the ANSI, OEM and locale forms are compared by their bytes too.
+            var otherAnsi = new Dictionary<uint, byte[]>(ours); otherAnsi[1] = System.Text.Encoding.ASCII.GetBytes("replaced\0");
+            Assert.Equal(OurWrite.None, classify(otherAnsi), "an ANSI form replaced (our Unicode text, markers and sentinel kept)");
+            var otherOem = new Dictionary<uint, byte[]>(ours); otherOem[7] = System.Text.Encoding.ASCII.GetBytes("dictatee\0");
+            Assert.Equal(OurWrite.None, classify(otherOem), "an OEM form replaced");
+            var otherLocale = new Dictionary<uint, byte[]>(ours); otherLocale[16] = BitConverter.GetBytes(1031);
+            Assert.Equal(OurWrite.None, classify(otherLocale), "a locale other than the one our sentinel states");
+            var longerAnsi = new Dictionary<uint, byte[]>(ours); longerAnsi[1] = ClipboardText.AnsiBytes("dictated").Concat(new byte[] { 65 }).ToArray();
+            Assert.Equal(OurWrite.None, classify(longerAnsi), "ANSI bytes that start with ours but go on");
             var otherMarker = new Dictionary<uint, byte[]>(ours); otherMarker[markers[1]] = BitConverter.GetBytes(1);
-            Assert.Equal(OurWrite.None, classify(otherMarker, new uint[0]), "a marker value that is not ours");
+            Assert.Equal(OurWrite.None, classify(otherMarker), "a marker value that is not ours");
             var foreign = new Dictionary<uint, byte[]>(ours); foreign[0xC333] = new byte[] { 1 };
-            Assert.Equal(OurWrite.None, classify(foreign, new uint[0]), "a format our write never sets");
-            var onlyMarkers = new Dictionary<uint, byte[]> { { markers[0], new byte[] { 0 } } };
-            Assert.Equal(OurWrite.None, classify(onlyMarkers, new uint[] { 1 }), "synthesized text without our text");
-            Assert.Equal(OurWrite.None, classify(new Dictionary<uint, byte[]>(), new uint[0]), "an empty clipboard is not a write");
+            Assert.Equal(OurWrite.None, classify(foreign), "a format our write never sets");
+            var ansiOnly = new Dictionary<uint, byte[]> { { 1, ClipboardText.AnsiBytes("dictated") }, { markers[0], new byte[] { 0 } } };
+            Assert.Equal(OurWrite.None, classify(ansiOnly), "a text form without our text");
+            Assert.Equal(OurWrite.None, classify(new Dictionary<uint, byte[]>()), "an empty clipboard is not a write");
+        }
+
+        public static void ARecordIsOfferedInAtMostTwoBoots()
+        {
+            RecordFacts facts = new RecordFacts();
+            // Boot A: the transaction crashed before any offer.
+            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "A"), "never offered: nothing to count");
+            // Boot B: first offered (as Offer() records it).
+            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "B"), "first offer in B");
+            facts.OfferedTick = 5000; facts.OfferedBoot = "B"; facts.OfferBoots = 1; facts.OfferedSequence = 40;
+            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "B"), "still B: kept");
+            // Boot C: offered again, as a fresh offer (sequence numbers restarted).
+            Assert.Equal("reoffer", PendingClipboard.OfferBootStep(facts, "C"), "C: offered again");
+            Assert.Equal(2, facts.OfferBoots, "two boots counted");
+            Assert.Equal(0u, facts.OfferedSequence, "the old offered sequence means nothing in C");
+            facts.OfferedTick = 3000; facts.OfferedBoot = "C"; facts.OfferedSequence = 7;
+            Assert.Equal("keep", PendingClipboard.OfferBootStep(facts, "C"), "still C: kept");
+            // Boot D: deleted (a policy, not proof the content is no longer wanted).
+            Assert.Equal("delete", PendingClipboard.OfferBootStep(facts, "D"), "D: deleted");
+        }
+
+        public static void ARecoveryJournalNeverCarriesAnotherBootsSequences()
+        {
+            RecordFacts old = new RecordFacts { Stage = "restore-emptied", SequenceAtStage = 100, SequenceClosed = 101, SequenceAfterWrite = 97, Tick = 9000000 };
+            PendingRecord journal = new PendingRecord("0123456789abcdef0123456789abcdef", "n");
+            PendingClipboard.Inherit(journal, old, LogonMatch.Different, 4000);
+            Assert.Equal("", journal.OriginStage ?? "", "another boot: no origin stage");
+            Assert.Equal(0u, journal.OriginSequenceAtStage, "no origin sequence");
+            Assert.Equal(0u, journal.SequenceAfterWrite, "no write sequence");
+            Assert.Equal(4000L, journal.CreatedTick, "this boot's tick, not the old record's");
+            // So a coincidental empty at the old sequence proves nothing: the journal's stage alone decides.
+            RecordFacts written = new RecordFacts { Stage = "recovering", SequenceAtStage = 90, OriginStage = journal.OriginStage ?? "", OriginSequenceAtStage = journal.OriginSequenceAtStage };
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Pending, PendingClipboard.Decide(written, new ClipboardView { Sequence = 100, FormatCount = 0 }, LogonMatch.Same), "an empty clipboard at the old boot's sequence: offered, never restored on its own");
+            PendingRecord unknown = new PendingRecord("0123456789abcdef0123456789abcdef", "n");
+            PendingClipboard.Inherit(unknown, old, LogonMatch.Unknown, 4000);
+            Assert.Equal("", unknown.OriginStage ?? "", "an unknown logon: no origin either");
+            PendingRecord same = new PendingRecord("0123456789abcdef0123456789abcdef", "n");
+            PendingClipboard.Inherit(same, old, LogonMatch.Same, 4000);
+            Assert.Equal("restore-emptied", same.OriginStage, "the same logon and boot: the found stage is the origin");
+            Assert.Equal(100u, same.OriginSequenceAtStage, "with its sequence");
         }
 
         public static void AnInterruptedRestoreHoldsOnlyWhatWeSaved()

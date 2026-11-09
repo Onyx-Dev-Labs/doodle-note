@@ -96,16 +96,14 @@ namespace DoodleNote.DictationHelper
     /// registry key, Windows' boot counter and the tick count; the wall clock is never part of it.
     ///
     /// POLICY. The helper writes the user's saved content back on its own ONLY when the clipboard is
-    /// provably ours (Decide): (a) our complete write (sentinel with this transaction's nonce, our exact
-    /// markers, our text by its hash), (b) an empty clipboard at exactly the sequence journaled under our
-    /// lock right after OUR EmptyClipboard, or (c) our own live window still owns the clipboard. Every other
-    /// state is PENDING: the record is kept, nothing is written, and the app offers the user a Restore
-    /// (a journaled transaction of its own, run only if the clipboard is still as it was when offered) or
-    /// a Dismiss (the record is deleted). A record is deleted otherwise only when that is provable or
-    /// harmless: the clipboard already holds exactly the saved content, nothing was emptied, a live foreign
-    /// owner or the user's own later copy (a sequence beyond anything our operations explain), another
-    /// logon or boot, or the 24 h retention. Sequence bounds are used only for that last kind of proof and
-    /// as a hint for the offer, never as authority to write.
+    /// provably ours (Decide): (a) our complete write (every format's bytes ours: sentinel with this
+    /// transaction's nonce, our text by its hash and its ANSI, OEM and locale forms, our exact markers) at a
+    /// sequence within our own operations, or (b) an empty clipboard at exactly the sequence journaled under
+    /// our lock right after OUR EmptyClipboard. Ownership of the clipboard is not proof. Every other state is
+    /// PENDING: the record is kept, nothing is written, and the app offers the user a Restore (a journaled
+    /// transaction of its own, run only if the clipboard is still as it was when offered) or a Dismiss. The
+    /// full list of what deletes a record is in docs/WINDOWS-RELEASE-QA.md; retention and the boot limit are
+    /// policies, not proofs the content is no longer wanted.
     ///
     /// Privacy: content that carries any clipboard privacy marker (password managers set them to say
     /// "do not record") is never written to disk; such a transaction stays in memory only, so after a
@@ -410,13 +408,21 @@ namespace DoodleNote.DictationHelper
         static void Delete(PendingRecord record, string why)
         {
             // Settled first, under the publication lock: a payload writer still running cannot publish now.
+            bool deleted;
             lock (record.Gate)
             {
                 record.Settled = true;
-                DeleteFiles(record.Id);
+                deleted = DeleteFiles(record.Id);
             }
             if (record.PayloadWriter != null && !record.PayloadWriter.Join(2000))
                 Wire.Log("the payload writer of record " + record.Id.Substring(0, 8) + " is still running; it will not publish");
+            if (!deleted)
+            {
+                // Intact (nothing was deleted): the next check finds it settled by its content, or offers it.
+                Wire.Log("clipboard record " + record.Id.Substring(0, 8) + " could not be deleted (" + why + "); kept, checked again later");
+                lock (gate) ScheduleRetry(record.Id, RetryKind.Check);
+                return;
+            }
             lock (gate) { CancelRetry(record.Id); OfferGone(record.Id, "settled"); }
             Wire.Log("clipboard record " + record.Id.Substring(0, 8) + " deleted: " + why);
         }
@@ -446,15 +452,30 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// The state file first: a record whose state file cannot be deleted (held by another process) keeps its
-        /// payload too, so no payload is ever left without the journal that says how to use it. False: kept.
+        /// Intact or gone: every file of the record is first opened for exclusive access (another process holding any of
+        /// them, an AV scan or an indexer, makes the whole deletion wait), and only then are they deleted, temporary files
+        /// first, then the state, then the payload. False: nothing was deleted (or, if a file was taken between the check
+        /// and its deletion, what is left is reported and kept).
         /// </summary>
         static bool DeleteFiles(string id)
         {
-            // The temporary files first, then the state file, then the payload: a failure at any step stops there, so
-            // the record is either intact or gone, and no payload is ever left without its state file.
-            foreach (string path in new[] { StatePath(id) + ".tmp", PayloadPath(id) + ".tmp", StatePath(id), PayloadPath(id) })
-                if (!TryDelete(path)) return false;
+            string[] paths = { StatePath(id) + ".tmp", PayloadPath(id) + ".tmp", StatePath(id), PayloadPath(id) };
+            List<FileStream> held = new List<FileStream>();
+            try
+            {
+                foreach (string path in paths)
+                {
+                    if (!File.Exists(path)) continue;
+                    try { held.Add(new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)); }
+                    catch (Exception error)
+                    {
+                        Wire.Log(Path.GetFileName(path) + " is held by another process (" + error.GetType().Name + "): the record is kept whole");
+                        return false;
+                    }
+                }
+            }
+            finally { foreach (FileStream stream in held) stream.Dispose(); }
+            foreach (string path in paths) if (!TryDelete(path)) return false;
             return true;
         }
 
@@ -637,6 +658,7 @@ namespace DoodleNote.DictationHelper
                     if (state != null)
                     {
                         RecordFacts facts = RecordFacts.Of(state);
+                        if (facts.Compare(Now()) == LogonMatch.OtherSession) return false; // another session's record: never deleted from here
                         if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid, facts.PidStart)) return false; // its helper still runs
                     }
                 }
@@ -681,7 +703,16 @@ namespace DoodleNote.DictationHelper
             try
             {
                 FileInfo info = new FileInfo(PayloadPath(id));
-                if (!info.Exists) { DeleteId(id, "no payload (the paste went ahead before it was written)"); return "ERROR: stage " + facts.Stage + " but no payload; cannot put back"; }
+                if (!info.Exists)
+                {
+                    // The writer completes .bin.tmp before moving it into place: a crash between the two leaves a whole
+                    // payload under the temporary name. Adopted when it decrypts and names this record.
+                    string adopted = AdoptPayload(id);
+                    if (adopted == "busy") { result = RecoverResult.Busy; reply["result"] = "busy"; return "its payload (.tmp) could not be read now; kept"; }
+                    if (adopted != "adopted") { DeleteId(id, "no payload (" + adopted + ")"); return "ERROR: stage " + facts.Stage + " but no payload (" + adopted + "); cannot put back"; }
+                    Wire.Log("clipboard record " + id.Substring(0, 8) + ": a complete payload left under its temporary name was adopted");
+                    info = new FileInfo(PayloadPath(id));
+                }
                 if (info.Length > MaxRecordBytes) { DeleteId(id, "payload over the size cap"); return "ERROR: payload of " + info.Length + " bytes over the cap; not read"; }
                 sealedBytes = File.ReadAllBytes(PayloadPath(id));
             }
@@ -770,15 +801,10 @@ namespace DoodleNote.DictationHelper
                     // however old it is), measured on the tick count from the first offer.
                     // Offered in an earlier boot and not answered: offered once more in this boot (a fresh offer: sequence
                     // numbers restarted), and deleted when a second reboot finds it still unanswered.
-                    if (facts.OfferedTick > 0 && facts.OfferedBoot.Length > 0 && bootId.Length > 0 && facts.OfferedBoot != bootId)
+                    if (OfferBootStep(facts, bootId) == "delete")
                     {
-                        if (facts.OfferBoots >= 2)
-                        {
-                            DeleteId(id, "offered in two boots without an answer");
-                            return "offered in two boots without an answer; deleted";
-                        }
-                        facts.OfferBoots = 2;
-                        facts.OfferedSequence = 0;
+                        DeleteId(id, "offered in two boots without an answer");
+                        return "offered in two boots without an answer; deleted";
                     }
                     // Offered first (this fixes the offered sequence and tick if it was not offered yet), then the retention.
                     Offer(id, facts, saved, view, verdict);
@@ -837,6 +863,30 @@ namespace DoodleNote.DictationHelper
                 if (journal != null) ConfirmClosed(journal);
             }
             return outcome;
+        }
+
+        /// <summary>Under gate: a complete .bin.tmp (decrypts, names this record) is moved into place. adopted | busy | none | corrupt.</summary>
+        static string AdoptPayload(string id)
+        {
+            string tmp = PayloadPath(id) + ".tmp";
+            if (!File.Exists(tmp)) return "none";
+            byte[] bytes;
+            try { bytes = File.ReadAllBytes(tmp); }
+            catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
+            try
+            {
+                byte[] plain = ProtectedData.Unprotect(bytes, Entropy, DataProtectionScope.CurrentUser);
+                using (BinaryReader reader = new BinaryReader(new MemoryStream(plain), Encoding.UTF8))
+                    if (reader.ReadString() != "DNCB3" || reader.ReadString() != id) return "corrupt";
+            }
+            catch (CryptographicException error)
+            {
+                int hr = System.Runtime.InteropServices.Marshal.GetHRForException(error);
+                return hr == unchecked((int)0x80090005) || hr == unchecked((int)0x8007000D) ? "corrupt" : "busy";
+            }
+            catch (EndOfStreamException) { return "corrupt"; }
+            try { File.Move(tmp, PayloadPath(id)); return "adopted"; }
+            catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
         }
 
         /// <summary>
@@ -924,9 +974,24 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
+        /// The rule (unit-tested), a POLICY rather than a proof the content is no longer wanted: a record is offered in at most
+        /// two boots, the boot in which it is first offered and the next one (a transaction whose boot crashed before any offer
+        /// does not count that boot). In a boot after that it is deleted. "reoffer": offered in an earlier boot, so the
+        /// offer starts again here (sequence numbers restarted); "delete"; "keep".
+        /// </summary>
+        internal static string OfferBootStep(RecordFacts facts, string bootNow)
+        {
+            if (facts.OfferedTick == 0 || facts.OfferedBoot.Length == 0 || bootNow.Length == 0 || facts.OfferedBoot == bootNow) return "keep";
+            if (facts.OfferBoots >= 2) return "delete";
+            facts.OfferBoots = 2;
+            facts.OfferedSequence = 0;
+            return "reoffer";
+        }
+
+        /// <summary>
         /// The retention rule (unit-tested): 24 h from the FIRST OFFER, measured on the tick count of the same boot
-        /// (no wall clock). A record from another boot is deleted as such (Compare). A record not yet offered (also one
-        /// from an older build) is offered first, which sets the tick; the 24 h run from then.
+        /// (no wall clock), a POLICY rather than a proof. A record from another boot is offered again (OfferBootStep). A
+        /// record not yet offered (also one from an older build) is offered first, which sets the tick; the 24 h run from then.
         /// </summary>
         internal static bool Expired(RecordFacts facts, LogonNow now)
         {
