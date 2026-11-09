@@ -1847,3 +1847,71 @@ test('round 14: one removal attempt; a file that took the temporary name survive
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('round 14: a failed close of the temporary file does not replace an earlier error', (t) => {
+  // Opus SF-1: the temporary write failed (ENOSPC), its close then reported a
+  // code of the fallback's kind (EACCES; a deferred error on NFS or SMB) and
+  // replaced ENOSPC, so the darwin writer wrote in place on a full disk and left
+  // the config empty. The first error stands; the cleanup still runs.
+  const realClose = fsModule.closeSync as (fd: number) => void
+  const root = mkdtempSync(join(tmpdir(), 'dn-close-first-'))
+  try {
+    const outcomes: (() => void)[] = []
+    let n = 0
+    for (const writer of WRITERS) {
+      const label = `${writer}: temporary write ENOSPC, its close EACCES`
+      const folder = join(root, String(n++))
+      mkdirSync(folder)
+      const path = join(folder, 'config.json')
+      writeFileSync(path, '{"a":1}')
+      let watched: number | null = null
+      let closes = 0
+      let inPlace = 0
+      let removals = 0
+      let thrown: string | null = null
+      withFsHook(
+        (name, args) => {
+          if (name === 'openSync' && String(args[0]).endsWith('.tmp'))
+            return (fd) => (watched = fd as number)
+          if (name === 'writeFileSync' && typeof args[0] === 'number' && args[0] === watched)
+            throw fsError('ENOSPC')
+          if (name === 'writeFileSync' && typeof args[0] !== 'number') {
+            // The in-place write on a full disk: truncated, then ENOSPC.
+            inPlace++
+            truncateSync(String(args[0]))
+            throw fsError('ENOSPC')
+          }
+          if (name === 'closeSync' && args[0] === watched) {
+            closes++
+            realClose(args[0] as number)
+            throw fsError('EACCES')
+          }
+          if (name === 'unlinkSync' && String(args[0]).endsWith('.tmp')) removals++
+          return undefined
+        },
+        () => {
+          try {
+            writeWith(writer, path, true)
+          } catch (error) {
+            thrown = (error as NodeJS.ErrnoException).code ?? null
+          }
+        }
+      )
+      const text = readFileSync(path, 'utf8')
+      t.diagnostic(
+        `${label}: ${thrown ?? 'written'}, ${inPlace} in-place writes, config ${JSON.stringify(text)}, ${closes} close(s), ${removals} removal(s)`
+      )
+      outcomes.push(() => {
+        assert.equal(thrown, 'ENOSPC', `${label}: the first error`)
+        assert.equal(inPlace, 0, `${label}: the in-place write is not reached`)
+        assert.equal(text, '{"a":1}', `${label}: the config intact`)
+        assert.equal(closes, 1, `${label}: closed once`)
+        assert.equal(removals, 1, `${label}: its own temporary file's removal attempted`)
+        assert.deepEqual(temporaries(folder), [], `${label}: no temporary file left`)
+      })
+    }
+    for (const check of outcomes) check()
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

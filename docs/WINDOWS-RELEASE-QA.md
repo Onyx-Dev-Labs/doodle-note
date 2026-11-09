@@ -700,7 +700,13 @@ another process's in-place write to the file between the open and the rename
 goes to the replaced file. And the temporary file remains whenever its removal
 fails, which is not reported (the write's own result stands). Its removal is
 attempted on every failure path, also when closing a descriptor failed (round
-13: such a close is never repeated). It fails, for example, when the
+13: such a close is never repeated). Round 14: when the temporary file's own
+write fails (`ENOSPC`, say) and its close then fails too, the first error is the
+one reported and classified; before, the close's error replaced it, and a close
+reporting a code of the fallback's kind (`EACCES` or `EPERM`, possible only as a
+deferred error on a network volume) sent a full disk to the in-place write,
+which emptied the config. A close that fails with no earlier error is reported
+as itself and classified like any other failure (both writers). It fails, for example, when the
 folder is made read-only between the temporary file and the rename (the in-place
 write still succeeds) or, for a new file, the link (`EACCES`, as the base's
 create). `src/main/agent-access-darwin.test.ts` compares a darwin service

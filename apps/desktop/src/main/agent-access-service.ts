@@ -236,9 +236,16 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
       writeFileSync(fd, next)
       // The file mode is subject to the umask on creation; set it exactly.
       if (process.platform !== 'win32') fchmodSync(fd, mode)
-    } finally {
-      closeSync(fd)
+    } catch (error) {
+      // The first error stands (round 14): a close that fails too does not replace it.
+      try {
+        closeSync(fd)
+      } catch {
+        // Released anyway.
+      }
+      throw error
     }
+    closeSync(fd)
     const current = readConfigFile(target)
     const now =
       current.state === 'read' ? current.raw : current.state === 'absent' ? null : undefined
@@ -387,9 +394,19 @@ export function replaceConfigFileBase(path: string, next: string): void {
         authority = null
         closeSync(opened)
       }
-    } finally {
-      closeSync(fd)
+    } catch (error) {
+      // The first error stands (round 14): a close that fails too (EACCES, say,
+      // after ENOSPC) does not replace it, so it cannot send a full disk to the
+      // in-place write. Released anyway (POSIX), so not closed again.
+      try {
+        closeSync(fd)
+      } catch {
+        // Released anyway.
+      }
+      throw error
     }
+    // A close that fails alone is thrown, and classified below like any other.
+    closeSync(fd)
     if (replacing) renameSync(temporary, target)
     else linkSync(temporary, target)
     done = true
