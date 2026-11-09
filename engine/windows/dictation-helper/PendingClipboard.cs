@@ -566,7 +566,9 @@ namespace DoodleNote.DictationHelper
                     // is still a prefix of state .tmp, payload .tmp, state, payload: never a state without its payload.
                     Wire.Log("ERROR: a deletion mark could not be cleared: completing the deletion instead");
                     completing = true;
-                    for (int k = 0; k < held.Count; k++) Native.SetFileInformationByHandle(held[k], Native.FileDispositionInfo, ref mark, 1);
+                    for (int k = 0; k < held.Count; k++)
+                        if (!Native.SetFileInformationByHandle(held[k], Native.FileDispositionInfo, ref mark, 1))
+                            Wire.Log("ERROR: handle " + (k + 1) + " could not be marked again (error " + Marshal.GetLastWin32Error() + "): what is left is reported below");
                     break;
                 }
             }
@@ -966,14 +968,12 @@ namespace DoodleNote.DictationHelper
                     // retention (policies) apply to what is offered.
                     if (OfferBootStep(facts, bootId, (long)Native.GetTickCount64()) == "delete")
                     {
-                        DeleteId(id, "offered in two boots without an answer");
-                        return "offered in two boots without an answer; deleted";
+                        return "offered in two boots without an answer; " + (DeleteId(id, "offered in two boots without an answer") ? "deleted" : "deletion deferred (a later check retries)");
                     }
                     Offer(id, facts, saved, view);
                     if (Expired(facts, Now()))
                     {
-                        DeleteId(id, "expired: offered longer than the " + Retention.TotalHours + " h retention");
-                        return "expired; deleted";
+                        return "expired; " + (DeleteId(id, "expired: offered longer than the " + Retention.TotalHours + " h retention") ? "deleted" : "deletion deferred (a later check retries)");
                     }
                     result = RecoverResult.Pending;
                     reply["result"] = "pending";
@@ -1153,7 +1153,9 @@ namespace DoodleNote.DictationHelper
         {
             long nowTick = (long)Native.GetTickCount64();
             string step = OfferBootStep(facts, bootId, nowTick);
-            if (step == "delete") { DeleteId(id, why + " in two boots: unrecoverable, deleted (the boot limit is a policy)"); return "unrecoverable payload, two boots; deleted"; }
+            // A retention DECISION: the deletion itself may be deferred (a file that cannot be looked at keeps the record whole;
+            // a later check retries). Reported as it happened.
+            if (step == "delete") return "unrecoverable payload, two boots (the boot limit is a policy); " + (DeleteId(id, why + " in two boots: unrecoverable") ? "deleted" : "deletion deferred (a later check retries)");
             if (facts.OfferedTick == 0)
             {
                 if (facts.OfferBoots == 0) facts.OfferBoots = 1;
@@ -1163,7 +1165,7 @@ namespace DoodleNote.DictationHelper
                 PersistOffer(id, facts);
             }
             MarkOfferOnlyOnDisk(id, facts, why);
-            if (Expired(facts, Now())) { DeleteId(id, why + " for the " + Retention.TotalHours + " h retention: unrecoverable, deleted (a policy)"); return "unrecoverable payload, retention over; deleted"; }
+            if (Expired(facts, Now())) return "unrecoverable payload, retention over (a policy); " + (DeleteId(id, why + " for the " + Retention.TotalHours + " h retention: unrecoverable") ? "deleted" : "deletion deferred (a later check retries)");
             return null;
         }
 
