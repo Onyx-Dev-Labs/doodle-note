@@ -697,7 +697,7 @@ namespace DoodleNote.DictationHelper
                 {
                     string name = Path.GetFileName(path);
                     // Round 8 wrote one record per identity with no id: never restored from, just removed.
-                    if (name == "DoodleNote-Bark-clipboard-" + HelperIdentity.Sanitized + ".bin") { TryDelete(path); Wire.Log("a round-8 clipboard record was removed (never restored from)"); continue; }
+                    if (name == "DoodleNote-Bark-clipboard-" + HelperIdentity.Sanitized + ".bin") { Wire.Log(TryDelete(path) ? "a round-8 clipboard record was removed (never restored from)" : "a round-8 clipboard record could not be removed now (never restored from; tried again later)"); continue; }
                     Match match = names.Match(name);
                     if (!match.Success) continue; // another identity's file (X-foo for X), or not a record
                     string id = match.Groups[1].Value;
@@ -708,14 +708,13 @@ namespace DoodleNote.DictationHelper
                         // A state .tmp is replaced atomically by its writer and removed with its record; one left with no state
                         // file, older than 10 minutes, is a stray (no payload depends on it).
                         if (Probe(StatePath(id)) != Presence.Absent || !OlderThanTenMinutes(path)) continue;
-                        TryDelete(path);
-                        Wire.Log("a stray state .tmp (" + name.Substring(Prefix.Length) + ") was deleted");
+                        // Round 22 (S7): the log says what happened, never "deleted" for a deletion that failed.
+                        Wire.Log("a stray state .tmp (" + name.Substring(Prefix.Length) + ") " + (TryDelete(path) ? "was deleted" : "could not be deleted now (tried again later)"));
                         continue;
                     }
                     // Only a payload whose state is positively ABSENT, old enough not to be another helper mid-step.
                     if (Probe(StatePath(id)) != Presence.Absent || writing.Contains(id) || inFlight.Contains(id) || !OlderThanTenMinutes(path)) continue;
-                    TryDelete(path);
-                    Wire.Log("an orphaned clipboard payload (" + name.Substring(Prefix.Length) + ") was deleted; never restored from");
+                    Wire.Log("an orphaned clipboard payload (" + name.Substring(Prefix.Length) + ") " + (TryDelete(path) ? "was deleted" : "could not be deleted now (tried again later)") + "; never restored from");
                 }
                 foreach (string id in states)
                 {
@@ -912,11 +911,11 @@ namespace DoodleNote.DictationHelper
                         if (ended != null) return PolicyEnded(ended, ref result, reply);
                         result = RecoverResult.Busy; reply["result"] = "busy"; return "its payload (.tmp) could not be read now; kept (bounded by the retention)";
                     }
-                    if (adopted != "adopted") { DeleteId(id, "no usable payload (" + adopted + ")"); return "ERROR: stage " + facts.Stage + " but no usable payload (" + adopted + ")"; }
+                    if (adopted != "adopted") { return "ERROR: stage " + facts.Stage + " but no usable payload (" + adopted + "); " + (DeleteId(id, "no usable payload (" + adopted + ")") ? "deleted" : Deferred); }
                     Wire.Log("clipboard record " + id.Substring(0, 8) + ": a complete payload left under its temporary name was adopted (offered)");
                 }
                 FileInfo info = new FileInfo(PayloadPath(id));
-                if (info.Length > MaxRecordBytes) { DeleteId(id, "payload over the size cap"); return "ERROR: payload of " + info.Length + " bytes over the cap; not read"; }
+                if (info.Length > MaxRecordBytes) { return "ERROR: payload of " + info.Length + " bytes over the cap; not read; " + (DeleteId(id, "payload over the size cap") ? "deleted" : Deferred); }
                 sealedBytes = File.ReadAllBytes(PayloadPath(id));
             }
             catch (Exception error)
@@ -942,10 +941,10 @@ namespace DoodleNote.DictationHelper
                     if (magic != "DNCB3")
                     {
                         // Round-10 records (payload v2, never shipped in a release) cannot be read by this helper.
-                        DeleteId(id, "a " + magic + " record from an earlier build: removed, never restored from");
-                        return "a record from an earlier build (" + magic + "): removed";
+                        bool removed = DeleteId(id, "a " + magic + " record from an earlier build: never restored from");
+                        return "a record from an earlier build (" + magic + "): " + (removed ? "removed" : "deletion deferred (kept, never restored from)");
                     }
-                    if (reader.ReadString() != id) { DeleteId(id, "payload does not match"); return "ERROR: payload does not match its state"; }
+                    if (reader.ReadString() != id) { return "ERROR: payload does not match its state; " + (DeleteId(id, "payload does not match") ? "deleted" : Deferred); }
                     nonce = reader.ReadString();
                     dictatedHash = reader.ReadBytes(32);
                     saved = SavedClipboard.ReadFrom(reader);
@@ -973,7 +972,7 @@ namespace DoodleNote.DictationHelper
             catch (FormatException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
             catch (ArgumentException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
             catch (OverflowException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
-            if (corrupt != null) { DeleteId(id, "payload corrupt"); return "ERROR: payload corrupt (" + corrupt + ")"; }
+            if (corrupt != null) { return "ERROR: payload corrupt (" + corrupt + "); " + (DeleteId(id, "payload corrupt") ? "deleted" : Deferred); }
             PutBackTrace trace = byUser ? new PutBackTrace("user-restore") : null; // log only
             if (!ClipboardText.Open()) { result = RecoverResult.Busy; reply["result"] = "busy"; return "the clipboard is busy; kept for a retry"; }
             string outcome;
@@ -987,10 +986,10 @@ namespace DoodleNote.DictationHelper
                 if (verdict == RecoveryVerdict.Untouched)
                 {
                     if (byUser) reply["result"] = "restored";
-                    DeleteId(id, "nothing of the user's is missing");
+                    bool gone = DeleteId(id, "nothing of the user's is missing");
                     // A restore of it had been reported failed: the app learns the clipboard holds the user's content.
                     if (facts.Unrestored) Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", "restored"));
-                    return "untouched (" + seen + "): the user's content is there";
+                    return "untouched (" + seen + "): the user's content is there; " + (gone ? "deleted" : Deferred);
                 }
                 if (!byUser)
                 {
@@ -1089,7 +1088,7 @@ namespace DoodleNote.DictationHelper
                 // withdrawn now and a "settled" state is deleted on sight, so restored content is never offered again.
                 if (!Stage(journal, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
                 OfferGone(id, "restored");
-                DeleteId(id, outcome);
+                outcome += DeleteId(id, outcome) ? "; deleted" : "; " + Deferred;
                 Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", restored));
             }
             finally
