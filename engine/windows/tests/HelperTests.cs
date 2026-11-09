@@ -981,7 +981,8 @@ namespace DoodleNote.DictationHelper.Tests
                     Assert.Equal(true, saved.MatchesOpenClipboard(), "control: the clipboard holds exactly the saved content");
                     ClipboardView whole = ClipboardView.Read(saved, id, "n", new byte[32]);
                     Assert.Equal(false, whole.Incomplete, "control: the view's enumeration is complete");
-                    Assert.Equal(true, ClipboardText.OpenClipboardBytes(false) > 0, "control: the size is known");
+                    // (CF_UNICODETEXT alone counts 0: the sizes skip every format Windows may synthesize; known, not -1.)
+                    Assert.Equal(true, ClipboardText.OpenClipboardBytes(false) >= 0, "control: the size is known");
                     ClipboardText.IncompleteAt = "matches";
                     Assert.Equal(false, saved.MatchesOpenClipboard(), "MatchesOpenClipboard: incomplete, no proof the saved content is there");
                     ClipboardText.IncompleteAt = "view";
