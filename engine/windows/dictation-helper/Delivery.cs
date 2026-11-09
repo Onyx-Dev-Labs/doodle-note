@@ -1771,6 +1771,10 @@ namespace DoodleNote.DictationHelper
                 else formats.Add(entry);
             }
             formats.AddRange(renderedLast);
+            // Round 19, LOG ONLY (the 25(a) diagnosis): what the reader listed against what Windows counts right now
+            // (CountClipboardFormats needs no open). A list of 0 beside a count above 0 is an enumeration that failed.
+            Wire.Log("saving the clipboard: the reader listed " + (head.Length - 4) + " format(s) at sequence " + sequence
+                + "; Windows counts " + Native.CountClipboardFormats() + " now (sequence " + Native.GetClipboardSequenceNumber() + ")");
             SavedClipboard saved = new SavedClipboard();
             saved.Sequence = sequence;
             long total = 0;
