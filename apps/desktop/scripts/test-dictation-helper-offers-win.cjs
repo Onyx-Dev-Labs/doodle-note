@@ -784,8 +784,19 @@ async function main() {
       await waitExit(lock)
       second = await h.req('clipboard-dismiss', { record: offer.record })
     }
-    check(`Dismiss with ${suffix} locked reports failure and deletes nothing`, !!first && first.dismissed === false && whole === 2, `${JSON.stringify(first)}; ${whole}`)
-    check(`once ${suffix} is released, Dismiss deletes every file`, !!second && second.dismissed === true && recordFiles().length === 0 && fs.readdirSync(os.tmpdir()).every((f) => !f.startsWith(recordPrefix)), `${JSON.stringify(second)}; ${recordFiles()}`)
+    check(
+      `Dismiss with ${suffix} locked reports failure and deletes nothing`,
+      !!first && first.dismissed === false && whole === 2,
+      `${JSON.stringify(first)}; ${whole}`
+    )
+    check(
+      `once ${suffix} is released, Dismiss deletes every file`,
+      !!second &&
+        second.dismissed === true &&
+        recordFiles().length === 0 &&
+        fs.readdirSync(os.tmpdir()).every((f) => !f.startsWith(recordPrefix)),
+      `${JSON.stringify(second)}; ${recordFiles()}`
+    )
     await h.stop()
   }
 
@@ -799,10 +810,18 @@ async function main() {
     const h = start(release)
     await h.ready
     const listed = await h.req('clipboard-offers')
-    check('a complete .bin.tmp is adopted and offered', !!bin && !!listed && listed.offers.length === 1 && recordFiles().length === 2, `${JSON.stringify(listed)}; ${recordFiles()}`)
+    check(
+      'a complete .bin.tmp is adopted and offered',
+      !!bin && !!listed && listed.offers.length === 1 && recordFiles().length === 2,
+      `${JSON.stringify(listed)}; ${recordFiles()}`
+    )
     const offer = listed && listed.offers[0]
     const restored = offer ? await restoreConfirming(h, offer) : null
-    check('and restoring it gives back the user clipboard', !!restored && restored.result === 'restored' && names() === userFormats, `${JSON.stringify(restored)}; ${names()}`)
+    check(
+      'and restoring it gives back the user clipboard',
+      !!restored && restored.result === 'restored' && names() === userFormats,
+      `${JSON.stringify(restored)}; ${names()}`
+    )
     await h.stop()
   }
 
@@ -818,7 +837,10 @@ async function main() {
     for (const when of ['before the confirmation', 'after the confirmation']) {
       copyMulti(user)
       const before = when.startsWith('before')
-      const a = start(testops, { DICTATION_HELPER_TEST: '1', ...(before ? { DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500' } : {}) })
+      const a = start(testops, {
+        DICTATION_HELPER_TEST: '1',
+        ...(before ? { DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500' } : {})
+      })
       await a.ready
       const dictated = `dictated text N ${name} ${when}`
       const reply = a.req('__clipboard-txn', { text: dictated, holdMs: before ? 300 : 2500 })
@@ -829,11 +851,23 @@ async function main() {
       await a.stop()
       const kept = recordFiles().length
       const theirs = readFormat(format)
-      check(`${name} replaced ${when}: kept, not restored over`, !!result && /^owned-but-changed\/unrestored\|/.test(String(result.result)) && kept === 2 && !!theirs && theirs.equals(bytes), `${JSON.stringify(result)}; ${kept}; ${theirs && theirs.toString('hex')}`)
+      check(
+        `${name} replaced ${when}: kept, not restored over`,
+        !!result &&
+          /^owned-but-changed\/unrestored\|/.test(String(result.result)) &&
+          kept === 2 &&
+          !!theirs &&
+          theirs.equals(bytes),
+        `${JSON.stringify(result)}; ${kept}; ${theirs && theirs.toString('hex')}`
+      )
       const h = start(release)
       await h.ready
       const listed = await h.req('clipboard-offers')
-      check(`${name} replaced ${when}: offered`, !!listed && listed.offers.length === 1, JSON.stringify(listed))
+      check(
+        `${name} replaced ${when}: offered`,
+        !!listed && listed.offers.length === 1,
+        JSON.stringify(listed)
+      )
       const offer = listed && listed.offers[0]
       if (offer) await h.req('clipboard-dismiss', { record: offer.record })
       await h.stop()
@@ -845,14 +879,23 @@ async function main() {
   // ours; the rejection is final: the later look before the keys must not upgrade it. Kept, offered.
   {
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500' })
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500'
+    })
     await a.ready
     const reply = a.req('__clipboard-txn', { text: 'dictated text O', holdMs: 300 })
     for (let i = 0; i < 200 && text() !== 'dictated text O'; i++) await sleep(50)
     replaceFormat(1, Buffer.from('dictated text O\0', 'latin1'), 4)
     const result = await reply
     await a.stop()
-    check('a confirmation rejected for the sequence stays rejected (owned-but-changed, kept)', !!result && /^owned-but-changed\/unrestored\|/.test(String(result.result)) && recordFiles().length === 2, `${JSON.stringify(result)}; ${recordFiles()}`)
+    check(
+      'a confirmation rejected for the sequence stays rejected (owned-but-changed, kept)',
+      !!result &&
+        /^owned-but-changed\/unrestored\|/.test(String(result.result)) &&
+        recordFiles().length === 2,
+      `${JSON.stringify(result)}; ${recordFiles()}`
+    )
     const h = start(release)
     await h.ready
     const listed = await h.req('clipboard-offers')
