@@ -18,9 +18,10 @@ namespace DoodleNote.DictationHelper
     /// one request per format, each OpenClipboard → GetClipboardData → copy → CloseClipboard (in a
     /// finally) with its own wall-clock bound. Round 21: the reader opens the clipboard with its own message-only
     /// window (it opened with NULL before; then another app's OpenClipboard succeeded at once even while the reader
-    /// waited in a render, which is also how the reader could lose its open). A read that overruns is abandoned and the save gives up: the reader is NOT killed,
-    /// because ending it mid-render loses the format being rendered; it finishes the render, finds its
-    /// stdin closed and exits (verified: the owner's "Embed Source" is still there after the render).
+    /// waited in a render, which is also how the reader could lose its open). A read that overruns is abandoned and the save gives up: the helper does not kill
+    /// it at once, because ending it mid-render loses the format being rendered; it normally finishes the render, finds
+    /// its stdin closed and exits (verified: the owner's "Embed Source" is still there after the render). Round 22: a
+    /// render that does not return is bounded (THE BOUND below): then the reader IS ended, and that format may be lost.
     /// At most MaxAbandoned readers may be waiting like that; reaching it asks for a helper restart
     /// through the safe path (between deliveries; the waiting readers are left to finish). Since
     /// other apps can write meanwhile, every read reports the clipboard sequence number taken after it,
@@ -265,7 +266,7 @@ namespace DoodleNote.DictationHelper
         }
     }
 
-    /// <summary>The helper's side of the reader process: started on demand; on an overrun it is ABANDONED (left to finish a render, never killed), and a generation whose capture was not established is retired.</summary>
+    /// <summary>The helper's side of the reader process: started on demand; on an overrun it is ABANDONED (left to finish a render; ended only by the bound: its own 30 s watchdog or the helper's ceiling), and a generation whose capture was not established is retired.</summary>
     internal sealed class ClipboardReaderClient
     {
         static readonly object gate = new object();
@@ -400,7 +401,8 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>
         /// Give up on a reader that is waiting in a render: no new requests, its stdin closed so it exits
-        /// once the render returns (the owner's content stays whole).
+        /// once the render returns (the owner's content stays whole), or by its own watchdog 30 s later (round 22: then
+        /// the format being rendered may be lost).
         /// </summary>
         void Abandon()
         {
@@ -418,8 +420,8 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Forget readers that exited. End one only if it has waited past AbandonedMaxMs and the
-        /// clipboard's owner is confirmed hung (its render is not coming). Under gate.
+        /// Forget readers that exited. End one that has waited past AbandonedMaxMs with its owner reported hung, or past
+        /// AbandonedCeilingMs whatever the owner reports (round 22, see MayEnd). Under gate.
         /// </summary>
         static void Prune()
         {
@@ -467,7 +469,7 @@ namespace DoodleNote.DictationHelper
         /// <summary>
         /// Helper exit (quit, or a restart): every reader's stdin is closed, so an idle one exits at once
         /// and one still waiting in a render exits when that render returns (the owner's format stays
-        /// whole). None is killed on exit.
+        /// whole), or by its own watchdog 30 s after its stdin closed. The exit itself kills none.
         /// </summary>
         public static void Shutdown()
         {
@@ -487,8 +489,8 @@ namespace DoodleNote.DictationHelper
                 try { idle.process.StandardInput.Close(); } catch (Exception) { }
                 try { idle.process.WaitForExit(IdleExitWaitMs); } catch (Exception) { }
             }
-            // Never killed on exit: a reader still waiting in a render finishes it (and the owner's
-            // format with it) and leaves on its own; "hung" is no proof the render will not come.
+            // Not killed by the exit: a reader still waiting in a render finishes it (and the owner's format with it)
+            // and leaves on its own, or its own watchdog ends it 30 s after this close (round 22).
             int left = 0;
             foreach (ClipboardReaderClient reader in waiting)
             {
