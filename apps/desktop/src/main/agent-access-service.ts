@@ -194,31 +194,15 @@ export function createTemporaryBeside(target: string, mode: number): { path: str
 }
 
 /**
- * Windows refuses a rename or removal while another process (a virus scanner, an
- * indexer, a client) has the file open without FILE_SHARE_DELETE; that lasts
- * milliseconds, so these are retried briefly: 5 more attempts, 50 ms apart.
- */
-const SHARING_RETRIES = 5
-const sharingRefusal = (error: unknown): boolean =>
-  ['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '')
-
-/**
  * Removes a temporary file this write created (createTemporaryBeside), never
- * another. With `retry` (the Windows writer, round 13) a sharing refusal is
- * retried as the rename's is; on macOS one EACCES or EPERM is the folder's own
- * permission and is not. A failure is not reported (the write's own result
- * stands): the file then remains, `.dn-<8 hex>.tmp` in the config's folder.
+ * another. A failure is not reported (the write's own result stands): the file
+ * then remains, `.dn-<8 hex>.tmp` in the config's folder.
  */
-function removeOwnTemporary(path: string, retry = false): void {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      unlinkSync(path)
-      return
-    } catch (error) {
-      // Left behind (removed meanwhile, or the removal was refused).
-      if (!retry || attempt >= SHARING_RETRIES || !sharingRefusal(error)) return
-      sleep(50)
-    }
+function removeOwnTemporary(path: string): void {
+  try {
+    unlinkSync(path)
+  } catch {
+    // Left behind (removed meanwhile, or the removal was refused).
   }
 }
 
@@ -227,8 +211,7 @@ function removeOwnTemporary(path: string, retry = false): void {
  * temporary file beside it (same folder, so the rename stays on one volume; a short
  * name, createTemporaryBeside: never an existing file, and only the file it created
  * is removed) with the original's mode (a new file: 0600), and is renamed over it.
- * A temporary file whose removal fails remains (removeOwnTemporary; a sharing
- * refusal is retried first, round 13). Clients such as Claude Code rewrite their file
+ * A temporary file whose removal fails remains (removeOwnTemporary). Clients such as Claude Code rewrite their file
  * often, so the file is read again just before the rename; when it is no longer
  * `expected` (null: it did not exist) nothing is written and false is returned so
  * the caller starts over from the new content. A symbolic link is followed, so a
@@ -255,22 +238,24 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
     const now =
       current.state === 'read' ? current.raw : current.state === 'absent' ? null : undefined
     if (now !== expected) {
-      removeOwnTemporary(temporary, true)
+      removeOwnTemporary(temporary)
       return false
     }
-    // Retried briefly while another process holds the file (SHARING_RETRIES).
+    // Windows refuses the rename while another process has the file open without
+    // FILE_SHARE_DELETE; that lasts milliseconds, so retry briefly.
     for (let attempt = 0; ; attempt++) {
       try {
         renameSync(temporary, target)
         return true
       } catch (error) {
-        if (attempt >= SHARING_RETRIES || !sharingRefusal(error)) throw error
+        const code = (error as NodeJS.ErrnoException).code
+        if (attempt >= 5 || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '')) throw error
         sleep(50)
       }
     }
   } catch (error) {
     // Not renamed (the rename is the last step): still this write's own file.
-    removeOwnTemporary(temporary, true)
+    removeOwnTemporary(temporary)
     throw error
   }
 }
