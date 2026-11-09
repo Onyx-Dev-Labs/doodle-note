@@ -1711,8 +1711,8 @@ namespace DoodleNote.DictationHelper
         const int MaxMarkerBytes = 64;
         readonly List<KeyValuePair<uint, byte[]>> items = new List<KeyValuePair<uint, byte[]>>();
         IntPtr metafile = IntPtr.Zero;
-        /// <summary>A written-down metafile that could not be rebuilt (see ReadFrom).</summary>
-        bool metafileLost;
+        /// <summary>Saved content that cannot go back (ReadFrom): a metafile that could not be rebuilt, a registered format with no usable name.</summary>
+        bool contentLost;
         bool complete = true;
         /// <summary>True only when a user-visible format was dropped by the byte or time cap; drops of private formats are silent.</summary>
         bool reportedSkip;
@@ -2004,7 +2004,10 @@ namespace DoodleNote.DictationHelper
                 string name = reader.ReadString();
                 byte[] bytes = reader.ReadBytes(reader.ReadInt32());
                 if (format >= 0xC000) format = name.Length > 0 ? Native.RegisterClipboardFormat(name) : 0;
+                // Round 21: a registered format with no name, or one that cannot be registered again, cannot go back:
+                // the record is INCOMPLETE (never "restored", never deleted as already there), not silently smaller.
                 if (format != 0) saved.items.Add(new KeyValuePair<uint, byte[]>(format, bytes));
+                else saved.contentLost = true;
             }
             int metaLength = reader.ReadInt32();
             if (metaLength > 0)
@@ -2013,10 +2016,11 @@ namespace DoodleNote.DictationHelper
                 saved.metafile = Native.SetEnhMetaFileBits((uint)bits.Length, bits);
                 // A metafile that cannot be rebuilt is part of the save that cannot go back: never "restored", never
                 // "already on the clipboard" (so such a record is never dropped as untouched).
-                if (saved.metafile == IntPtr.Zero) saved.metafileLost = true;
+                if (saved.metafile == IntPtr.Zero) saved.contentLost = true;
             }
             saved.forceMarkers = reader.ReadBoolean();
-            saved.complete = reader.ReadBoolean() && !saved.metafileLost;
+            saved.complete = reader.ReadBoolean() && !saved.contentLost;
+            if (TestMode.Env("DICTATION_HELPER_TEST_RECORD_LOSES_NAME") == "1" && saved.items.Count > 0) { saved.items.RemoveAt(saved.items.Count - 1); saved.contentLost = true; saved.complete = false; } // test build only
             saved.reportedSkip = reader.ReadBoolean();
             return saved;
         }
@@ -2068,7 +2072,7 @@ namespace DoodleNote.DictationHelper
         /// <summary>Every saved format is among the present ones (with MatchesOpenClipboard: the clipboard holds exactly the saved content).</summary>
         public bool AllPresent(IList<uint> present)
         {
-            if (metafileLost) return false;
+            if (contentLost) return false;
             uint sentinel = Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat);
             foreach (KeyValuePair<uint, byte[]> item in items) if (item.Key != sentinel && !present.Contains(item.Key)) return false;
             if (metafile != IntPtr.Zero && !present.Contains(CF_ENHMETAFILE)) return false;
@@ -2450,7 +2454,7 @@ namespace DoodleNote.DictationHelper
         public string PutBackResult(bool setOk)
         {
             // The payload still holds a metafile that could not be rebuilt this time: not settled, the record is kept.
-            if (metafileLost) return "unrestored";
+            if (contentLost) return "unrestored";
             return RestoreResult(setOk, complete, reportedSkip);
         }
     }
