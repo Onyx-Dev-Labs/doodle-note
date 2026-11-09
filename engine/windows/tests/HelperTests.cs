@@ -793,41 +793,115 @@ namespace DoodleNote.DictationHelper.Tests
 
         public static void TheSaveIsWrittenOverOnlyWhenPositivelyEstablished()
         {
-            // Round 20: hooked reader replies; Judge decides whether the helper may write. Formats: CF_UNICODETEXT (13)
-            // and a registered one; the listing's entries are "<id>:<base64 name>".
-            Func<uint, string> entry = (f) => f + ":" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(f == 13 ? "CF_UNICODETEXT" : "DoodleNote.CI.Extra"));
+            // Rounds 20-21: hooked reader replies (the client has already checked the id and stripped " end"); Judge
+            // decides whether the helper may write. Listing: "list <seq before> <counted> <error> <seq after> <listed> <entries>".
             uint extra = Native.RegisterClipboardFormat("DoodleNote.CI.Extra");
-            string two = " " + entry(13) + " " + entry(extra);
-            Func<uint, string> data = (f) => "data " + f + " 100 " + Convert.ToBase64String(new byte[] { 1, 2, 3 });
+            Func<uint, string, string> entry = (f, name) => f + ":" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(name));
+            string two = " " + entry(13, "") + " " + entry(extra, "DoodleNote.CI.Extra");
+            Func<uint, string> data = (f) => "data " + f + " 100 3 " + Convert.ToBase64String(new byte[] { 1, 2, 3 });
             Func<string, Func<string, string>, SavedClipboard> judge = (listReply, getReply) =>
             {
                 bool retry; string line;
                 return SavedClipboard.Judge((request, ms) => request == "list" ? listReply : getReply(request), 1500, () => 100u, out retry, out line);
             };
             Func<string, string> allData = (request) => data(uint.Parse(request.Split(' ')[1]));
-            // Established: listed 2 = counted 2, no error, sequence unchanged, both saved.
-            SavedClipboard ok = judge("list 100 0 0 2 0 100" + two, allData);
-            Assert.Equal(true, ok != null && ok.Count == 2, "listed = counted, no error, both formats saved: established");
-            // Positive empty: listed 0, counted 0, no error.
-            SavedClipboard empty = judge("list 100 0 0 0 0 100", allData);
-            Assert.Equal(true, empty != null && empty.Count == 0, "listed 0, counted 0, no error: a positively empty clipboard (the only zero-item record)");
-            // Not established: no record at all, so the delivery never empties or writes the clipboard.
-            Assert.Equal(null, judge("list 100 0 0 5 1418 100", allData), "an enumeration error (ERROR_CLIPBOARD_NOT_OPEN) with a non-empty clipboard");
-            Assert.Equal(null, judge("list 100 0 0 5 0 100", allData), "listed 0 but counted 5 (the round-19 failure mode)");
-            Assert.Equal(null, judge("list 100 0 0 3 0 100" + two, allData), "listed 2 but counted 3");
-            Assert.Equal(null, judge("list 100 0 0 2 0 101" + two, allData), "the sequence moved across the listing");
-            Assert.Equal(null, judge("list 100 0 0 2 0 100" + two, (request) => "none " + request.Split(' ')[1] + " 100"), "listed 2, counted 2, but every get answers none");
-            Assert.Equal(null, judge("list 100 0 0 2 0 100" + two, (request) => "unlocked " + request.Split(' ')[1] + " 100"), "every get answers unlocked");
-            Assert.Equal(null, judge("out-of-order", allData), "a late reply from the previous request (the client answers out-of-order)");
-            Assert.Equal(null, judge("list 100 0 0", allData), "a reader killed mid-reply (a truncated listing)");
-            Assert.Equal(null, judge("busy", allData), "a busy reader");
-            Assert.Equal(null, judge(null, allData), "a reader that overran or ended");
-            Assert.Equal(null, judge("list 100 0 0 2 0 100" + two, (request) => request.Contains(extra.ToString()) ? "dat" : allData(request)), "a get reply cut short");
-            Assert.Equal(null, judge("list 100 0 0 2 0 100" + two, (request) => data(13)), "a get reply for another format (out of order)");
-            Assert.Equal(null, judge("list 100 0 0 1 0 100 13:not-base64!", allData), "a malformed listing entry");
-            // Named skips are definite outcomes: over the cap still establishes the save (reported as skipped).
-            SavedClipboard skipped = judge("list 100 0 0 2 0 100" + two, (request) => request.Contains(extra.ToString()) ? "oversize " + extra + " 100" : allData(request));
-            Assert.Equal(true, skipped != null && skipped.Count == 1 && skipped.ReportedSkip, "one format over the cap: established, that format reported as skipped");
+            Func<string, Func<string, string>> withExtra = (reply) => (request) => request.Contains(" " + extra + " ") ? reply : allData(request);
+            SavedClipboard ok = judge("list 100 2 0 100 2" + two, allData);
+            Assert.Equal(true, ok != null && ok.Count == 2, "listed = counted = declared, no error, both saved: established");
+            SavedClipboard empty = judge("list 100 0 0 100 0", allData);
+            Assert.Equal(true, empty != null && empty.Count == 0 && !empty.ReportedSkip, "listed 0, counted 0, no error: a positively empty clipboard (the only zero-item save that reports restored)");
+            // Not established: nothing is written, no record.
+            var failures = new Dictionary<string, SavedClipboard>
+            {
+                { "an enumeration error with a non-empty clipboard", judge("list 100 5 1418 100 0", allData) },
+                { "listed 0, counted 5 (the round-19 failure)", judge("list 100 5 0 100 0", allData) },
+                { "an enumeration error mid-list", judge("list 100 2 1418 100 1 " + entry(13, ""), allData) },
+                { "listed 2, counted 3", judge("list 100 3 0 100 2" + two, allData) },
+                { "declared 3, listed 2", judge("list 100 2 0 100 3" + two, allData) },
+                { "the sequence moved across the listing", judge("list 100 2 0 101 2" + two, allData) },
+                { "a zero sequence", judge("list 0 2 0 0 2" + two, allData) },
+                { "a lost hold during the listing", judge("lost", allData) },
+                { "a lost hold during a get", judge("list 100 2 0 100 2" + two, withExtra("lost")) },
+                { "every get none", judge("list 100 2 0 100 2" + two, (r) => "none " + r.Split(' ')[1] + " 100 1418") },
+                { "a get unlocked", judge("list 100 2 0 100 2" + two, withExtra("unlocked " + extra + " 100 5")) },
+                { "a GlobalSize of zero (nosize)", judge("list 100 2 0 100 2" + two, withExtra("nosize " + extra + " 100 0")) },
+                { "an oversize that is not over the cap", judge("list 100 2 0 100 2" + two, withExtra("oversize " + extra + " 100 1")) },
+                { "a late reply (out-of-order)", judge("out-of-order", allData) },
+                { "a truncated listing (EOF fragment)", judge("list 100 2", allData) },
+                { "busy", judge("busy", allData) },
+                { "an overrun", judge(null, allData) },
+                { "a get shorter than declared", judge("list 100 2 0 100 2" + two, withExtra("data " + extra + " 100 9 " + Convert.ToBase64String(new byte[] { 1 }))) },
+                { "a get for another format", judge("list 100 2 0 100 2" + two, (r) => data(13)) },
+                { "a get with a zero sequence", judge("list 100 2 0 100 2" + two, withExtra("data " + extra + " 0 3 " + Convert.ToBase64String(new byte[] { 1, 2, 3 }))) },
+                { "a token without a colon", judge("list 100 2 0 100 2 13" + " " + entry(extra, "DoodleNote.CI.Extra"), allData) },
+                { "a repeated format id", judge("list 100 2 0 100 2 " + entry(13, "") + " " + entry(13, ""), allData) },
+                { "a registered format without a name", judge("list 100 2 0 100 2 " + entry(13, "") + " " + entry(extra, ""), allData) }
+            };
+            foreach (var f in failures) Assert.Equal(null, f.Value, f.Key + ": not established (no write, no record)");
+            // Named skips: only a measured excess over the cap (or a format policy) still establishes the save.
+            SavedClipboard skipped = judge("list 100 2 0 100 2" + two, withExtra("oversize " + extra + " 100 999999999"));
+            Assert.Equal(true, skipped != null && skipped.Count == 1 && skipped.ReportedSkip, "one format measured over the cap: established, reported as skipped");
+            SavedClipboard allSkipped = judge("list 100 1 0 100 1 " + entry(extra, "DoodleNote.CI.Extra"), withExtra("oversize " + extra + " 100 999999999"));
+            Assert.Equal(true, allSkipped != null && allSkipped.Count == 0 && allSkipped.ReportedSkip && allSkipped.ListedCount == 1, "every format over the cap: zero items, but SKIPPED with its provenance, never an empty clipboard");
+        }
+
+        public static void EveryProofNeedsACompleteEnumeration()
+        {
+            // Round 21: the shared enumeration, with the native calls injected.
+            Func<uint[], int, int, bool> complete = (sequence, endError, counted) =>
+            {
+                int i = 0;
+                List<uint> got;
+                return ClipboardText.EnumerateComplete(f => i < sequence.Length ? sequence[i++] : 0u, () => endError, () => counted, out got);
+            };
+            uint sentinel = Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat);
+            Assert.Equal(true, complete(new uint[] { 13, sentinel }, 0, 2), "every format, ERROR_SUCCESS at the end, the count matches: complete");
+            // Astra scenario 1: a foreign format appended AFTER ours, the enumeration stopping before it: no proof (no restore).
+            Assert.Equal(false, complete(new uint[] { 13, sentinel }, 0, 3), "stopped before an appended foreign format (counted 3): incomplete");
+            Assert.Equal(false, complete(new uint[] { 13, sentinel }, 1418, 2), "ended with an error: incomplete");
+            // Astra scenario 2: saved A+B, now A matching, B changed, the enumeration failing after A: no deletion.
+            Assert.Equal(false, complete(new uint[] { 13 }, 1418, 2), "failed after A: incomplete (the record is not deleted as untouched)");
+            Assert.Equal(false, complete(new uint[] { 13, 13 }, 0, 2), "a repeated id: incomplete");
+            Assert.Equal(true, complete(new uint[0], 0, 0), "an empty clipboard, positively");
+            Assert.Equal(false, complete(new uint[0], 0, 4), "nothing listed but 4 counted: incomplete");
+        }
+
+        public static void ARecordThatCannotGoBackWholeIsNeverRestored()
+        {
+            // Round 21: on reading a record, a registered format with an empty name (or one that cannot be registered)
+            // and a metafile that cannot be rebuilt make the record INCOMPLETE: a put-back of it is never "restored"
+            // (so the user's Restore cannot delete it) and it is never "already on the clipboard".
+            Func<Action<System.IO.BinaryWriter>, SavedClipboard> read = (write) =>
+            {
+                var stream = new System.IO.MemoryStream();
+                using (var writer = new System.IO.BinaryWriter(stream, System.Text.Encoding.UTF8, true)) write(writer);
+                stream.Position = 0;
+                using (var reader = new System.IO.BinaryReader(stream, System.Text.Encoding.UTF8)) return SavedClipboard.ReadFrom(reader);
+            };
+            SavedClipboard noName = read(w =>
+            {
+                w.Write(2);
+                w.Write(13u); w.Write(""); w.Write(4); w.Write(new byte[] { 65, 0, 0, 0 });
+                w.Write(0xC123u); w.Write(""); w.Write(3); w.Write(new byte[] { 1, 2, 3 }); // a registered format with no name
+                w.Write(0); w.Write(false); w.Write(true); w.Write(false);
+            });
+            Assert.Equal("unrestored", noName.PutBackResult(true), "a registered format without a name: never restored (the record stays)");
+            Assert.Equal(false, noName.AllPresent(new List<uint> { 13 }), "and never already there");
+            SavedClipboard badEmf = read(w =>
+            {
+                w.Write(1);
+                w.Write(13u); w.Write(""); w.Write(4); w.Write(new byte[] { 65, 0, 0, 0 });
+                w.Write(5); w.Write(new byte[] { 1, 2, 3, 4, 5 }); // metafile bits that cannot be rebuilt
+                w.Write(false); w.Write(true); w.Write(false);
+            });
+            Assert.Equal("unrestored", badEmf.PutBackResult(true), "a metafile that cannot be rebuilt: never restored");
+            SavedClipboard whole = read(w =>
+            {
+                w.Write(1);
+                w.Write(13u); w.Write(""); w.Write(4); w.Write(new byte[] { 65, 0, 0, 0 });
+                w.Write(0); w.Write(false); w.Write(true); w.Write(false);
+            });
+            Assert.Equal("restored", whole.PutBackResult(true), "control: a whole record is restored");
         }
 
         public static void OfferOnlyRecordsAreNeverRestoredOnTheirOwn()
