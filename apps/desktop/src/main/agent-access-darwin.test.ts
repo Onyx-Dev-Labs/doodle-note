@@ -1772,3 +1772,78 @@ test('round 13: a close that fails is not repeated; its error stands and nothing
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('round 14: one removal attempt; a file that took the temporary name survives', (t) => {
+  // Astra round 10: the round-13 retry unlinked the same name again after a
+  // sleep, so a file another process created under it in the interval (ours
+  // moved aside) was deleted. One attempt: a refused removal leaves ours behind.
+  const realRename = fsModule.renameSync as (from: string, to: string) => void
+  const realWrite = fsModule.writeFileSync as (path: string, text: string, o: object) => void
+  const root = mkdtempSync(join(tmpdir(), 'dn-temp-reuse-'))
+  try {
+    const cases: { writer: Writer; after: string }[] = [
+      { writer: 'windows', after: 'a stale read' },
+      { writer: 'windows', after: 'a failed rename' },
+      { writer: 'darwin', after: 'a refused rename' }
+    ]
+    const outcomes: (() => void)[] = []
+    let n = 0
+    for (const c of cases) {
+      const label = `${c.writer}, after ${c.after}`
+      const folder = join(root, String(n++))
+      mkdirSync(folder)
+      const path = join(folder, 'config.json')
+      const aside = join(folder, 'moved-aside')
+      writeFileSync(path, '{"a":1}')
+      let attempts = 0
+      let result: boolean | string | null = null
+      withFsHook(
+        (name, args) => {
+          if (name === 'unlinkSync' && String(args[0]).endsWith('.tmp')) {
+            if (attempts++ === 0) {
+              // Refused; meanwhile ours is moved aside and FOREIGN takes the name.
+              realRename(String(args[0]), aside)
+              realWrite(String(args[0]), 'FOREIGN', { flag: 'wx' })
+              throw fsError('EPERM')
+            }
+          }
+          // Windows: thrown (not a sharing refusal); darwin: the base's write.
+          if (name === 'renameSync' && c.after !== 'a stale read') throw fsError('EXDEV')
+        },
+        () => {
+          try {
+            if (c.writer === 'darwin') replaceConfigFileBase(path, '{"b":2}')
+            else
+              result = replaceConfigFile(
+                path,
+                c.after === 'a stale read' ? '{"stale":1}' : '{"a":1}',
+                '{"b":2}'
+              )
+          } catch (error) {
+            result = (error as NodeJS.ErrnoException).code ?? null
+          }
+        }
+      )
+      const left = temporaries(folder)
+      const foreign = left.length === 1 ? readFileSync(join(folder, left[0]), 'utf8') : null
+      t.diagnostic(
+        `${label}: ${attempts} removal attempt(s), foreign ${foreign ?? 'gone'}, ${result}`
+      )
+      outcomes.push(() => {
+        assert.equal(attempts, 1, `${label}: one removal attempt`)
+        assert.deepEqual([left.length, foreign], [1, 'FOREIGN'], `${label}: the foreign file`)
+        assert.equal(readFileSync(aside, 'utf8'), '{"b":2}', `${label}: ours left behind`)
+        // The write's own result stands.
+        if (c.writer === 'darwin') assert.equal(readFileSync(path, 'utf8'), '{"b":2}', label)
+        else {
+          assert.equal(result, c.after === 'a stale read' ? false : 'EXDEV', label)
+          assert.equal(readFileSync(path, 'utf8'), '{"a":1}', label)
+        }
+      })
+    }
+    // Asserted after every case has run, so each one's diagnostic is shown.
+    for (const check of outcomes) check()
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

@@ -175,9 +175,9 @@ export const TEMPORARY_ATTEMPTS = 8
 
 /**
  * Creates a temporary file beside `target` (temporaryBeside; 'wx', so never one
- * that exists) and returns its path and open descriptor. Only a file returned
- * here belongs to the write, and only such a file is ever removed (round 12: a
- * name that was taken is someone else's file). A taken name (EEXIST) is retried
+ * that exists) and returns its path and open descriptor. Only a name returned
+ * here was created by the write, and only such a name is ever removed (round 12:
+ * a name that was taken is someone else's file). A taken name (EEXIST) is retried
  * with a fresh one, TEMPORARY_ATTEMPTS names in all, then EEXIST is thrown; any
  * other error is thrown at once. Nothing is created when it throws.
  */
@@ -194,8 +194,13 @@ export function createTemporaryBeside(target: string, mode: number): { path: str
 }
 
 /**
- * Removes a temporary file this write created (createTemporaryBeside), never
- * another. A failure is not reported (the write's own result stands): the file
+ * Removes the temporary file at `path`, a name this write created itself with an
+ * exclusive create (createTemporaryBeside), by that name: one attempt (round 14:
+ * no retry), and the file is not identified again first. So a same-user process
+ * that replaces the file under that random name in the interval (moves ours
+ * aside and creates its own there) would have its file removed, and before the
+ * rename, its file would be the one renamed over the config: a disclosed
+ * residual. A failure is not reported (the write's own result stands): the file
  * then remains, `.dn-<8 hex>.tmp` in the config's folder.
  */
 function removeOwnTemporary(path: string): void {
@@ -209,8 +214,8 @@ function removeOwnTemporary(path: string): void {
 /**
  * Windows: replaces a client config file atomically: the new text goes to a
  * temporary file beside it (same folder, so the rename stays on one volume; a short
- * name, createTemporaryBeside: never an existing file, and only the file it created
- * is removed) with the original's mode (a new file: 0600), and is renamed over it.
+ * name, createTemporaryBeside: never an existing file, and only a name it created
+ * is removed, removeOwnTemporary) with the original's mode (a new file: 0600), and is renamed over it.
  * A temporary file whose removal fails remains (removeOwnTemporary). Clients such as Claude Code rewrite their file
  * often, so the file is read again just before the rename; when it is no longer
  * `expected` (null: it did not exist) nothing is written and false is returned so
@@ -254,7 +259,7 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
       }
     }
   } catch (error) {
-    // Not renamed (the rename is the last step): still this write's own file.
+    // Not renamed (the rename is the last step): still the name this write created.
     removeOwnTemporary(temporary)
     throw error
   }
@@ -298,8 +303,11 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * written or created.
  *
  * The temporary file is created exclusively (createTemporaryBeside: a taken name
- * is retried with a fresh one, then the base's write decides), and only a file
- * this write created is removed: never one another writer holds (round 12).
+ * is retried with a fresh one, then the base's write decides), and only a name
+ * this write created is removed, never one that was taken (round 12); the removal
+ * is by name, one attempt, without identifying the file again (removeOwnTemporary:
+ * a same-user process that replaces the file under that name meanwhile is the
+ * disclosed residual, round 14).
  *
  * What remains (the concurrency contract, tested where it can be): a change to
  * the file's mode bits made in the interval between the last fstat (the

@@ -641,9 +641,14 @@ to the name inside its folder's real path, where `writeFileSync` would create it
 where that cannot be determined, nothing is written), only when their content changes, and not at all if
 the client rewrote the file in the meantime (the update starts over from the new
 text). A temporary file whose removal fails stays beside the config as
-`.dn-<8 hex>.tmp` (not reported; the write's own result stands). Round 13: a
-removal refused while another process, such as a virus scanner, holds the new
-file is retried first, as the rename is (5 more attempts, 50 ms apart).
+`.dn-<8 hex>.tmp` (not reported; the write's own result stands). The removal is
+one attempt (round 14: round 13's retry of a refused removal is reverted, since it
+removed the same name again without knowing it still held our file). It removes
+the temporary file by its name, a name this write created itself with an
+exclusive create, and does not identify the file again first. **Residual
+(disclosed):** a same-user process that replaces the file under that random name
+in the interval (moves ours aside and creates its own there) would have its file
+removed, or, before the rename, renamed over the config.
 
 Those rules, and the strict Codex reading (a `config.toml` the TOML 1.0 statement
 scanner cannot read is refused and left unchanged; every definition of our server
@@ -678,8 +683,10 @@ with the config empty or cut short (or, rarely, succeeded in the blocks it had
 just freed); the macOS build fails with the config intact. The temporary file's name is short and fixed
 (`.dn-<8 hex>.tmp`), whatever the config is called, so it no longer names its
 config (the accepted cost of round 11's B2). It is created exclusively; a taken
-name is drawn again (8 names in all), and only a file this write created is ever
-removed (round 12: round 11 removed a taken name's file, someone else's).
+name is drawn again (8 names in all), and only a name this write created is ever
+removed (round 12: round 11 removed a taken name's file, someone else's), by that
+name, one attempt, without identifying the file again (the same residual as on
+Windows above).
 Concurrency contract (tested where it can be): a change to the file's mode bits
 made before that open behaves as for the base (the base's write decides); one made
 after it is kept on the new file; one made in the interval between the last
