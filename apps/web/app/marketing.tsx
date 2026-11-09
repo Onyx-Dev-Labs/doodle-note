@@ -50,6 +50,7 @@ export function MarketingHeader() {
         <a href="/#bark">Bark</a>
         <Link href="/#how-it-works">How it works</Link>
         <Link href="/pricing">Pricing</Link>
+        <Link href="/help">Docs</Link>
       </nav>
       <div className="header-actions">
         <GitHubLink />
@@ -71,6 +72,7 @@ export function MarketingFooter() {
         <a href="/#bark">Bark</a>
         <Link href="/pricing">Pricing</Link>
         <Link href="/changelog">What’s new</Link>
+        <Link href="/help">Help &amp; guides</Link>
         <Link href="/contact">Contact</Link>
         <Link href="/privacy">Privacy</Link>
         <Link href="/terms">Terms</Link>

@@ -145,13 +145,16 @@ export function BrandLockup({
 /** Marketing-page header. Pass `nav` to swap the right side per page. */
 export function SiteHeader({ nav }: { nav?: React.ReactNode }) {
   return (
-    <header className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-5">
+    <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-4 px-6 py-5">
       <BrandLockup priority />
       <nav className="flex items-center gap-1 sm:gap-2">
         {nav ?? (
           <>
             <Link href="/pricing" className={navLinkClass}>
               Pricing
+            </Link>
+            <Link href="/help" className={navLinkClass}>
+              Docs
             </Link>
             <GitHubNavLink />
             <Link href="/login" className={navPillClass}>
@@ -175,6 +178,9 @@ export function SiteFooter() {
           </Link>
           <Link href="/changelog" className="whitespace-nowrap hover:text-ink">
             What&rsquo;s new
+          </Link>
+          <Link href="/help" className="whitespace-nowrap hover:text-ink">
+            Help &amp; guides
           </Link>
           <Link href="/contact" className="whitespace-nowrap hover:text-ink">
             Contact

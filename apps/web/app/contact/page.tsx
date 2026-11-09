@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { SiteFooter, SiteHeader } from "../ui";
 import { ContactForm } from "./contact-form";
@@ -27,6 +28,16 @@ export default function ContactPage() {
               email.
             </p>
             <div className="mt-8 border-l-2 border-sage pl-4 text-sm leading-relaxed text-stone">
+              <p className="mb-4">
+                Looking for a walkthrough?{" "}
+                <Link
+                  href="/help"
+                  className="font-medium text-sage-deep underline underline-offset-2"
+                >
+                  Browse Help &amp; guides
+                </Link>{" "}
+                for setup, recording, Bark, and Cloud Sync.
+              </p>
               Prefer email? Write directly to{" "}
               <a
                 href="mailto:team@onyxdev.io"

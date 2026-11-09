@@ -11,6 +11,7 @@ const navItems = [
   { href: "/app/shared", label: "Shared" },
   { href: "/app/settings/sync", label: "Settings" },
   { href: "/app/settings/workspace", label: "Teams" },
+  { href: "/help", label: "Help & guides" },
 ];
 
 export function AppHeader({
