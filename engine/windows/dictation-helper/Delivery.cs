@@ -1499,11 +1499,23 @@ namespace DoodleNote.DictationHelper
         /// each step and ERROR_SUCCESS at the end, no repeated id, and as many formats as CountClipboardFormats counts in
         /// the same open. False ("incomplete") means no proof of anything: no automatic restore, no "untouched" deletion.
         /// </summary>
-        public static bool EnumerateComplete(out List<uint> formats)
+        public static bool EnumerateComplete(out List<uint> formats, string site = null)
         {
-            return EnumerateComplete(delegate (uint f) { Native.ClearLastError(0); return Native.EnumClipboardFormats(f); },
+            bool complete = EnumerateComplete(delegate (uint f) { Native.ClearLastError(0); return Native.EnumClipboardFormats(f); },
                 delegate { return Marshal.GetLastWin32Error(); }, delegate { return Native.CountClipboardFormats(); }, out formats);
+#if DICTATION_TEST
+            // Test build only (round 22): the enumeration at a named call site reports INCOMPLETE (with what it did list),
+            // so each destructive caller is shown to refuse. Sites: confirm, still-there, matches, view, bytes.
+            string forced = IncompleteAt ?? TestMode.Env("DICTATION_HELPER_TEST_ENUM_INCOMPLETE");
+            if (site != null && forced != null && ("," + forced + ",").Contains("," + site + ",")) return false;
+#endif
+            return complete;
         }
+
+#if DICTATION_TEST
+        /// <summary>Unit tests: the call sites whose enumeration reports incomplete (comma-separated), or null.</summary>
+        internal static string IncompleteAt = null;
+#endif
 
         /// <summary>The rule, with the native calls injected (unit-tested).</summary>
         internal static bool EnumerateComplete(Func<uint, uint> next, Func<int> lastError, Func<int> count, out List<uint> formats)
@@ -1525,7 +1537,7 @@ namespace DoodleNote.DictationHelper
             if (foreignOwner) return -1;
             long total = 0;
             List<uint> present;
-            if (!EnumerateComplete(out present)) return -1; // display only: unknown
+            if (!EnumerateComplete(out present, "bytes")) return -1; // display only: unknown
             foreach (uint f in present)
             {
                 if (SavedClipboard.MaybeSynthesized(f) || f == 2 || f == 3 || f == 9 || f == 14) continue;
@@ -1717,7 +1729,7 @@ namespace DoodleNote.DictationHelper
                 if (record == null || record.DictatedHash == null) { Rejected = true; RejectedWhy = "nothing to compare against"; return; }
                 List<uint> present;
                 // An enumeration that is not complete is no proof: a rejection, as a failed read is.
-                if (!ClipboardText.EnumerateComplete(out present)) { Rejected = true; RejectedWhy = "the enumeration was not complete"; return; }
+                if (!ClipboardText.EnumerateComplete(out present, "confirm")) { Rejected = true; RejectedWhy = "the enumeration was not complete"; return; }
                 int synthesized = 0;
                 foreach (uint f in present) if (SavedClipboard.MaybeSynthesized(f) && !ClipboardText.OurWriteFormat(f)) synthesized++;
                 // Exactly our write: every present format's BYTES ours (our text, our markers, the sentinel) or Windows' from
@@ -1831,6 +1843,7 @@ namespace DoodleNote.DictationHelper
         bool reportedSkip;
         /// <summary>A privacy marker was on the clipboard but could not be read, so set it conservatively on restore.</summary>
         bool forceMarkers;
+        internal bool ForceMarkers { get { return forceMarkers; } }
         static readonly HashSet<string> Markers = new HashSet<string>(ClipboardText.MarkerNames, StringComparer.OrdinalIgnoreCase);
 
         const uint CF_SYLK = 4, CF_DIF = 5, CF_TIFF = 6, CF_PENDATA = 10, CF_RIFF = 11, CF_WAVE = 12, CF_METAFILEPICT = 3;
@@ -2434,7 +2447,7 @@ namespace DoodleNote.DictationHelper
         public bool MatchesOpenClipboard()
         {
             List<uint> present;
-            if (!ClipboardText.EnumerateComplete(out present)) return false; // incomplete: no proof (no "untouched" deletion)
+            if (!ClipboardText.EnumerateComplete(out present, "matches")) return false; // incomplete: no proof (no "untouched" deletion)
             byte[] emf = null;
             if (metafile != IntPtr.Zero)
             {
@@ -2566,7 +2579,7 @@ namespace DoodleNote.DictationHelper
             if (offerOnly) return false;
             if (Record == null || Record.DictatedHash == null || ours.Owner == IntPtr.Zero || Native.GetClipboardOwner() != ours.Owner) return false;
             List<uint> present;
-            if (!ClipboardText.EnumerateComplete(out present)) return false; // incomplete: no proof, no automatic restore
+            if (!ClipboardText.EnumerateComplete(out present, "still-there")) return false; // incomplete: no proof, no automatic restore
             if (ClipboardText.ClassifyOurWrite(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, Record.Id, Record.Nonce, Record.DictatedHash, ours.ExpectedForms()) != OurWrite.Complete) return false;
             // And at a sequence our close explains (as the confirmation requires).
             int synthesized = 0;

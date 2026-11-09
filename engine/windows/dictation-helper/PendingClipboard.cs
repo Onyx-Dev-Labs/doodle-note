@@ -1617,7 +1617,7 @@ namespace DoodleNote.DictationHelper
             view.OwnerAlive = owner != IntPtr.Zero && Native.IsWindow(owner);
             view.Sequence = ClipboardText.Sequence("view");
             List<uint> present;
-            if (!ClipboardText.EnumerateComplete(out present))
+            if (!ClipboardText.EnumerateComplete(out present, "view"))
             {
                 // Incomplete (round 21): no proof of anything: not our write, not the saved content (offered, never deleted).
                 view.FormatCount = present.Count;

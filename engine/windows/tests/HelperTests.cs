@@ -845,6 +845,161 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(true, allSkipped != null && allSkipped.Count == 0 && allSkipped.ReportedSkip && allSkipped.ListedCount == 1, "every format over the cap: zero items, but SKIPPED with its provenance, never an empty clipboard");
         }
 
+        public static void TheThreeClassesOfFormatsASaveCannotRead()
+        {
+            // Round 22, the owner decision. Hooked reader replies as in TheSaveIsWrittenOverOnlyWhenPositivelyEstablished.
+            uint extra = Native.RegisterClipboardFormat("DoodleNote.CI.Extra");
+            uint ignore = Native.RegisterClipboardFormat("Clipboard Viewer Ignore");
+            uint column = Native.RegisterClipboardFormat("MSDEVColumnSelect");
+            uint marker = Native.RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing");
+            Func<uint, string, string> entry = (f, name) => f + ":" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(name));
+            Func<uint, string> data = (f) => "data " + f + " 100 3 " + Convert.ToBase64String(new byte[] { 1, 2, 3 });
+            var asked = new List<string>();
+            Func<string, Func<string, string>, bool, SavedClipboard> judge = (listReply, getReply, allowUnrendered) =>
+            {
+                bool retry; string line;
+                asked.Clear();
+                return SavedClipboard.Judge((request, ms) => { asked.Add(request); return request == "list" ? listReply : getReply(request); }, 1500, () => 100u, out retry, out line, allowUnrendered);
+            };
+            Func<uint, string, Func<string, string>> only = (f, reply) => (request) => request.Contains(" " + f + " ") ? reply : data(uint.Parse(request.Split(' ')[1]));
+            string text = " " + entry(13, "");
+            // Class 1: the known presence-only formats are never read; saved and put back as presence only.
+            SavedClipboard flags = judge("list 100 3 0 100 3" + text + " " + entry(ignore, "Clipboard Viewer Ignore") + " " + entry(column, "MSDEVColumnSelect"), (r) => data(13), false);
+            Assert.Equal(true, flags != null && flags.Count == 1 && flags.FormatCount == 3 && flags.Has(ignore) && flags.Has(column) && !flags.ReportedSkip, "class 1: presence-only formats saved as presence only, the save whole");
+            Assert.Equal(false, asked.Exists(r => r.Contains(" " + ignore + " ") || r.Contains(" " + column + " ")), "class 1: a presence-only format is never read (its data is not used)");
+            // Class 2: a privacy marker not read cleanly forces the conservative markers (first attempt too).
+            foreach (string reply in new[] { "none " + marker + " 100 1418", "nosize " + marker + " 100 0", "unlocked " + marker + " 100 5" })
+            {
+                SavedClipboard marked = judge("list 100 2 0 100 2" + text + " " + entry(marker, "ExcludeClipboardContentFromMonitorProcessing"), only(marker, reply), false);
+                Assert.Equal(true, marked != null && marked.ForceMarkers && marked.PrivacyMarked && marked.Count == 1, "class 2 (" + reply.Split(' ')[0] + "): established, the exclusion markers forced");
+            }
+            // Class 3: an owner-unrendered format beside content that goes back: strict on the first attempt, a NAMED reported
+            // skip on the second.
+            string withExtra = "list 100 2 0 100 2" + text + " " + entry(extra, "DoodleNote.CI.Extra");
+            foreach (string reply in new[] { "none " + extra + " 100 1418", "nosize " + extra + " 100 0", "unlocked " + extra + " 100 5" })
+            {
+                Assert.Equal(null, judge(withExtra, only(extra, reply), false), "class 3 (" + reply.Split(' ')[0] + "), first attempt: not established");
+                SavedClipboard skipped = judge(withExtra, only(extra, reply), true);
+                Assert.Equal(true, skipped != null && skipped.Count == 1 && skipped.ReportedSkip, "class 3 (" + reply.Split(' ')[0] + "), second attempt: established, reported as skipped");
+                Assert.Equal("DoodleNote.CI.Extra (not provided by the app that copied it)", string.Join("|", skipped.Missing().ToArray()), "class 3: the skipped format is named, with its reason");
+                Assert.Equal(true, skipped.Incomplete, "and the save is incomplete (an offer of it says so)");
+            }
+            // The limit: nothing with data provided, so nothing would come back: never established (the clipboard is left alone).
+            Assert.Equal(null, judge("list 100 1 0 100 1 " + entry(extra, "DoodleNote.CI.Extra"), (r) => "none " + extra + " 100 1418", true), "class 3 limit: no format with data provided: not established");
+            // Everything else stays NOT ESTABLISHED on the second attempt too.
+            Assert.Equal(null, judge(withExtra, only(extra, "lost"), true), "a lost hold: not established");
+            Assert.Equal(null, judge(withExtra, only(extra, "busy"), true), "busy: not established");
+            Assert.Equal(null, judge(withExtra, only(extra, "unresponsive"), true), "an unresponsive owner: not established");
+            Assert.Equal(null, judge(withExtra, only(extra, "out-of-order"), true), "a framing error: not established");
+            Assert.Equal(null, judge("list 100 3 0 100 2" + text + " " + entry(extra, "DoodleNote.CI.Extra"), only(extra, "none " + extra + " 100 1418"), true), "listed != counted: not established");
+            Assert.Equal(null, judge("list 100 2 1418 100 2" + text + " " + entry(extra, "DoodleNote.CI.Extra"), only(extra, "none " + extra + " 100 1418"), true), "an enumeration error: not established");
+            Assert.Equal(null, judge(withExtra, only(extra, "none " + extra + " 101 1418"), true), "the sequence moved: not established");
+            // S5 / F9: the reply kinds are bound to the format; ids are bounded.
+            Assert.Equal(null, judge("list 100 1 0 100 1" + text, (r) => "emf 13 100 3 " + Convert.ToBase64String(new byte[] { 1, 2, 3 }), true), "an \"emf\" reply for CF_UNICODETEXT: not established");
+            Assert.Equal(null, judge("list 100 1 0 100 1 " + entry(14, ""), (r) => data(14), true), "a \"data\" reply for CF_ENHMETAFILE: not established");
+            Assert.Equal(null, judge("list 100 1 0 100 1 " + entry(0x10000, ""), (r) => data(0x10000), true), "a format id above 0xFFFF: not established");
+            // S4: no time left: no request at all.
+            bool r4; string l4;
+            int requests = 0;
+            Assert.Equal(null, SavedClipboard.Judge((request, ms) => { requests++; return "list 100 0 0 100 0"; }, 0, () => 100u, out r4, out l4), "no time left: not established");
+            Assert.Equal(0, requests, "and no listing was requested");
+        }
+
+        public static void WhatASaveCouldNotKeepIsWrittenDownAndReadBack()
+        {
+            Func<SavedClipboard, SavedClipboard> roundTrip = (saved) =>
+            {
+                var stream = new System.IO.MemoryStream();
+                using (var writer = new System.IO.BinaryWriter(stream, System.Text.Encoding.UTF8, true)) saved.WriteTo(writer);
+                stream.Position = 0;
+                using (var reader = new System.IO.BinaryReader(stream, System.Text.Encoding.UTF8)) return SavedClipboard.ReadFrom(reader);
+            };
+            uint extra = Native.RegisterClipboardFormat("DoodleNote.CI.Extra");
+            uint ignore = Native.RegisterClipboardFormat("Clipboard Viewer Ignore");
+            Func<uint, string, string> entry = (f, name) => f + ":" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(name));
+            bool retry; string line;
+            SavedClipboard skipped = SavedClipboard.Judge((request, ms) => request == "list"
+                    ? "list 100 3 0 100 3 " + entry(13, "") + " " + entry(extra, "DoodleNote.CI.Extra") + " " + entry(ignore, "Clipboard Viewer Ignore")
+                    : request.Contains(" " + extra + " ") ? "none " + extra + " 100 1418" : "data 13 100 4 " + Convert.ToBase64String(new byte[] { 65, 0, 0, 0 }),
+                1500, () => 100u, out retry, out line, true);
+            Assert.Equal(true, skipped != null, "the save is established (class 3): " + line);
+            SavedClipboard back = roundTrip(skipped);
+            Assert.Equal(3, back.ListedCount, "provenance: the listed count is written down");
+            Assert.Equal("DoodleNote.CI.Extra (not provided by the app that copied it)", string.Join("|", back.Missing().ToArray()), "provenance: what was not kept is written down, by name and reason");
+            Assert.Equal(true, back.Has(ignore) && back.FormatCount == 2, "the presence-only format round-trips as presence only");
+            Assert.Equal("skipped", back.PutBackResult(true), "a put-back of it is never \"restored\"");
+            // B2: an EMF whose bytes are not available is written as LOST, never as absent, and read back incomplete.
+            SavedClipboard lostEmf = SavedClipboard.ForTest(new[] { new KeyValuePair<uint, byte[]>(13, new byte[] { 65, 0, 0, 0 }) }, false);
+            lostEmf.metafileExpected = true;
+            SavedClipboard lostBack = roundTrip(lostEmf);
+            Assert.Equal("unrestored", lostBack.PutBackResult(true), "B2: an EMF written as lost: never restored (the record stays)");
+            Assert.Equal(true, lostBack.Incomplete && lostBack.Missing().Contains("CF_ENHMETAFILE (it could not be written down)"), "B2: and it says what is missing");
+            Assert.Equal("unrestored", roundTrip(lostBack).PutBackResult(true), "B2: written down again, still lost (never absent)");
+            // A whole save: nothing missing.
+            SavedClipboard whole = roundTrip(SavedClipboard.ForTest(new[] { new KeyValuePair<uint, byte[]>(13, new byte[] { 65, 0, 0, 0 }) }, false));
+            Assert.Equal(true, !whole.Incomplete && whole.Missing().Count == 0 && whole.PutBackResult(true) == "restored", "control: a whole save is restored, nothing missing");
+            // The delivery's reply names what was not put back; an unsaved clipboard is said.
+            DeliveryResult result = new DeliveryResult(DeliveryOutcome.Delivered, null) { Clipboard = "skipped" };
+            Delivery.ClipboardNotes(result, skipped, false);
+            Assert.Equal("DoodleNote.CI.Extra (not provided by the app that copied it)", result.ClipboardMissing == null ? null : string.Join("|", result.ClipboardMissing.ToArray()), "the reply names the skipped format");
+            DeliveryResult notSaved = new DeliveryResult(DeliveryOutcome.Delivered, null) { Clipboard = "untouched" };
+            Delivery.ClipboardNotes(notSaved, null, true);
+            Assert.Equal("not-saved", notSaved.ClipboardNotice, "a clipboard that could not be saved: the reply says so");
+        }
+
+        public static void AFailedLivenessQueryIsUnknownNeverNotRunning()
+        {
+            Assert.Equal(PendingClipboard.Liveness.NotRunning, PendingClipboard.HelperLiveness(0), "no pid: not running");
+            Assert.Equal(PendingClipboard.Liveness.NotRunning, PendingClipboard.HelperLiveness(int.MaxValue - 1), "no such process: not running (proven)");
+            using (System.Diagnostics.Process self = System.Diagnostics.Process.GetCurrentProcess())
+            {
+                Assert.Equal(PendingClipboard.Liveness.Running, PendingClipboard.HelperLiveness(self.Id, self.StartTime.ToUniversalTime().Ticks), "this process at its start time: running");
+                Assert.Equal(PendingClipboard.Liveness.NotRunning, PendingClipboard.HelperLiveness(self.Id, self.StartTime.ToUniversalTime().Ticks - TimeSpan.TicksPerHour), "another start time: a reused pid, not running");
+            }
+        }
+
+        public static void EveryDestructiveCallerRefusesAnIncompleteEnumeration()
+        {
+            // Round 22: one call site at a time reports an incomplete enumeration (test build); each refuses its proof.
+            var window = new System.Windows.Forms.NativeWindow();
+            var parameters = new System.Windows.Forms.CreateParams();
+            parameters.Parent = new IntPtr(-3); // HWND_MESSAGE
+            window.CreateHandle(parameters);
+            try
+            {
+                bool opened = false;
+                for (int i = 0; i < 50 && !(opened = Native.OpenClipboard(window.Handle)); i++) System.Threading.Thread.Sleep(20);
+                Assert.True(opened, "the test opens the clipboard with its own window");
+                try
+                {
+                    Assert.True(Native.EmptyClipboard(), "emptied");
+                    byte[] text = System.Text.Encoding.Unicode.GetBytes("incomplete enumeration\0");
+                    Assert.True(ClipboardText.SetBytes(13, text), "CF_UNICODETEXT set");
+                    SavedClipboard saved = SavedClipboard.ForTest(new[] { new KeyValuePair<uint, byte[]>(13, text) }, false);
+                    string id = new string('0', 32);
+                    ClipboardText.IncompleteAt = null;
+                    Assert.Equal(true, saved.MatchesOpenClipboard(), "control: the clipboard holds exactly the saved content");
+                    ClipboardView whole = ClipboardView.Read(saved, id, "n", new byte[32]);
+                    Assert.Equal(false, whole.Incomplete, "control: the view's enumeration is complete");
+                    Assert.Equal(true, ClipboardText.OpenClipboardBytes(false) > 0, "control: the size is known");
+                    ClipboardText.IncompleteAt = "matches";
+                    Assert.Equal(false, saved.MatchesOpenClipboard(), "MatchesOpenClipboard: incomplete, no proof the saved content is there");
+                    ClipboardText.IncompleteAt = "view";
+                    ClipboardView view = ClipboardView.Read(saved, id, "n", new byte[32]);
+                    Assert.Equal(true, view.Incomplete, "ClipboardView.Read: incomplete");
+                    Assert.Equal(false, PendingClipboard.Decide(new RecordFacts { Stage = "written", SequenceAtStage = 7, SequenceAfterWrite = 7 }, view, LogonMatch.Same) == PendingClipboard.RecoveryVerdict.Untouched, "the recovery: never untouched (never deleted) on an incomplete view");
+                    ClipboardText.IncompleteAt = "bytes";
+                    Assert.Equal(-1L, ClipboardText.OpenClipboardBytes(false), "OpenClipboardBytes: unknown, never a smaller size");
+                }
+                finally
+                {
+                    ClipboardText.IncompleteAt = null;
+                    Native.CloseClipboard();
+                }
+            }
+            finally { window.DestroyHandle(); }
+        }
+
         public static void EveryProofNeedsACompleteEnumeration()
         {
             // Round 21: the shared enumeration, with the native calls injected.

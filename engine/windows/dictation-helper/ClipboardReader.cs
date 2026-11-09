@@ -144,6 +144,7 @@ namespace DoodleNote.DictationHelper
                 string hook = TestMode.Env("DICTATION_HELPER_TEST_READER") ?? "";
                 // Test build only: a stray line before the reply (a late reply), or a fragment and then the end (EOF).
                 if (hook == "stray-line") reply = "0 list 1 0 0 0 0 1 0 end\n" + reply;
+                if (hook == "empty-reply") reply = id + " end"; // round 22 (F9): nothing between the id and the end
                 if (hook == "fragment-list" && reply.Contains(" list ")) { WriteRaw(output, reply.Substring(0, reply.Length / 2)); return 3; }
 #endif
                 bool written = WriteRaw(output, reply + "\n");
