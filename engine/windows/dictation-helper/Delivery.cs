@@ -2491,6 +2491,17 @@ namespace DoodleNote.DictationHelper
         }
 
         public int Count { get { return items.Count; } }
+        /// <summary>Round 24: how many kept formats are the user's content (the one rule; IsUserContent).</summary>
+        public int UserContentCount
+        {
+            get
+            {
+                int count = metafile != IntPtr.Zero ? 1 : 0; // an EMF lost on read-back is no content that can go back
+                foreach (KeyValuePair<uint, byte[]> item in items)
+                    if (IsUserContent(item.Key, item.Key >= 0xC000 ? FormatName(item.Key) : "")) count++;
+                return count;
+            }
+        }
         /// <summary>How many formats the save kept (an offer shows formats and size only).</summary>
         public int FormatCount { get { return items.Count + presenceOnly.Count + (metafile != IntPtr.Zero ? 1 : 0); } }
         /// <summary>The saved bytes (an offer shows formats and size only).</summary>

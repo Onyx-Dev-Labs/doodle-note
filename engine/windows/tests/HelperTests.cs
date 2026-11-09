@@ -1057,6 +1057,17 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(false, SavedClipboard.ForTest(new[] { text }, false, true, true).Incomplete == false, "and it is incomplete (its Restore says restored-partially)");
         }
 
+        public static void OnlyUserContentCountsAsRestorable()
+        {
+            // Round 24 (Opus, the one rule at the user's Restore): CF_LOCALE, markers and flags are no content to put back.
+            uint marker = Native.RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing");
+            var locale = new KeyValuePair<uint, byte[]>(16, new byte[] { 9, 4, 0, 0 });
+            var text = new KeyValuePair<uint, byte[]>(13, new byte[] { 65, 0, 0, 0 });
+            var mark = new KeyValuePair<uint, byte[]>(marker, new byte[] { 0 });
+            Assert.Equal(0, SavedClipboard.ForTest(new[] { locale, mark }, true).UserContentCount, "CF_LOCALE and a marker: nothing to put back");
+            Assert.Equal(1, SavedClipboard.ForTest(new[] { locale, text }, false).UserContentCount, "the text is content");
+        }
+
         public static void ARecordThatCannotGoBackWholeIsNeverRestored()
         {
             // Round 21: on reading a record, a registered format with an empty name (or one that cannot be registered)

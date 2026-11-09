@@ -78,6 +78,9 @@ namespace DoodleNote.DictationHelper
         /// <summary>Round 22 (S3): part of this clipboard could not be saved or read back; Missing names what (the card says so).</summary>
         public bool Incomplete;
         public List<string> Missing = new List<string>();
+        /// <summary>Round 24 (Opus): how many formats with the user's CONTENT a Restore can put back (Formats also counts
+        /// flags and CF_LOCALE).</summary>
+        public int Content;
         /// <summary>The first offer's tick and boot (kept in memory too, in case the state file could not take them).</summary>
         public long Tick;
         public string Boot = "";
@@ -86,7 +89,7 @@ namespace DoodleNote.DictationHelper
         {
             return Wire.Fields("record", Record, "delivery", Delivery ?? "", "formats", Formats, "bytes", (double)Bytes,
                 "sequence", (double)Sequence, "created", Created.ToString("o"), "likelyOurs", LikelyOurs,
-                "incomplete", Incomplete, "missing", Missing);
+                "incomplete", Incomplete, "missing", Missing, "content", Content);
         }
     }
 
@@ -1035,6 +1038,17 @@ namespace DoodleNote.DictationHelper
                     Offer(id, facts, saved, view);
                     return "the user's restore: the clipboard changed since the offer (" + seen + "); asked again";
                 }
+                // Round 24 (Opus, the one rule at the user's Restore): an incomplete record with NO user content (an
+                // all-skipped record of an earlier build, or one whose only content format was lost on read-back) would
+                // empty the user's clipboard and put back nothing: refused, with the reason; nothing emptied.
+                if (saved.Incomplete && saved.UserContentCount == 0)
+                {
+                    result = RecoverResult.Pending;
+                    reply["result"] = "nothing-to-restore";
+                    reply["missing"] = saved.Missing();
+                    Offer(id, facts, saved, view);
+                    return "the user's restore: nothing with the user's content can go back; nothing emptied, kept (Dismiss deletes it)";
+                }
                 // Round 22 (S3): part of it could not be saved or read back. Nothing is emptied unless the user was told
                 // exactly what is missing (the card shows it and the app says so with acceptIncomplete).
                 if (saved.Incomplete && !acceptIncomplete)
@@ -1293,7 +1307,8 @@ namespace DoodleNote.DictationHelper
             {
                 Record = id, Delivery = facts.Delivery, Formats = saved.FormatCount, Bytes = saved.ByteCount,
                 Sequence = facts.OfferedSequence, Created = facts.CreatedUtc, LikelyOurs = view.LooksInterrupted,
-                Tick = facts.OfferedTick, Boot = facts.OfferedBoot, Incomplete = saved.Incomplete, Missing = saved.Incomplete ? saved.Missing() : new List<string>()
+                Tick = facts.OfferedTick, Boot = facts.OfferedBoot, Incomplete = saved.Incomplete, Missing = saved.Incomplete ? saved.Missing() : new List<string>(),
+                Content = saved.UserContentCount
             };
             if (offers.ContainsKey(id)) return; // already announced by this helper: unchanged (the app lists offers itself)
             offers[id] = offer;
