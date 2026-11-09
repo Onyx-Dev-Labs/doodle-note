@@ -538,7 +538,7 @@ namespace DoodleNote.DictationHelper
                         int error = Marshal.GetLastWin32Error();
                         handle.Dispose();
                         if (error == 2 || error == 3) continue; // gone meanwhile (ERROR_FILE_NOT_FOUND / PATH_NOT_FOUND)
-                        Wire.Log(Path.GetFileName(path) + " is held by another process (error " + error + "): nothing deleted, the record is kept whole");
+                        Wire.Log(Path.GetFileName(path) + " could not be opened for deletion (error " + error + ": held by another process, or already pending deletion): nothing more is deleted now; what is there stays");
                         return false;
                     }
                     held.Add(handle);
@@ -568,7 +568,7 @@ namespace DoodleNote.DictationHelper
                     completing = true;
                     for (int k = 0; k < held.Count; k++)
                         if (!Native.SetFileInformationByHandle(held[k], Native.FileDispositionInfo, ref mark, 1))
-                            Wire.Log("ERROR: handle " + (k + 1) + " could not be marked again (error " + Marshal.GetLastWin32Error() + "): what is left is reported below");
+                            Wire.Log("ERROR: handle " + (k + 1) + " could not be marked again (error " + Marshal.GetLastWin32Error() + "): that file stays unless its earlier mark still holds; the files left are listed below");
                     break;
                 }
             }
@@ -864,7 +864,7 @@ namespace DoodleNote.DictationHelper
                 {
                     // Not proof of absence: kept whole, bounded like an undecryptable payload.
                     string ended = UnreadablePolicy(id, facts, "its payload could not be looked at now");
-                    if (ended != null) return ended;
+                    if (ended != null) return PolicyEnded(ended, ref result, reply);
                     result = RecoverResult.Busy; reply["result"] = "busy";
                     return "its payload could not be looked at now; kept (offer-only; bounded by the retention)";
                 }
@@ -878,7 +878,7 @@ namespace DoodleNote.DictationHelper
                     if (adopted == "busy")
                     {
                         string ended = UnreadablePolicy(id, facts, "its payload (.tmp) could not be read now");
-                        if (ended != null) return ended;
+                        if (ended != null) return PolicyEnded(ended, ref result, reply);
                         result = RecoverResult.Busy; reply["result"] = "busy"; return "its payload (.tmp) could not be read now; kept (bounded by the retention)";
                     }
                     if (adopted != "adopted") { DeleteId(id, "no usable payload (" + adopted + ")"); return "ERROR: stage " + facts.Stage + " but no usable payload (" + adopted + ")"; }
@@ -896,7 +896,7 @@ namespace DoodleNote.DictationHelper
             if (readError != null)
             {
                 string ended = UnreadablePolicy(id, facts, "its payload could not be read now (" + readError + ")");
-                if (ended != null) return ended;
+                if (ended != null) return PolicyEnded(ended, ref result, reply);
                 result = RecoverResult.Busy; reply["result"] = "busy";
                 return "its payload could not be read now (" + readError + "); kept (bounded by the retention)";
             }
@@ -933,7 +933,7 @@ namespace DoodleNote.DictationHelper
                     // offer-only, and bounded by the same policies as an offer (24 h from the first failed attempt in a
                     // boot, at most two boots), then deleted as unrecoverable. It never lives for ever.
                     string ended = UnreadablePolicy(id, facts, "its payload could not be decrypted now (0x" + hr.ToString("x8") + ")");
-                    if (ended != null) return ended;
+                    if (ended != null) return PolicyEnded(ended, ref result, reply);
                     result = RecoverResult.Busy; reply["result"] = "busy";
                     return "its payload could not be decrypted now (0x" + hr.ToString("x8") + "); kept (offer-only; the retention runs from the first failed attempt)";
                 }
@@ -968,12 +968,12 @@ namespace DoodleNote.DictationHelper
                     // retention (policies) apply to what is offered.
                     if (OfferBootStep(facts, bootId, (long)Native.GetTickCount64()) == "delete")
                     {
-                        return "offered in two boots without an answer; " + (DeleteId(id, "offered in two boots without an answer") ? "deleted" : "deletion deferred (a later check retries)");
+                        return PolicyEnded("offered in two boots without an answer; " + (DeleteId(id, "offered in two boots without an answer") ? "deleted" : Deferred), ref result, reply);
                     }
                     Offer(id, facts, saved, view);
                     if (Expired(facts, Now()))
                     {
-                        return "expired; " + (DeleteId(id, "expired: offered longer than the " + Retention.TotalHours + " h retention") ? "deleted" : "deletion deferred (a later check retries)");
+                        return PolicyEnded("expired; " + (DeleteId(id, "expired: offered longer than the " + Retention.TotalHours + " h retention") ? "deleted" : Deferred), ref result, reply);
                     }
                     result = RecoverResult.Pending;
                     reply["result"] = "pending";
@@ -1149,13 +1149,22 @@ namespace DoodleNote.DictationHelper
         /// and the boot limit and the 24 h retention apply as to an offer; then it is deleted as unrecoverable. Null while
         /// it is kept.
         /// </summary>
+        /// <summary>A policy deletion that could not be carried out is deferred: kept, and retried on the backoff (not cancelled).</summary>
+        const string Deferred = "deletion deferred (kept; retried)";
+
+        static string PolicyEnded(string ended, ref RecoverResult result, Dictionary<string, object> reply)
+        {
+            if (ended.EndsWith(Deferred, StringComparison.Ordinal)) { result = RecoverResult.Busy; reply["result"] = "busy"; }
+            return ended;
+        }
+
         static string UnreadablePolicy(string id, RecordFacts facts, string why)
         {
             long nowTick = (long)Native.GetTickCount64();
             string step = OfferBootStep(facts, bootId, nowTick);
             // A retention DECISION: the deletion itself may be deferred (a file that cannot be looked at keeps the record whole;
             // a later check retries). Reported as it happened.
-            if (step == "delete") return "unrecoverable payload, two boots (the boot limit is a policy); " + (DeleteId(id, why + " in two boots: unrecoverable") ? "deleted" : "deletion deferred (a later check retries)");
+            if (step == "delete") return "unrecoverable payload, two boots (the boot limit is a policy); " + (DeleteId(id, why + " in two boots: unrecoverable") ? "deleted" : Deferred);
             if (facts.OfferedTick == 0)
             {
                 if (facts.OfferBoots == 0) facts.OfferBoots = 1;
@@ -1165,7 +1174,7 @@ namespace DoodleNote.DictationHelper
                 PersistOffer(id, facts);
             }
             MarkOfferOnlyOnDisk(id, facts, why);
-            if (Expired(facts, Now())) return "unrecoverable payload, retention over (a policy); " + (DeleteId(id, why + " for the " + Retention.TotalHours + " h retention: unrecoverable") ? "deleted" : "deletion deferred (a later check retries)");
+            if (Expired(facts, Now())) return "unrecoverable payload, retention over (a policy); " + (DeleteId(id, why + " for the " + Retention.TotalHours + " h retention: unrecoverable") ? "deleted" : Deferred);
             return null;
         }
 
