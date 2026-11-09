@@ -1725,7 +1725,8 @@ namespace DoodleNote.DictationHelper
         IntPtr metafile = IntPtr.Zero;
         /// <summary>The saved EMF's bytes as validated by the capture (or read from a record): what WriteTo writes down.</summary>
         byte[] metafileBits;
-        /// <summary>Tests: a save that had an EMF whose bytes are not available (WriteTo must then write it as lost).</summary>
+        /// <summary>A save that had an EMF whose bytes are not available (a record read back with it lost; tests set it
+        /// directly): WriteTo writes it as lost again, never as absent.</summary>
         internal bool metafileExpected;
         /// <summary>Saved content that cannot go back (ReadFrom): a metafile that could not be rebuilt, a registered format with no usable name.</summary>
         bool contentLost;
@@ -2081,7 +2082,7 @@ namespace DoodleNote.DictationHelper
                 else saved.contentLost = true;
             }
             int metaLength = reader.ReadInt32();
-            if (metaLength < 0) saved.contentLost = true; // round 22: an EMF that could not be written down: incomplete, never absent
+            if (metaLength < 0) { saved.contentLost = true; saved.metafileExpected = true; } // round 22: an EMF that could not be written down: incomplete, never absent
             if (metaLength > 0)
             {
                 byte[] bits = reader.ReadBytes(metaLength);
