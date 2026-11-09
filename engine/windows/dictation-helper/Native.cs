@@ -11,9 +11,13 @@ namespace DoodleNote.DictationHelper
         // sharing, mark every handle for deletion, close them all (the files go at the close); undone if any mark fails.
         public const uint DELETE_ACCESS = 0x00010000, GENERIC_READ_ACCESS = 0x80000000, OPEN_EXISTING_FILE = 3, FILE_ATTRIBUTE_NORMAL_ = 0x80;
         public const int FileDispositionInfo = 4;
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern uint GetFileAttributesW(string name);
         // The text forms Windows synthesizes from CF_UNICODETEXT (ClipboardText.ExpectedTextForm).
         [DllImport("user32.dll")]
         public static extern IntPtr GetKeyboardLayout(uint threadId);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern IntPtr LoadKeyboardLayoutW(string klid, uint flags);
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern int GetLocaleInfoW(uint locale, uint type, out uint value, int chars);
         [DllImport("kernel32.dll", SetLastError = true)]

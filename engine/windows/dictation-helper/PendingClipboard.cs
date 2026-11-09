@@ -186,10 +186,35 @@ namespace DoodleNote.DictationHelper
             using (SHA256 sha = SHA256.Create()) return sha.ComputeHash(Encoding.Unicode.GetBytes(text));
         }
 
-        /// <summary>Whether any file of a record with this id is on disk (tests, diagnostics).</summary>
+        /// <summary>Whether any file of a record with this id may be on disk (only a positive ABSENT counts as gone).</summary>
         internal static bool OnDisk(string id)
         {
-            return File.Exists(StatePath(id)) || File.Exists(StatePath(id) + ".tmp") || File.Exists(PayloadPath(id)) || File.Exists(PayloadPath(id) + ".tmp");
+            foreach (string path in new[] { StatePath(id), StatePath(id) + ".tmp", PayloadPath(id), PayloadPath(id) + ".tmp" })
+                if (Probe(path) != Presence.Absent) return true;
+            return false;
+        }
+
+        /// <summary>What a look at a path proves (round 18): File.Exists is false on ANY error, which is no proof of absence.</summary>
+        internal enum Presence { Absent, Present, Unknown }
+
+        /// <summary>The rule (unit-tested): ABSENT only for ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND; any other error is UNKNOWN.</summary>
+        internal static Presence ClassifyPresence(uint attributes, int error)
+        {
+            if (attributes != 0xFFFFFFFFu) return Presence.Present;
+            return error == 2 || error == 3 ? Presence.Absent : Presence.Unknown;
+        }
+
+        /// <summary>
+        /// Every destructive or deletion-deciding look at a record file goes through this: "missing payload" cleanup,
+        /// adoption's "none", the orphan sweeps and the deletion's own verification act only on ABSENT; UNKNOWN keeps the
+        /// record whole (bounded by the unreadable-payload policy).
+        /// </summary>
+        internal static Presence Probe(string path)
+        {
+            string unknown = TestMode.Env("DICTATION_HELPER_TEST_PROBE_UNKNOWN"); // test build only: metadata unreadable
+            if (!string.IsNullOrEmpty(unknown) && path.EndsWith(unknown, StringComparison.Ordinal)) return Presence.Unknown;
+            uint attributes = Native.GetFileAttributesW(path);
+            return ClassifyPresence(attributes, attributes == 0xFFFFFFFFu ? Marshal.GetLastWin32Error() : 0);
         }
 
         /// <summary>
@@ -430,13 +455,13 @@ namespace DoodleNote.DictationHelper
                 stream.Write(bytes, 0, bytes.Length);
                 stream.Flush(true);
             }
-            if (File.Exists(path)) File.Replace(tmp, path, null); // atomic replacement
+            if (Probe(path) != Presence.Absent) File.Replace(tmp, path, null); // atomic replacement (throws if it is not there after all)
             else File.Move(tmp, path);
         }
 
         static bool TryDelete(string path)
         {
-            try { if (File.Exists(path)) File.Delete(path); return true; }
+            try { File.Delete(path); return true; } // a missing file is not an error
             catch (Exception error) { Wire.Log("ERROR: " + Path.GetFileName(path) + " could not be deleted: " + error.GetType().Name); return false; }
         }
 
@@ -505,7 +530,9 @@ namespace DoodleNote.DictationHelper
             {
                 foreach (string path in paths)
                 {
-                    if (!File.Exists(path)) continue;
+                    Presence presence = Probe(path);
+                    if (presence == Presence.Absent) continue;
+                    if (presence == Presence.Unknown) { Wire.Log(Path.GetFileName(path) + " could not be looked at: nothing deleted, the record is kept whole"); return false; }
                     Microsoft.Win32.SafeHandles.SafeFileHandle handle = Native.CreateFileForDelete(path, Native.DELETE_ACCESS | Native.GENERIC_READ_ACCESS, 0, IntPtr.Zero, Native.OPEN_EXISTING_FILE, Native.FILE_ATTRIBUTE_NORMAL_, IntPtr.Zero);
                     if (handle.IsInvalid)
                     {
@@ -545,7 +572,7 @@ namespace DoodleNote.DictationHelper
             finally { foreach (Microsoft.Win32.SafeHandles.SafeFileHandle handle in held) handle.Dispose(); }
             if (completing) foreach (string path in paths) TryDelete(path);
             bool left = false;
-            foreach (string path in paths) if (File.Exists(path)) { Wire.Log("ERROR: " + Path.GetFileName(path) + " is still there after the deletion" + (path == PayloadPath(id) && !File.Exists(StatePath(id)) ? " (a payload without its state: never restored from, swept after 10 minutes)" : "")); left = true; }
+            foreach (string path in paths) if (Probe(path) != Presence.Absent) { Wire.Log("ERROR: " + Path.GetFileName(path) + " is still there (or cannot be looked at) after the deletion" + (path == PayloadPath(id) && Probe(StatePath(id)) == Presence.Absent ? " (a payload without its state: never restored from, swept after 10 minutes)" : "")); left = true; }
             return !left;
         }
 
@@ -619,7 +646,7 @@ namespace DoodleNote.DictationHelper
             {
                 // Never while a delivery of ours is in flight (our write may be on the clipboard): wait, not consumed.
                 if (inFlight.Count > 0) { ScheduleRetry(id, RetryKind.Busy); return; }
-                if (!File.Exists(StatePath(id))) { CancelRetry(id); return; }
+                if (Probe(StatePath(id)) == Presence.Absent) { CancelRetry(id); return; }
                 RecoverResult result;
                 string verdict;
                 try { verdict = RecoverOne(id, out result, false, 0); }
@@ -665,15 +692,13 @@ namespace DoodleNote.DictationHelper
                     {
                         // A state .tmp is replaced atomically by its writer and removed with its record; one left with no state
                         // file, older than 10 minutes, is a stray (no payload depends on it).
-                        if (File.Exists(StatePath(id))) continue;
-                        try { if (DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < TimeSpan.FromMinutes(10)) continue; } catch (Exception) { continue; }
+                        if (Probe(StatePath(id)) != Presence.Absent || !OlderThanTenMinutes(path)) continue;
                         TryDelete(path);
                         Wire.Log("a stray state .tmp (" + name.Substring(Prefix.Length) + ") was deleted");
                         continue;
                     }
-                    if (File.Exists(StatePath(id)) || writing.Contains(id) || inFlight.Contains(id)) continue;
-                    // Only an orphan old enough not to be another session's helper mid-step (writing or deleting it).
-                    try { if (DateTime.UtcNow - File.GetLastWriteTimeUtc(path) < TimeSpan.FromMinutes(10)) continue; } catch (Exception) { continue; }
+                    // Only a payload whose state is positively ABSENT, old enough not to be another helper mid-step.
+                    if (Probe(StatePath(id)) != Presence.Absent || writing.Contains(id) || inFlight.Contains(id) || !OlderThanTenMinutes(path)) continue;
                     TryDelete(path);
                     Wire.Log("an orphaned clipboard payload (" + name.Substring(Prefix.Length) + ") was deleted; never restored from");
                 }
@@ -715,7 +740,7 @@ namespace DoodleNote.DictationHelper
         {
             lock (gate)
             {
-                if (!RecordName.IsMatch(Prefix + id + ".state") || !File.Exists(StatePath(id))) return Wire.Fields("result", "gone");
+                if (!RecordName.IsMatch(Prefix + id + ".state") || Probe(StatePath(id)) == Presence.Absent) return Wire.Fields("result", "gone");
                 RecoverResult result;
                 Dictionary<string, object> reply = Wire.Fields();
                 string verdict = RecoverOne(id, out result, true, expectSequence, reply);
@@ -732,7 +757,9 @@ namespace DoodleNote.DictationHelper
             {
                 if (!RecordName.IsMatch(Prefix + id + ".state")) return false;
                 if (inFlight.Contains(id)) return false;
-                if (File.Exists(StatePath(id)))
+                Presence onDisk = Probe(StatePath(id));
+                if (onDisk == Presence.Unknown) return false; // its isolation cannot be checked now: not deleted (retryable)
+                if (onDisk == Presence.Present)
                 {
                     // A state file that cannot be read now could belong to a running helper: not deleted (retryable).
                     Dictionary<string, object> state = null;
@@ -807,19 +834,33 @@ namespace DoodleNote.DictationHelper
             string readError = null;
             try
             {
-                FileInfo info = new FileInfo(PayloadPath(id));
-                if (!info.Exists)
+                Presence payload = Probe(PayloadPath(id));
+                Presence payloadTmp = payload == Presence.Absent ? Probe(PayloadPath(id) + ".tmp") : Presence.Absent;
+                if (payload == Presence.Unknown || payloadTmp == Presence.Unknown)
                 {
-                    // The writer completes .bin.tmp before moving it into place: a crash between the two leaves a whole
-                    // payload under the temporary name. Adopted when it decrypts and names this record.
-                    string adopted = AdoptPayload(id);
-                    if (adopted == "busy") { result = RecoverResult.Busy; reply["result"] = "busy"; return "its payload (.tmp) could not be read now; kept"; }
-                    if (adopted != "adopted") { DeleteId(id, "no payload (" + adopted + ")"); return "ERROR: stage " + facts.Stage + " but no payload (" + adopted + "); cannot put back"; }
-                    // Adopted, but it proves nothing about the stage it is next to: offer-only (never restored on its own).
-                    MarkOfferOnlyOnDisk(id, facts, "its payload was adopted from .bin.tmp");
-                    Wire.Log("clipboard record " + id.Substring(0, 8) + ": a complete payload left under its temporary name was adopted (offer-only)");
-                    info = new FileInfo(PayloadPath(id));
+                    // Not proof of absence: kept whole, bounded like an undecryptable payload.
+                    string ended = UnreadablePolicy(id, facts, "its payload could not be looked at now");
+                    if (ended != null) return ended;
+                    result = RecoverResult.Busy; reply["result"] = "busy";
+                    return "its payload could not be looked at now; kept (offer-only; bounded by the retention)";
                 }
+                if (payload == Presence.Absent)
+                {
+                    // Positively absent. The writer completes .bin.tmp before moving it into place: a crash between the two
+                    // leaves a whole payload under the temporary name, adopted (its offer-only fact persisted BEFORE the
+                    // move) when it decrypts and names this record. Neither: a state without a payload, removed.
+                    if (payloadTmp == Presence.Absent) { DeleteId(id, "a state without its payload (both positively absent)"); return "stage " + facts.Stage + " but no payload; nothing to restore from: deleted"; }
+                    string adopted = AdoptPayload(id, delegate { MarkOfferOnlyOnDisk(id, facts, "its payload was adopted from .bin.tmp"); });
+                    if (adopted == "busy")
+                    {
+                        string ended = UnreadablePolicy(id, facts, "its payload (.tmp) could not be read now");
+                        if (ended != null) return ended;
+                        result = RecoverResult.Busy; reply["result"] = "busy"; return "its payload (.tmp) could not be read now; kept (bounded by the retention)";
+                    }
+                    if (adopted != "adopted") { DeleteId(id, "no usable payload (" + adopted + ")"); return "ERROR: stage " + facts.Stage + " but no usable payload (" + adopted + ")"; }
+                    Wire.Log("clipboard record " + id.Substring(0, 8) + ": a complete payload left under its temporary name was adopted (offered)");
+                }
+                FileInfo info = new FileInfo(PayloadPath(id));
                 if (info.Length > MaxRecordBytes) { DeleteId(id, "payload over the size cap"); return "ERROR: payload of " + info.Length + " bytes over the cap; not read"; }
                 sealedBytes = File.ReadAllBytes(PayloadPath(id));
             }
@@ -830,8 +871,10 @@ namespace DoodleNote.DictationHelper
             }
             if (readError != null)
             {
+                string ended = UnreadablePolicy(id, facts, "its payload could not be read now (" + readError + ")");
+                if (ended != null) return ended;
                 result = RecoverResult.Busy; reply["result"] = "busy";
-                return "its payload could not be read now (" + readError + "); kept";
+                return "its payload could not be read now (" + readError + "); kept (bounded by the retention)";
             }
             // Only a payload read in full that does not decrypt or parse is corrupt (and only then deleted).
             string corrupt = null;
@@ -865,7 +908,7 @@ namespace DoodleNote.DictationHelper
                     // Not the payload's own damage (a key or profile not available now, e.g. after a password reset): kept,
                     // offer-only, and bounded by the same policies as an offer (24 h from the first failed attempt in a
                     // boot, at most two boots), then deleted as unrecoverable. It never lives for ever.
-                    string ended = UnreadablePolicy(id, facts, hr);
+                    string ended = UnreadablePolicy(id, facts, "its payload could not be decrypted now (0x" + hr.ToString("x8") + ")");
                     if (ended != null) return ended;
                     result = RecoverResult.Busy; reply["result"] = "busy";
                     return "its payload could not be decrypted now (0x" + hr.ToString("x8") + "); kept (offer-only; the retention runs from the first failed attempt)";
@@ -984,12 +1027,24 @@ namespace DoodleNote.DictationHelper
         static string RebuildState(string id, Dictionary<string, object> old, string why)
         {
             string payload = PayloadPath(id);
-            if (!File.Exists(payload)) { string adopted = AdoptPayload(id); if (adopted != "adopted") return adopted; }
-            byte[] bytes;
-            try { bytes = File.ReadAllBytes(payload); }
-            catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
+            Presence present = Probe(payload);
+            if (present == Presence.Absent)
+            {
+                Presence tmp = Probe(payload + ".tmp");
+                if (tmp == Presence.Absent) return "none";
+                if (tmp == Presence.Present) { string adopted = AdoptPayload(id, null); if (adopted == "corrupt") return adopted; }
+                present = Probe(payload);
+            }
+            // A payload that cannot be looked at or read now is rebuilt unverified (offer-only; the unreadable-payload
+            // policy bounds it, and it must name this record once it can be read).
+            byte[] bytes = null;
+            if (present == Presence.Present)
+            {
+                try { bytes = File.ReadAllBytes(payload); }
+                catch (Exception error) { if (!(error is IOException || error is UnauthorizedAccessException)) throw; }
+            }
             string nonce = "";
-            try
+            if (bytes != null) try
             {
                 byte[] plain = ProtectedData.Unprotect(bytes, Entropy, DataProtectionScope.CurrentUser);
                 using (BinaryReader reader = new BinaryReader(new MemoryStream(plain), Encoding.UTF8))
@@ -1026,10 +1081,12 @@ namespace DoodleNote.DictationHelper
         /// offer-only). Complete: it decrypts and names this record, or it cannot be decrypted NOW (checked again when it
         /// can; it then has to name this record). adopted | busy | none | corrupt.
         /// </summary>
-        static string AdoptPayload(string id)
+        static string AdoptPayload(string id, Action beforeMove)
         {
             string tmp = PayloadPath(id) + ".tmp";
-            if (!File.Exists(tmp)) return "none";
+            Presence presence = Probe(tmp);
+            if (presence == Presence.Absent) return "none";
+            if (presence == Presence.Unknown) return "busy";
             byte[] bytes;
             try { bytes = File.ReadAllBytes(tmp); }
             catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
@@ -1045,7 +1102,10 @@ namespace DoodleNote.DictationHelper
                 if (hr == unchecked((int)0x80090005) || hr == unchecked((int)0x8007000D)) return "corrupt";
             }
             catch (EndOfStreamException) { return "corrupt"; }
-            lock (gate) offerOnly.Add(id);
+            // Persisted before it is published (hygiene: nothing on disk grants authority since round 18 either way).
+            if (beforeMove != null) beforeMove();
+            int stallAdopt = TestMode.Int("DICTATION_HELPER_TEST_STALL_IN_ADOPT_MS", 0); // test build only: killed before the move
+            if (stallAdopt > 0) Thread.Sleep(stallAdopt);
             try { File.Move(tmp, PayloadPath(id)); return "adopted"; }
             catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
         }
@@ -1056,11 +1116,11 @@ namespace DoodleNote.DictationHelper
         /// and the boot limit and the 24 h retention apply as to an offer; then it is deleted as unrecoverable. Null while
         /// it is kept.
         /// </summary>
-        static string UnreadablePolicy(string id, RecordFacts facts, int hr)
+        static string UnreadablePolicy(string id, RecordFacts facts, string why)
         {
             long nowTick = (long)Native.GetTickCount64();
             string step = OfferBootStep(facts, bootId, nowTick);
-            if (step == "delete") { DeleteId(id, "its payload could not be decrypted in two boots (0x" + hr.ToString("x8") + "): unrecoverable, deleted (the boot limit is a policy)"); return "unrecoverable payload, two boots; deleted"; }
+            if (step == "delete") { DeleteId(id, why + " in two boots: unrecoverable, deleted (the boot limit is a policy)"); return "unrecoverable payload, two boots; deleted"; }
             if (facts.OfferedTick == 0)
             {
                 if (facts.OfferBoots == 0) facts.OfferBoots = 1;
@@ -1069,8 +1129,8 @@ namespace DoodleNote.DictationHelper
                 facts.OfferedUtc = DateTime.UtcNow.ToString("o");
                 PersistOffer(id, facts);
             }
-            MarkOfferOnlyOnDisk(id, facts, "its payload could not be decrypted");
-            if (Expired(facts, Now())) { DeleteId(id, "its payload could not be decrypted for the " + Retention.TotalHours + " h retention (0x" + hr.ToString("x8") + "): unrecoverable, deleted (a policy)"); return "unrecoverable payload, retention over; deleted"; }
+            MarkOfferOnlyOnDisk(id, facts, why);
+            if (Expired(facts, Now())) { DeleteId(id, why + " for the " + Retention.TotalHours + " h retention: unrecoverable, deleted (a policy)"); return "unrecoverable payload, retention over; deleted"; }
             return null;
         }
 
