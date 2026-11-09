@@ -377,19 +377,26 @@ namespace DoodleNote.DictationHelper
             if (Settled(restoreResult))
             {
                 // Journaled "settled" and deleted BEFORE it leaves in-flight: a concurrent check never finds content that
-                // was already put back and offers it (a "settled" state is deleted on sight, never offered).
-                if (record.Persisted)
+                // was already put back and offers it (a "settled" state is deleted on sight, never offered). It leaves
+                // in-flight whatever happens (finally), or every kept record's retry would wait on it until a restart.
+                try
                 {
-                    if (!Stage(record, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
-                    Delete(record, "restore ran (" + restoreResult + ")");
+                    if (record.Persisted)
+                    {
+                        if (!Stage(record, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
+                        Delete(record, "restore ran (" + restoreResult + ")");
+                    }
                 }
-                lock (gate) inFlight.Remove(record.Id);
+                finally { lock (gate) inFlight.Remove(record.Id); }
                 return;
             }
             // Marked BEFORE it leaves in-flight: no concurrent check sees it unmarked.
-            record.Unrestored = true;
-            MarkOfferOnly(record, "a restore that did not complete (" + restoreResult + ")");
-            lock (gate) inFlight.Remove(record.Id);
+            try
+            {
+                record.Unrestored = true;
+                MarkOfferOnly(record, "a restore that did not complete (" + restoreResult + ")");
+            }
+            finally { lock (gate) inFlight.Remove(record.Id); }
             if (record.Persisted)
             {
                 Journal(record); // the unrestored flag (also when the record was offer-only already)
@@ -839,7 +846,7 @@ namespace DoodleNote.DictationHelper
                 // never deleted and never restored on its own. Without a usable payload there is nothing to restore from.
                 string kept = RebuildState(id, state, invalid);
                 if (kept == "busy") { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state (" + invalid + "); its payload could not be read now; kept"; }
-                if (kept != "rebuilt") { DeleteId(id, "an invalid state (" + invalid + ") and no usable payload (" + kept + ")"); return "invalid state, no usable payload; deleted"; }
+                if (kept != "rebuilt") return "invalid state, no usable payload; " + (DeleteId(id, "an invalid state (" + invalid + ") and no usable payload (" + kept + ")") ? "deleted" : "deletion deferred (kept)");
                 Wire.Log("clipboard record " + id.Substring(0, 8) + ": an invalid state (" + invalid + ") was rebuilt from its payload (offer-only, unknown identity)");
                 return RecoverOne(id, out result, byUser, expectSequence, reply, depth + 1);
             }
@@ -848,8 +855,8 @@ namespace DoodleNote.DictationHelper
             if (facts.Compare(Now()) == LogonMatch.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record; left to it"; }
             if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid, facts.PidStart)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its helper (pid " + facts.Pid + ") still runs; left to it"; }
             // Its restore had run (journaled before the deletion): deleted on sight, never offered.
-            if (facts.Stage == "settled") { DeleteId(id, "settled: its restore had run"); return "settled earlier; deleted (never offered)"; }
-            if (facts.Stage == "saved" && !facts.OfferOnly) { DeleteId(id, "nothing had been emptied"); return "stage saved: nothing to put back"; }
+            if (facts.Stage == "settled") return "settled earlier (never offered); " + (DeleteId(id, "settled: its restore had run") ? "deleted" : "deletion deferred (kept)");
+            if (facts.Stage == "saved" && !facts.OfferOnly) return "stage saved: nothing to put back; " + (DeleteId(id, "nothing had been emptied") ? "deleted" : "deletion deferred (kept)");
             SavedClipboard saved;
             string nonce;
             byte[] dictatedHash;
@@ -873,7 +880,7 @@ namespace DoodleNote.DictationHelper
                     // Positively absent. The writer completes .bin.tmp before moving it into place: a crash between the two
                     // leaves a whole payload under the temporary name, adopted (its offer-only fact persisted BEFORE the
                     // move) when it decrypts and names this record. Neither: a state without a payload, removed.
-                    if (payloadTmp == Presence.Absent) { DeleteId(id, "a state without its payload (both positively absent)"); return "stage " + facts.Stage + " but no payload; nothing to restore from: deleted"; }
+                    if (payloadTmp == Presence.Absent) return "stage " + facts.Stage + " but no payload; nothing to restore from: " + (DeleteId(id, "a state without its payload (both positively absent)") ? "deleted" : "deletion deferred (kept)");
                     string adopted = AdoptPayload(id, delegate { MarkOfferOnlyOnDisk(id, facts, "its payload was adopted from .bin.tmp"); });
                     if (adopted == "busy")
                     {
@@ -1013,7 +1020,7 @@ namespace DoodleNote.DictationHelper
                     return "the clipboard's owner is not responding (" + ownerProblem + "); nothing emptied, kept";
                 }
                 bool emptied = TestMode.Env("DICTATION_HELPER_TEST_FAIL_RECOVERY_EMPTY") != "1" && Native.EmptyClipboard();
-                trace.Emptied(emptied, emptied ? 0 : Marshal.GetLastWin32Error());
+                if (trace != null) trace.Emptied(emptied, emptied ? 0 : Marshal.GetLastWin32Error());
                 if (!emptied)
                 {
                     result = RecoverResult.Failed;

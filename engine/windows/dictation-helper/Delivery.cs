@@ -1108,9 +1108,9 @@ namespace DoodleNote.DictationHelper
                     {
                         job.Holds = outcome == "unrestored" ? "unknown" : null;
                         job.Outcome = outcome;
-                        // Whenever it lands (before or after the reply), the app learns what happened.
-                        Wire.Send(Wire.Fields("event", "clipboard", "phase", "late-restore", "id", deliveryId ?? "", "clipboard", outcome));
-                        DeliveriesInFlight.LateEnd();
+                        // Whenever it lands (before or after the reply), the app learns what happened; LateEnd runs whatever.
+                        try { Wire.Send(Wire.Fields("event", "clipboard", "phase", "late-restore", "id", deliveryId ?? "", "clipboard", outcome)); }
+                        finally { DeliveriesInFlight.LateEnd(); }
                     }
                 }
             });
@@ -1262,11 +1262,12 @@ namespace DoodleNote.DictationHelper
         };
 
         /// <summary>Set the three privacy markers to "do not record" on the current clipboard (must be open).</summary>
-        public static void SetConservativeMarkers()
+        public static bool SetConservativeMarkers()
         {
-            SetBytes(Native.RegisterClipboardFormat(MarkerNames[0]), new byte[] { 0 });
-            SetBytes(Native.RegisterClipboardFormat(MarkerNames[1]), BitConverter.GetBytes(0));
-            SetBytes(Native.RegisterClipboardFormat(MarkerNames[2]), BitConverter.GetBytes(0));
+            bool a = SetBytes(Native.RegisterClipboardFormat(MarkerNames[0]), new byte[] { 0 });
+            bool b = SetBytes(Native.RegisterClipboardFormat(MarkerNames[1]), BitConverter.GetBytes(0));
+            bool c = SetBytes(Native.RegisterClipboardFormat(MarkerNames[2]), BitConverter.GetBytes(0));
+            return a && b && c;
         }
 
         /// <summary>Our transaction's sentinel format on the open clipboard ("record id:nonce:locale"; no user content).</summary>
@@ -2051,7 +2052,12 @@ namespace DoodleNote.DictationHelper
                 metafile = IntPtr.Zero;
             }
             // A marker was present but unreadable: keep the content out of history and cloud.
-            if (forceMarkers) { ClipboardText.SetConservativeMarkers(); if (trace != null) trace.Set(0, -1, true, 0); }
+            if (forceMarkers)
+            {
+                bool marked = ClipboardText.SetConservativeMarkers();
+                if (trace != null) trace.Set(0, -1, marked, marked ? 0 : -1);
+                if (!marked) ok = false;
+            }
             return ok;
         }
 
@@ -2113,8 +2119,8 @@ namespace DoodleNote.DictationHelper
         {
             PendingRecord record = Record;
             Record = null;
-            LoseAuthority("settled (" + restoreResult + ")");
-            PendingClipboard.Finish(record, restoreResult);
+            try { LoseAuthority("settled (" + restoreResult + ")"); }
+            finally { PendingClipboard.Finish(record, restoreResult); }
         }
 
         /// <summary>
