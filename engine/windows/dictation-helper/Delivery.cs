@@ -536,6 +536,13 @@ namespace DoodleNote.DictationHelper
                 Wire.Log("the clipboard's owner is not responding (" + ownerProblem + "); not pasting");
                 return "owner-unresponsive";
             }
+            // Round 22 (S2): a zero sequence now is no evidence the clipboard is still what was saved: nothing is written
+            // down and nothing touched (checked again under the write's own lock).
+            if (ClipboardText.Sequence("begin") == 0 || saved.Sequence == 0)
+            {
+                Wire.Log("the clipboard sequence is not usable evidence (0) before the transaction; not pasting (no record, nothing touched)");
+                return "zero-sequence";
+            }
             // The transaction is written down until its restore ran, so a helper that ends meanwhile
             // loses nothing (see PendingClipboard; content with a privacy marker stays in memory only).
             // Without a record, no paste.
@@ -1066,6 +1073,20 @@ namespace DoodleNote.DictationHelper
         /// owner's WM_DESTROYCLIPBOARD. IsHungAppWindow only says the owner has not pumped messages for a
         /// while (about 5 s); an owner can pass both and still stall later, which WriteBounded covers.
         /// </summary>
+        /// <summary>
+        /// Round 22 (S2/F8): the clipboard sequence as every check of ours reads it. A zero is NO EVIDENCE (Windows answers
+        /// 0 when it cannot tell, e.g. without access to the window station): every caller treats it as "cannot prove",
+        /// never as a match. Test build: DICTATION_HELPER_TEST_ZERO_SEQUENCE=&lt;site&gt;[,&lt;site&gt;...] answers 0 there.
+        /// </summary>
+        internal static uint Sequence(string site)
+        {
+#if DICTATION_TEST
+            string zero = TestMode.Env("DICTATION_HELPER_TEST_ZERO_SEQUENCE");
+            if (zero != null && ("," + zero + ",").Contains("," + site + ",")) return 0; // one site, or several (comma-separated)
+#endif
+            return Native.GetClipboardSequenceNumber();
+        }
+
         public static string OwnerUnresponsive()
         {
             IntPtr owner = Native.GetClipboardOwner();
@@ -1289,7 +1310,7 @@ namespace DoodleNote.DictationHelper
                     if (record != null) SetSentinel(record, ownership.TextLocale);
                     // Sampled INSIDE the same open/close as our SetClipboardData: nobody else can
                     // write while we hold the clipboard.
-                    ownership.SequenceInside = Native.GetClipboardSequenceNumber();
+                    ownership.SequenceInside = Sequence("inside");
                 }
             }
             finally
@@ -1705,7 +1726,15 @@ namespace DoodleNote.DictationHelper
                 };
                 // Reading every text form here also materializes it, so a later passive reader does not move the sequence.
                 bool content = ClipboardText.ClassifyOurWrite(present, read, record.Id, record.Nonce, record.DictatedHash, ExpectedForms()) == OurWrite.Complete;
-                uint now = Native.GetClipboardSequenceNumber();
+                uint now = ClipboardText.Sequence("confirm");
+                // Round 22 (S2): a zero, inside our write or now, is no evidence: a rejection (durable: offer-only).
+                if (SequenceInside == 0 || now == 0)
+                {
+                    Wire.Log("our write's confirmation: the clipboard sequence is not usable evidence (0); not confirmed, kept as an offer");
+                    Rejected = true;
+                    RejectedWhy = "the sequence is no evidence (0)";
+                    return;
+                }
                 bool bound = unchecked(now - SequenceInside) <= (uint)(PendingClipboard.CloseMoves + synthesized);
                 if (!content || !bound)
                 {
@@ -1724,14 +1753,16 @@ namespace DoodleNote.DictationHelper
         /// <summary>Under the clipboard lock: the clipboard is still exactly as our write left it.</summary>
         public bool StillOurs()
         {
-            return Confirmed && Native.GetClipboardOwner() == Owner && Native.GetClipboardSequenceNumber() == SequenceFinal;
+            uint now = ClipboardText.Sequence("still-ours");
+            return Confirmed && SequenceFinal != 0 && now != 0 && Native.GetClipboardOwner() == Owner && now == SequenceFinal;
         }
 
 
         /// <summary>Without the lock (right before Ctrl+V): our window still owns the clipboard and its sequence is the one a content look saw.</summary>
         public bool UnchangedSince(uint sequence)
         {
-            return Owner != IntPtr.Zero && Native.GetClipboardOwner() == Owner && sequence != 0 && Native.GetClipboardSequenceNumber() == sequence;
+            uint now = ClipboardText.Sequence("unchanged-since");
+            return Owner != IntPtr.Zero && Native.GetClipboardOwner() == Owner && sequence != 0 && now != 0 && now == sequence;
         }
 
         /// <summary>Without the lock (right before Ctrl+V): the clipboard still holds our write, as far as can be seen.</summary>
@@ -1740,15 +1771,16 @@ namespace DoodleNote.DictationHelper
             // Only a confirmed write (content checked under the lock) is trusted by owner and sequence; an unconfirmed
             // one needs the content look (SavedClipboard.InspectOurWrite).
             if (!Confirmed || ForeignAtConfirm || Owner == IntPtr.Zero || Native.GetClipboardOwner() != Owner) return false;
-            return Native.GetClipboardSequenceNumber() == SequenceFinal;
+            uint now = ClipboardText.Sequence("looks-ours");
+            return SequenceFinal != 0 && now != 0 && now == SequenceFinal;
         }
 
         /// <summary>What the clipboard holds when it could not be put back: dictated, foreign or unknown.</summary>
         public string Holds()
         {
             if (Owner != IntPtr.Zero && Native.GetClipboardOwner() != Owner) return "foreign";
-            uint now = Native.GetClipboardSequenceNumber();
-            if (Confirmed && now == SequenceFinal) return "dictated";
+            uint now = ClipboardText.Sequence("holds");
+            if (Confirmed && now != 0 && now == SequenceFinal) return "dictated";
             return "unknown";
         }
     }
@@ -2522,7 +2554,8 @@ namespace DoodleNote.DictationHelper
             int synthesized = 0;
             foreach (uint f in present) if (MaybeSynthesized(f) && !ClipboardText.OurWriteFormat(f)) synthesized++;
             uint basis = ours.Confirmed ? ours.SequenceFinal : ours.SequenceInside;
-            return basis != 0 && unchecked(Native.GetClipboardSequenceNumber() - basis) <= (uint)(PendingClipboard.CloseMoves + synthesized);
+            uint now = ClipboardText.Sequence("still-there");
+            return basis != 0 && now != 0 && unchecked(now - basis) <= (uint)(PendingClipboard.CloseMoves + synthesized);
         }
 
         /// <summary>

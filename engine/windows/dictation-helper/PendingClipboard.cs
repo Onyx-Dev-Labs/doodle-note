@@ -1010,6 +1010,13 @@ namespace DoodleNote.DictationHelper
                     reply["result"] = "pending";
                     return "offered (" + seen + "); nothing written";
                 }
+                // Round 22 (S2): a zero, now or offered, is no evidence the clipboard is as offered: nothing emptied.
+                if (view.Sequence == 0 || expectSequence == 0)
+                {
+                    result = RecoverResult.Pending;
+                    reply["result"] = "busy";
+                    return "the user's restore: the clipboard sequence is not usable evidence (0); nothing emptied, kept";
+                }
                 // The user's Restore: only while the clipboard is exactly as offered.
                 if (view.Sequence != expectSequence)
                 {
@@ -1602,7 +1609,7 @@ namespace DoodleNote.DictationHelper
             IntPtr owner = Native.GetClipboardOwner();
             view.OwnerIsUs = owner != IntPtr.Zero && owner == Ui.ClipboardWindow;
             view.OwnerAlive = owner != IntPtr.Zero && Native.IsWindow(owner);
-            view.Sequence = Native.GetClipboardSequenceNumber();
+            view.Sequence = ClipboardText.Sequence("view");
             List<uint> present;
             if (!ClipboardText.EnumerateComplete(out present))
             {
