@@ -789,7 +789,7 @@ namespace DoodleNote.DictationHelper
                 RecoveryVerdict verdict = Decide(facts, view, match);
                 string seen = view.Describe() + "; sequence " + view.Sequence + ", recorded " + facts.Stage + " " + facts.SequenceAtStage + "/" + facts.SequenceClosed + "/" + facts.SequenceAfterWrite
                     + (facts.OriginStage.Length > 0 ? " (found " + facts.OriginStage + " " + facts.OriginSequenceAtStage + "/" + facts.OriginSequenceClosed + ")" : "") + ", logon " + match.ToString().ToLowerInvariant();
-                if (verdict == RecoveryVerdict.OtherSession) { result = RecoverResult.Busy; reply["result"] = "busy"; return "another session's record (" + seen + "); left to it"; }
+                if (verdict == RecoveryVerdict.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record (" + seen + "); left to it"; } // not retried here (S-A)
                 if (verdict == RecoveryVerdict.Stale) { DeleteId(id, "stale"); return "stale (" + seen + "); deleted"; } // not produced by Decide any more
                 if (verdict == RecoveryVerdict.Untouched)
                 {
