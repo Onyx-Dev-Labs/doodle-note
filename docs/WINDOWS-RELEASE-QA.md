@@ -414,10 +414,16 @@ language) and synthesizes CF_TEXT and CF_OEMTEXT from our text on that locale's 
 always did. Round 16 wrote the three itself from three independent settings (the .NET culture, the system
 ANSI and OEM code pages), which could disagree and changed what ANSI and RichEdit targets pasted on
 mixed-locale systems; that is undone. The sentinel states the locale Windows will set. Every look compares
-the three forms Windows made with what Windows makes: its own bytes when our write could read them back
-inside its own open (nobody else can write then), otherwise Windows' conversion of our text on the stated
-locale's default ANSI and OEM code pages (CI compares this byte for byte with Windows' own synthesis for
-non-ASCII, best-fit, unmappable and surrogate-pair text under four locales). Our write's confirmation
+the three forms Windows made with what Windows makes. The preferred source, reading Windows' bytes back
+inside our write's own open (nobody else can write then), does not exist: on the CI runner Windows renders
+none of the three before the clipboard is closed (CF_LOCALE is set at the close; GetClipboardData returns
+nothing for them inside the open). The write still tries and would use them; otherwise, as on the runner,
+the expected bytes are Windows' conversion of our text on the stated locale's default ANSI and OEM code pages
+(GetLocaleInfo, WideCharToMultiByte). CI compares that byte for byte with Windows' own synthesis for
+non-ASCII, best-fit, unmappable and surrogate-pair text under four locales (en-US, ru-RU, pl-PL, ja-JP),
+and checks that the CF_LOCALE Windows chooses for a Unicode-only write is the input language the helper
+states. A difference on some other system would make a write look changed: a false rejection (nothing
+pasted, the record offered), never a wrong paste. Our write's confirmation
 compares, under the lock, every format byte for byte (our text, markers and sentinel, and the three forms),
 which also materializes the forms (a later passive reader does not move the sequence; CI checks it); it reads
 the sequence AFTER those reads and accepts it only within what our close and the formats Windows synthesized
