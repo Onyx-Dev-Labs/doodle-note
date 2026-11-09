@@ -50,9 +50,28 @@ const RtlCopyOut = kernel32.func(
 const block = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 let lastOpenError = 0
+// Round 21: this process's READS open the clipboard with a window of its own too. CI 34 showed that a NULL-window
+// open is taken over by another process's OpenClipboard(NULL) (the poller in 33b did exactly that to the read-back).
+// It never empties the clipboard with it, so it never becomes the owner (no message can wait on this thread).
+let readWindow = null
 function open() {
+  if (!readWindow)
+    readWindow = CreateWindowExW(
+      0,
+      'STATIC',
+      'DoodleNote CI reads',
+      0,
+      0,
+      0,
+      0,
+      0,
+      null,
+      null,
+      null,
+      null
+    )
   for (let i = 0; i < 150; i++) {
-    if (OpenClipboard(null)) return true
+    if (OpenClipboard(readWindow)) return true
     lastOpenError = GetLastError()
     block(20)
   }
