@@ -1132,6 +1132,9 @@ namespace DoodleNote.DictationHelper
         {
             ownership = new ClipboardOwnership();
             PendingRecord record = saved != null ? saved.Record : null;
+            // Test build only: this write thread uses another input language (KLID, e.g. 00000419), as a user with several has.
+            string layout = TestMode.Env("DICTATION_HELPER_TEST_KEYBOARD_LAYOUT");
+            if (!string.IsNullOrEmpty(layout)) Native.LoadKeyboardLayoutW(layout, 1); // KLF_ACTIVATE, for this thread
             if (!Open()) return false;
             bool ok = false;
             try
@@ -1191,6 +1194,9 @@ namespace DoodleNote.DictationHelper
                     // The locale Windows will state at our close: this thread's input language (the sentinel carries it,
                     // so every later look knows which code pages Windows converted our text with).
                     ownership.TextLocale = InputLocale();
+#if DICTATION_TEST
+                    LastWriteLocale = ownership.TextLocale;
+#endif
                     if (record != null) SetSentinel(record, ownership.TextLocale);
                     // Windows' own text forms, if it renders them while we still hold the clipboard (nobody else can
                     // write now): then their exact bytes are what the confirmation compares against.
@@ -1248,6 +1254,8 @@ namespace DoodleNote.DictationHelper
 #if DICTATION_TEST
         /// <summary>Test build only: what the last write's read-back inside its own open found (reported by __text-forms).</summary>
         internal static string LastReadBack = "";
+        /// <summary>Test build only: the locale the last write pinned (this write thread's input language).</summary>
+        internal static int LastWriteLocale;
 #endif
 
         /// <summary>Under our write's lock: the text forms as Windows renders them now, if it does (null entries otherwise).</summary>
@@ -1486,8 +1494,11 @@ namespace DoodleNote.DictationHelper
             int textLocale = TextLocale;
             return delegate (uint f, string text, int locale)
             {
+                // The locale is PINNED to what this transaction wrote in its sentinel (round 18): a sentinel on the
+                // clipboard that states another locale is not ours, whatever forms come with it.
+                if (locale != textLocale) return null;
                 byte[] seen;
-                if (readBack != null && readBack.TryGetValue(f, out seen) && locale == textLocale)
+                if (readBack != null && readBack.TryGetValue(f, out seen))
                     return f == 16 ? (seen.Length >= 4 ? new[] { seen[0], seen[1], seen[2], seen[3] } : null) : ClipboardText.CString(seen);
                 return ClipboardText.ExpectedTextForm(f, text, locale);
             };
