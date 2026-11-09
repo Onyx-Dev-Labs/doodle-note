@@ -943,6 +943,82 @@ async function main() {
     await h.stop()
   }
 
+  // 17. A state file that does not parse (zeroed, as after a crash mid-write on some file systems) next to a whole
+  // payload: the record is rebuilt (no stage authority) and OFFERED, never deleted; Restore gives the user's back.
+  {
+    copyMulti(user)
+    await keptRecord('dictated text P')
+    const st = recordFiles().find((f) => f.endsWith('.state'))
+    if (st) {
+      const full = path.join(os.tmpdir(), st)
+      fs.writeFileSync(full, Buffer.alloc(fs.statSync(full).size))
+    }
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check(
+      'a zeroed state file with a whole payload is offered, not deleted',
+      !!st && !!listed && listed.offers.length === 1 && recordFiles().length === 2,
+      `${JSON.stringify(listed)}; ${recordFiles()}`
+    )
+    const offer = listed && listed.offers[0]
+    const restored = offer ? await restoreConfirming(h, offer) : null
+    check(
+      'and its Restore gives back the user clipboard',
+      !!restored &&
+        restored.result === 'restored' &&
+        names() === userFormats &&
+        recordFiles().length === 0,
+      `${JSON.stringify(restored)}; ${names()}; ${recordFiles()}`
+    )
+    await h.stop()
+  }
+
+  // 18. Another session's record (same user, shared %TEMP%): not offered here, and Dismiss with its id refuses it
+  // (nothing deleted); back in this session it is offered and Dismiss deletes it.
+  {
+    copyMulti(user)
+    await keptRecord('dictated text Q')
+    const st = recordFiles().find((f) => f.endsWith('.state'))
+    const full = st ? path.join(os.tmpdir(), st) : ''
+    const original = st ? fs.readFileSync(full, 'utf8') : ''
+    const record = st ? st.slice(recordPrefix.length, -'.state'.length) : ''
+    const session = st ? JSON.parse(original).session : -1
+    if (st)
+      fs.writeFileSync(full, JSON.stringify({ ...JSON.parse(original), session: session + 7 }))
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    const refused = st ? await h.req('clipboard-dismiss', { record }) : null
+    check(
+      "another session's record is not offered and Dismiss refuses it",
+      !!st &&
+        !!listed &&
+        listed.offers.length === 0 &&
+        !!refused &&
+        refused.dismissed === false &&
+        recordFiles().length === 2,
+      `${JSON.stringify(listed)}; ${JSON.stringify(refused)}; ${recordFiles()}`
+    )
+    await h.stop()
+    if (st) fs.writeFileSync(full, original)
+    const h2 = start(release)
+    await h2.ready
+    const again = await h2.req('clipboard-offers')
+    const o2 = again && again.offers[0]
+    const gone = o2 ? await h2.req('clipboard-dismiss', { record: o2.record }) : null
+    check(
+      'back in its own session it is offered and dismissed',
+      !!o2 &&
+        o2.record === record &&
+        !!gone &&
+        gone.dismissed === true &&
+        recordFiles().length === 0,
+      `${JSON.stringify(again)}; ${JSON.stringify(gone)}; ${recordFiles()}`
+    )
+    await h2.stop()
+  }
+
   // 7. Our complete write, unchanged since: the release helper restores it on its own at start (proof a).
   {
     copyMulti(user)
