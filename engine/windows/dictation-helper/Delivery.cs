@@ -1924,14 +1924,16 @@ namespace DoodleNote.DictationHelper
         /// Exactly these names. Any other format that answers NULL fails the first whole-save attempt and, on the second,
         /// is a named, reported skip (round 22, class 3), or a forced exclusion when it is a privacy marker (class 2).
         /// </summary>
-        internal static readonly HashSet<string> PresenceOnly = new HashSet<string>(StringComparer.Ordinal)
+        internal static readonly HashSet<string> PresenceOnly = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "MSDEVColumnSelect", "MSDEVLineSelect", "VisualStudioEditorOperationsLineCutCopyClipboardTag",
             // The clipboard-viewer convention (round 22): a format whose PRESENCE tells clipboard viewers and history tools
-            // to ignore the entry; its data is not used. KeePass sets it on the passwords it copies (ClipboardUtil,
-            // CfnViewerIgnore) and clipboard managers such as Ditto skip an entry that carries it.
-            "Clipboard Viewer Ignore"
+            // to ignore the entry; readers such as Ditto test its presence only and skip an entry that carries it. KeePass
+            // sets it on the passwords it copies WITH data (ClipboardUtil, CfnViewerIgnore); that data is not used by its
+            // readers, so it is put back as presence only. Round 23: it also keeps such a copy off the disk (PrivacyMarked).
+            ViewerIgnore
         };
+        const string ViewerIgnore = "Clipboard Viewer Ignore";
         /// <summary>The saved presence-only formats (see PresenceOnly).</summary>
         readonly List<uint> presenceOnly = new List<uint>();
 
@@ -2127,7 +2129,15 @@ namespace DoodleNote.DictationHelper
                 else if (name == PendingClipboard.SentinelFormat) { outcomes.Append(" ours, not saved (policy)"); continue; }
                 else if (Markers.Contains(name)) { saved.PrivacyMarked = true; marker = true; cap = MaxMarkerBytes; }
                 else if (SilentDrop.Contains(name)) { outcomes.Append(" not saved (OLE bookkeeping: policy)"); continue; }
-                else if (PresenceOnly.Contains(name)) { saved.presenceOnly.Add(format); outcomes.Append(" presence only (policy)"); continue; }
+                else if (PresenceOnly.Contains(name))
+                {
+                    saved.presenceOnly.Add(format);
+                    // Round 23 (Opus S-D): "Clipboard Viewer Ignore" means "do not record": such a copy is never written to
+                    // disk (in memory only, as a privacy-marked one); it is still put back as presence only.
+                    if (string.Equals(name, ViewerIgnore, StringComparison.OrdinalIgnoreCase)) saved.PrivacyMarked = true;
+                    outcomes.Append(" presence only (policy)");
+                    continue;
+                }
                 else cap = Math.Min(MaxFormatBytes, MaxBytes - total);
                 // Round 22: a recognised privacy marker that is skipped for ANY reason forces the conservative exclusion
                 // markers on the put-back (the content must never come back without its exclusion).
