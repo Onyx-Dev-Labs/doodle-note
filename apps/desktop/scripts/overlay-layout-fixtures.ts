@@ -32,7 +32,9 @@ export function helperNoSaveReasons(): string[] {
   )
   const reasons = new Set<string>()
   // The right-hand side of each assignment only (a ternary chain of literals, or one literal).
-  for (const m of source.matchAll(/\b(?:deliveryNoSave|LastNoSaveReason|NotStarted)\s*=\s*([^;]+);/g))
+  for (const m of source.matchAll(
+    /\b(?:deliveryNoSave|LastNoSaveReason|NotStarted)\s*=\s*([^;]+);/g
+  ))
     for (const token of m[1]!.matchAll(/"([a-z][a-z-]*)"/g)) reasons.add(token[1]!)
   return [...reasons].sort()
 }
