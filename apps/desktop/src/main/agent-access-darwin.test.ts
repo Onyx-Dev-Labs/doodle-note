@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import {
   chmodSync,
   closeSync,
+  constants as fsConstants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -15,6 +16,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  truncateSync,
   writeFileSync
 } from 'node:fs'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
@@ -605,24 +607,43 @@ test('round 11: a 220-character target name, directly or through a link, as the 
 
 /**
  * Runs `run` with `hook` called before each of these fs functions (the writer's
- * calls go through the same module object), so a change can be made at an exact
- * point of the write. A hook that throws stands for the call failing.
+ * calls go through the same module object; `realpathSync.native` as
+ * `realpathSync.native`), so a change can be made at an exact point of the
+ * write. A hook that throws stands for the call failing; one that returns a
+ * function is given the call's result.
  */
 const fsModule = createRequire(import.meta.url)('node:fs') as Record<string, unknown>
-function withFsHook(hook: (name: string, args: unknown[]) => void, run: () => void): void {
-  const names = ['accessSync', 'openSync', 'writeFileSync', 'renameSync', 'linkSync', 'unlinkSync']
+type FsHook = (name: string, args: unknown[]) => void | ((result: unknown) => void)
+function withFsHook(hook: FsHook, run: () => void): void {
+  const names = [
+    'accessSync',
+    'openSync',
+    'closeSync',
+    'statSync',
+    'writeFileSync',
+    'renameSync',
+    'linkSync',
+    'unlinkSync'
+  ]
   const originals = names.map((name) => fsModule[name] as (...args: unknown[]) => unknown)
-  names.forEach((name, i) => {
-    fsModule[name] = (...args: unknown[]) => {
-      hook(name, args)
-      return originals[i](...args)
+  const realpath = fsModule.realpathSync as { native: (...args: unknown[]) => unknown }
+  const native = realpath.native
+  const wrap =
+    (name: string, original: (...args: unknown[]) => unknown) =>
+    (...args: unknown[]) => {
+      const after = hook(name, args)
+      const result = original(...args)
+      if (typeof after === 'function') after(result)
+      return result
     }
-  })
+  names.forEach((name, i) => (fsModule[name] = wrap(name, originals[i])))
+  realpath.native = wrap('realpathSync.native', native)
   syncBuiltinESMExports()
   try {
     run()
   } finally {
     names.forEach((name, i) => (fsModule[name] = originals[i]))
+    realpath.native = native
     syncBuiltinESMExports()
   }
 }
@@ -1518,6 +1539,137 @@ test('round 12: a temporary file whose removal fails remains; the result stands'
         assert.equal(result, false)
         assert.equal(readFileSync(path, 'utf8'), '{"a":1}')
       }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+/** Every check before the replace, as the darwin writer makes it (round 13), and for which configs. */
+const CHECKS: {
+  site: string
+  at: (name: string, args: unknown[]) => boolean
+  exists: boolean[]
+}[] = [
+  // configWriteTarget: the config's own path resolved; for a new one, its folder.
+  { site: 'resolve', at: (name) => name === 'realpathSync.native', exists: [true, false] },
+  {
+    site: 'resolve folder',
+    at: (name, args) => name === 'realpathSync.native' && !String(args[0]).endsWith('.json'),
+    exists: [false]
+  },
+  { site: 'stat', at: (name) => name === 'statSync', exists: [true, false] },
+  { site: 'folder access', at: (name) => name === 'accessSync', exists: [true, false] },
+  // The authority: opened for writing, no create, no truncation.
+  {
+    site: 'open',
+    at: (name, args) => name === 'openSync' && args[1] === fsConstants.O_WRONLY,
+    exists: [true]
+  }
+]
+
+test('round 13: a failed check before the replace: the base decides only for BASE_DECIDES', (t) => {
+  // Astra P2 (round 9): an I/O error at the open or the access check fell back to
+  // the in-place write (round 12 classified only the replace's own steps).
+  const root = mkdtempSync(join(tmpdir(), 'dn-checks-'))
+  try {
+    let n = 0
+    for (const check of CHECKS)
+      for (const exists of check.exists)
+        for (const code of ['EIO', 'ENOMEM', 'EMFILE', 'EACCES', 'EPERM', 'EROFS']) {
+          const label = `${check.site}, ${exists ? 'existing' : 'new'} config, ${code}`
+          const folder = join(root, String(n++))
+          mkdirSync(folder)
+          const path = join(folder, 'config.json')
+          if (exists) writeFileSync(path, '{"a":1}')
+          const ino = exists ? statSync(path).ino : null
+          let fired = false
+          let inPlace = 0
+          let thrown: string | null = null
+          withFsHook(
+            (name, args) => {
+              if (name === 'writeFileSync' && typeof args[0] !== 'number') inPlace++
+              if (!fired && check.at(name, args)) {
+                fired = true
+                throw fsError(code)
+              }
+            },
+            () => {
+              try {
+                replaceConfigFileBase(path, '{"b":2}')
+              } catch (error) {
+                thrown = (error as NodeJS.ErrnoException).code ?? null
+              }
+            }
+          )
+          t.diagnostic(`${label}: ${thrown ?? 'written'}, ${inPlace} in-place writes`)
+          assert.ok(fired, `${label}: reached`)
+          const files = readdirSync(folder).sort()
+          if (['EACCES', 'EPERM', 'EROFS'].includes(code)) {
+            // Permission: the base's write decides, in place (here: written).
+            assert.equal(thrown, null, label)
+            assert.equal(inPlace, 1, `${label}: in place`)
+            assert.equal(readFileSync(path, 'utf8'), '{"b":2}', label)
+            if (posix && ino !== null) assert.equal(statSync(path).ino, ino, `${label}: same file`)
+            assert.deepEqual(files, ['config.json'], label)
+          } else {
+            // Anything else: thrown, nothing written, nothing created.
+            assert.equal(thrown, code, `${label}: surfaced`)
+            assert.equal(inPlace, 0, `${label}: no in-place write`)
+            assert.deepEqual(files, exists ? ['config.json'] : [], `${label}: nothing created`)
+            if (exists) assert.equal(readFileSync(path, 'utf8'), '{"a":1}', label)
+            if (posix && ino !== null) assert.equal(statSync(path).ino, ino, `${label}: same file`)
+          }
+        }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('round 13: after an I/O error at a check, the truncating in-place write is not reached', (t) => {
+  // Astra's second case: the fallback's own write then failed too (here: the file
+  // truncated, then EIO, as a write on a failing disk leaves it), and the config
+  // was left empty.
+  const root = mkdtempSync(join(tmpdir(), 'dn-checks-truncate-'))
+  try {
+    let n = 0
+    for (const check of CHECKS.filter((c) => c.exists.includes(true))) {
+      const label = `EIO at ${check.site}`
+      const folder = join(root, String(n++))
+      mkdirSync(folder)
+      const path = join(folder, 'config.json')
+      writeFileSync(path, '{"a":1}')
+      let fired = false
+      let inPlace = 0
+      let thrown: string | null = null
+      withFsHook(
+        (name, args) => {
+          if (name === 'writeFileSync' && typeof args[0] !== 'number') {
+            inPlace++
+            truncateSync(String(args[0]))
+            throw fsError('EIO')
+          }
+          if (!fired && check.at(name, args)) {
+            fired = true
+            throw fsError('EIO')
+          }
+        },
+        () => {
+          try {
+            replaceConfigFileBase(path, '{"b":2}')
+          } catch (error) {
+            thrown = (error as NodeJS.ErrnoException).code ?? null
+          }
+        }
+      )
+      const left = readFileSync(path, 'utf8')
+      t.diagnostic(
+        `${label}: ${thrown ?? 'written'}, ${inPlace} in-place writes, ${left.length} bytes left`
+      )
+      assert.equal(thrown, 'EIO', label)
+      assert.equal(inPlace, 0, `${label}: the in-place write is not reached`)
+      assert.equal(left, '{"a":1}', `${label}: the config intact`)
+      assert.deepEqual(readdirSync(folder), ['config.json'], label)
     }
   } finally {
     rmSync(root, { recursive: true, force: true })

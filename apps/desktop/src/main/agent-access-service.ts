@@ -94,9 +94,14 @@ export function sameConfigContent(a: string, b: string, dialect: 'json' | 'toml'
  * place cannot be determined this way (a missing or unreadable folder on the
  * way, a loop, a name ending in `.` or `..`); the caller then writes in place
  * (macOS: exactly the base's writeFileSync, which fails or succeeds as before)
- * or refuses (Windows).
+ * or refuses (Windows). An error for which `thrown` is true is thrown instead
+ * (round 13, macOS: one after which the base's write must not decide, an I/O
+ * error for example; see BASE_DECIDES).
  */
-export function configWriteTarget(path: string): string | null {
+export function configWriteTarget(
+  path: string,
+  thrown: (error: unknown) => boolean = () => false
+): string | null {
   const separators = process.platform === 'win32' ? /[\\/]/ : /\//
   let current = path
   for (let hops = 0; hops <= 40; hops++) {
@@ -105,7 +110,7 @@ export function configWriteTarget(path: string): string | null {
       // (Checked, not assumed: a realpath that accepted a missing last name.)
       if (!lstatSync(real).isSymbolicLink()) return real
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return unresolved(error, thrown)
     }
     // Something on the way does not exist: resolve the folder, then the last name.
     let cut = -1
@@ -121,8 +126,8 @@ export function configWriteTarget(path: string): string | null {
       const head = cut < 0 ? '.' : current.slice(0, cut) || current[0]
       // `C:` alone is the drive's current folder, not its root.
       folder = realpathSync.native(/^[A-Za-z]:$/.test(head) ? head + sep : head)
-    } catch {
-      return null
+    } catch (error) {
+      return unresolved(error, thrown)
     }
     const candidate = join(folder, leaf)
     let link: boolean
@@ -130,13 +135,24 @@ export function configWriteTarget(path: string): string | null {
       link = lstatSync(candidate).isSymbolicLink()
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return candidate
-      return null
+      return unresolved(error, thrown)
     }
     if (!link) return candidate
     // A dangling link: its text is relative to the link's real folder, taken verbatim.
-    const text = readlinkSync(candidate)
+    let text: string
+    try {
+      text = readlinkSync(candidate)
+    } catch (error) {
+      return unresolved(error, thrown)
+    }
     current = isAbsolute(text) ? text : `${folder}${sep}${text}`
   }
+  return null
+}
+
+/** configWriteTarget's answer to a failure: null, or the failure thrown. */
+function unresolved(error: unknown, thrown: (error: unknown) => boolean): null {
+  if (thrown(error)) throw error
   return null
 }
 
@@ -273,7 +289,10 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * decides: it succeeds or fails (same error) exactly as it would have at that
  * moment. Any other failure (a full disk, EDQUOT, EIO) is thrown with the original
  * untouched, where the base's write would have truncated it first (round 12: the
- * one difference in failure, disclosed).
+ * one difference in failure, disclosed). Round 13: the checks before the replace
+ * (resolving the path, the stat, the folder's access check and the open) are
+ * classified the same way: a BASE_DECIDES failure there leads to the base's
+ * in-place write, any other is thrown before anything is written or created.
  *
  * The temporary file is created exclusively (createTemporaryBeside: a taken name
  * is retried with a fresh one, then the base's write decides), and only a file
@@ -293,19 +312,25 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * before the link. It is `.dn-<8 hex>.tmp` in the config's folder.
  */
 export function replaceConfigFileBase(path: string, next: string): void {
-  const target = configWriteTarget(path)
+  const target = configWriteTarget(path, unclassified)
   let stats: ReturnType<typeof statSync> | null = null
+  let statFailed = false
   if (target !== null)
     try {
       stats = statSync(target)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') statFailed = baseDecides(error)
     }
-  // Not determinable (configWriteTarget), or a folder (or anything else that is
-  // not a file) in the config's place, or a read-only folder: written as the base
-  // wrote it, in place through the original path, so it fails (or succeeds)
-  // exactly as before.
-  if (target === null || (stats !== null && !stats.isFile()) || !writable(dirname(target))) {
+  // Not determinable (configWriteTarget, the stat), or a folder (or anything else
+  // that is not a file) in the config's place, or a read-only folder: written as
+  // the base wrote it, in place through the original path, so it fails (or
+  // succeeds) exactly as before.
+  if (
+    target === null ||
+    statFailed ||
+    (stats !== null && !stats.isFile()) ||
+    !writable(dirname(target))
+  ) {
     writeFileSync(path, next)
     return
   }
@@ -313,8 +338,10 @@ export function replaceConfigFileBase(path: string, next: string): void {
   if (stats !== null)
     try {
       authority = openSync(target, fsConstants.O_WRONLY)
-    } catch {
-      // Not writable (or gone) now: the base's write decides.
+    } catch (error) {
+      // Not writable (or gone) now: the base's write decides (round 13: only after
+      // a BASE_DECIDES failure; an I/O error is thrown, nothing written).
+      baseDecides(error)
       writeFileSync(path, next)
       return
     }
@@ -354,8 +381,7 @@ export function replaceConfigFileBase(path: string, next: string): void {
     // The original is untouched. A permission or compatibility failure, or a file
     // replaced or removed meanwhile: the base's write decides. Anything else (a
     // full disk, I/O) is thrown as is, the original left intact (round 12).
-    const code = (error as NodeJS.ErrnoException).code
-    if (error !== replaced && !BASE_DECIDES.has(code ?? '')) failure = error
+    if (error !== replaced && unclassified(error)) failure = error
   } finally {
     if (authority !== null) closeSync(authority)
     // Renamed into place: the name is free again and may be another writer's now.
@@ -366,16 +392,19 @@ export function replaceConfigFileBase(path: string, next: string): void {
 }
 
 /**
- * The failures of the atomic replace after which the base's in-place write
- * decides (round 12): those of permission and compatibility, where the base's own
- * write may succeed (or fails with its own error): access refused, a read-only
- * volume, no hard links or renames here (EXDEV, ENOTSUP, EINVAL, EMLINK), a name
- * too long, every temporary name taken or a file that appeared before the link
- * (EEXIST), and a file or folder removed meanwhile (ENOENT). Any other failure
- * (ENOSPC, EDQUOT, EIO, ENOMEM, EMFILE, ...) is thrown with the original
- * untouched, because the in-place write truncates first: on a full disk it would
- * leave the config empty or cut short (the base's behavior; a disclosed, owner-
- * acknowledged difference).
+ * The failures after which the base's in-place write decides (round 12: of the
+ * atomic replace; round 13: also of the checks before it): those of permission,
+ * compatibility and the name, where the base's own write may succeed (or fails
+ * with its own error): access refused, a read-only volume, no hard links or
+ * renames here (EXDEV, ENOTSUP, EOPNOTSUPP, EINVAL, EMLINK), a name too long,
+ * every temporary name taken or a file that appeared before the link (EEXIST), a
+ * file or folder removed meanwhile (ENOENT), and a name that does not lead to a
+ * file (round 13: ENOTDIR, EISDIR, ELOOP, each one the base's own open fails
+ * with, before it truncates anything). Any other failure (ENOSPC, EDQUOT, EIO,
+ * ENOMEM, EMFILE, ...) is thrown with the original untouched, because the
+ * in-place write truncates first: on a full disk it would leave the config empty
+ * or cut short (the base's behavior; a disclosed difference, for the owner to
+ * acknowledge).
  */
 const BASE_DECIDES = new Set([
   'EACCES',
@@ -388,15 +417,34 @@ const BASE_DECIDES = new Set([
   'EMLINK',
   'ENAMETOOLONG',
   'EEXIST',
-  'ENOENT'
+  'ENOENT',
+  'ENOTDIR',
+  'EISDIR',
+  'ELOOP'
 ])
 
-/** access(2) W_OK (macOS: also honours ACLs and the immutable flags). */
+/** True for a failure after which the base's write must not decide (not BASE_DECIDES). */
+function unclassified(error: unknown): boolean {
+  return !BASE_DECIDES.has((error as NodeJS.ErrnoException).code ?? '')
+}
+
+/** Returns true for a BASE_DECIDES failure (the base's write decides); throws any other. */
+function baseDecides(error: unknown): true {
+  if (unclassified(error)) throw error
+  return true
+}
+
+/**
+ * access(2) W_OK (macOS: also honours ACLs and the immutable flags). False after
+ * a BASE_DECIDES failure; any other is thrown (round 13: an I/O error is not a
+ * read-only folder).
+ */
 function writable(path: string): boolean {
   try {
     accessSync(path, fsConstants.W_OK)
     return true
-  } catch {
+  } catch (error) {
+    baseDecides(error)
     return false
   }
 }
