@@ -14,11 +14,14 @@ import {
   describeClipboardSize,
   overlaySize,
   listMissing,
+  graphemes,
+  CLIPBOARD_NOT_SAVED_MESSAGES,
   overlayView,
   panelView,
   type OverlayContext,
   type OverlayView
 } from './dictation-overlay-view'
+import { helperNoSaveReasons } from '../../scripts/overlay-layout-fixtures'
 
 const ctx = (over: Partial<OverlayContext> = {}): OverlayContext => ({
   micOpen: true,
@@ -482,6 +485,23 @@ test('macOS (round 25): every card keeps its exact size from before round 24 (th
   // And Windows does grow a long card (the round-24 fix stays where it is needed).
   const [, card] = views[0]!
   assert.ok(overlaySize({ ...card, warning: 'w '.repeat(200) }, 'win32').height > 158)
+})
+
+test('Windows (round 25): every no-paste reason the helper can send has its own sentence, and the layout fixtures render exactly those', () => {
+  const helper = helperNoSaveReasons()
+  assert.ok(helper.length >= 10, `the helper's reasons were found (${helper})`)
+  assert.deepEqual([...CLIPBOARD_NOT_SAVED_MESSAGES.keys()].sort(), helper)
+})
+
+test('Windows (round 25): names are cut on grapheme boundaries (an emoji sequence is never split)', () => {
+  const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'
+  const cut = listMissing([family.repeat(70)])
+  const parts = graphemes(cut)
+  assert.equal(parts.length, 61, 'sixty clusters and the ellipsis')
+  assert.ok(
+    parts.slice(0, 60).every((p) => p === family),
+    'every cluster whole'
+  )
 })
 
 test('Windows: the clipboard offer card names formats and size only, with Restore and Dismiss', () => {

@@ -45,7 +45,12 @@ interface Harness {
     delivery: HelperDelivery
     /** Windows: false when the fake helper would not be restarted on its own. */
     willRestart?: boolean
-    clipboardLateListener?: (clipboard: string, deliveryId?: string, missing?: string[]) => void
+    clipboardLateListener?: (
+      clipboard: string,
+      deliveryId?: string,
+      missing?: string[],
+      record?: string
+    ) => void
     lastDeliveryId?: string
     /** Round 23: what the fake helper sends before it answers a Restore (the real event order). */
     beforeRestoreAnswer?: () => void
@@ -252,7 +257,12 @@ function harness(
       available: true,
       willRestart: () => helper.willRestart !== false,
       onClipboardLate: (
-        listener: (clipboard: string, deliveryId?: string, missing?: string[]) => void
+        listener: (
+          clipboard: string,
+          deliveryId?: string,
+          missing?: string[],
+          record?: string
+        ) => void
       ) => {
         helper.clipboardLateListener = listener
         return () => {}
@@ -3045,8 +3055,13 @@ test('Windows (round 22): a Restore the helper finds incomplete empties nothing;
 })
 
 /** How many times the overlay came to show `title` (one notice is one arrival, however often it is re-rendered). */
-const arrivals = (h: ReturnType<typeof harness>, title: string): number =>
-  h.overlay.filter((v, i) => v.title === title && h.overlay[i - 1]?.title !== title).length
+/**
+ * Round 25: how many clipboard NOTICES the service raised with this sentence (each panel it set counts once,
+ * however often it is re-rendered or redrawn with the same title).
+ */
+const notices = (h: ReturnType<typeof harness>, title: string): number =>
+  (h.service as unknown as { noticesRaised: string[] }).noticesRaised.filter((t) => t === title)
+    .length
 
 for (const order of ['offer-gone and recovered', 'offer-gone only'] as const) {
   test(`Windows (rounds 23-24): a completed Restore whose offer was withdrawn first (${order} before the reply) names what is missing, exactly once`, async () => {
@@ -3079,7 +3094,7 @@ for (const order of ['offer-gone and recovered', 'offer-gone only'] as const) {
     const title =
       'Your clipboard was put back except: FileContents (not provided by the app that copied it).'
     assert.equal(h.overlay.at(-1)!.title, title)
-    assert.equal(arrivals(h, title), 1, 'exactly one notice')
+    assert.equal(notices(h, title), 1, 'exactly one notice')
   })
 }
 
@@ -3104,6 +3119,22 @@ test('Windows (round 24): a click acts only on the card the user saw (an offer-g
   assert.deepEqual(h.helper.restoreCalls, [], 'nor without the record')
 })
 
+test('Windows (round 25): an offer refused as nothing-to-restore keeps no Restore when the list is loaded again', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const kept = offer({ incomplete: true, content: 1, missing: ['X (y)'] })
+  h.helper.offers = [kept]
+  h.helper.restoreAnswers = [{ result: 'nothing-to-restore', missing: ['X (y)'] }]
+  await h.service.start()
+  await tick()
+  clickOffer(h, 'offer-restore')
+  await tick()
+  assert.ok(!h.overlay.at(-1)!.controls.offerRestore)
+  // An older helper lists it again with its formats as the content count.
+  await (h.service as unknown as { loadClipboardOffers(): Promise<void> }).loadClipboardOffers()
+  await tick()
+  assert.ok(!h.overlay.at(-1)!.controls.offerRestore, 'still no Restore after the reload')
+})
+
 test('Windows (round 24, the one rule at Restore): an incomplete offer with no user content shows no Restore; a helper that finds none says so', async () => {
   const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
   h.helper.offers = [offer({ incomplete: true, content: 0, missing: ['CF_DIB (too large)'] })]
@@ -3123,41 +3154,66 @@ test('Windows (round 24, the one rule at Restore): an incomplete offer with no u
   assert.ok(!n.overlay.at(-1)!.controls.offerRestore, 'the card no longer offers Restore')
 })
 
-test('Windows (round 24): a Restore that got no answer in time shows its result when the helper reports it later', async () => {
-  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
-  await h.service.start()
-  h.helper.delivery = {
-    outcome: 'delivered',
-    method: 'paste',
-    verified: true,
-    clipboard: 'restored'
-  }
-  await speak(h, 'some words')
-  await tick()
-  const kept = offer({ delivery: 'd-old', incomplete: true, missing: ['X (y)'] })
-  h.helper.offers = [kept]
-  h.helper.offerListener!(kept)
-  await tick()
-  h.helper.restoreAnswers = [{ result: 'failed' }]
-  clickOffer(h, 'offer-restore')
-  await tick()
-  h.helper.offers = []
-  h.helper.offerGoneListener!(kept.record)
-  h.helper.clipboardLateListener!('restored-partially', 'd-old', ['X (y)'])
-  await tick()
-  assert.equal(h.overlay.at(-1)!.title, 'Your clipboard was put back except: X (y).')
-})
+for (const delivery of ['d-old', ''] as const) {
+  test(`Windows (rounds 24-25): a Restore that got no answer in time shows its result when the helper reports it later, matched by its RECORD (delivery ${delivery ? 'named' : 'empty: a rebuilt record'}); an event naming nothing changes nothing; a later answer adds no second notice`, async () => {
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    await h.service.start()
+    h.helper.delivery = {
+      outcome: 'delivered',
+      method: 'paste',
+      verified: true,
+      clipboard: 'restored'
+    }
+    await speak(h, 'some words')
+    await tick()
+    const kept = offer({ delivery, incomplete: true, missing: ['X (y)'] })
+    h.helper.offers = [kept]
+    h.helper.offerListener!(kept)
+    await tick()
+    h.helper.restoreAnswers = [{ result: 'failed' }]
+    clickOffer(h, 'offer-restore')
+    await tick()
+    // An older helper's event with no ids at all: never the newest delivery's notice, never the Restore's.
+    const before = h.overlay.at(-1)!.title
+    h.helper.clipboardLateListener!('restored-partially', undefined, ['Z (z)'])
+    await tick()
+    assert.equal(h.overlay.at(-1)!.title, before, 'an unidentified event changes nothing')
+    h.helper.offers = []
+    h.helper.offerGoneListener!(kept.record)
+    h.helper.clipboardLateListener!(
+      'restored-partially',
+      delivery || undefined,
+      ['X (y)'],
+      kept.record
+    )
+    await tick()
+    const title = 'Your clipboard was put back except: X (y).'
+    assert.equal(h.overlay.at(-1)!.title, title)
+    // The same result again (a retried event): no second notice.
+    h.helper.clipboardLateListener!(
+      'restored-partially',
+      delivery || undefined,
+      ['X (y)'],
+      kept.record
+    )
+    await tick()
+    assert.equal(notices(h, title), 1, 'exactly one notice')
+  })
+}
 
 test('Windows (round 24): a clipboard too large to save gives no paste-it-yourself advice once typing put the text in', async () => {
+  // Round 25: the advice only when the text was NOT inserted (an uncertain insertion may have put it in).
   for (const [outcome, advice] of [
     ['delivered', false],
-    ['uncertain', true]
+    ['uncertain', false],
+    ['refused', true]
   ] as const) {
     const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
     await h.service.start()
     h.helper.delivery = {
       outcome,
       ...(outcome === 'uncertain' ? { reason: 'insertion-unverifiable' } : {}),
+      ...(outcome === 'refused' ? { reason: 'focus-changed' } : {}),
       method: 'type',
       verified: outcome === 'delivered',
       clipboard: 'untouched',

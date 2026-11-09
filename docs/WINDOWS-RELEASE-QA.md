@@ -482,12 +482,16 @@ was lost on read-back) is never restored: the helper answers "nothing-to-restore
 counts the user content it holds (`content`, not `formats`, which also counts flags and CF_LOCALE), and its card
 offers no Restore, only Dismiss.
 
-The overlay card (round 24, Astra): its window grows to fit the title, the warning and at least one line of the
-dictated text (an estimate, at most 300 px), and the page bounds every block: the buttons never shrink, the text
-keeps one line, and a long warning scrolls inside the card. CI renders every notice variant in Electron's Chromium
-with the bundled font at the size the app gives it and checks that the buttons and a line of the text are in view.
-An offer card's buttons name the record the page shows, and the app acts only on that record (a click never reaches
-an offer that became current since).
+The overlay card (round 24, Astra; Windows only since round 25): on Windows its window grows to fit the title, the
+warning and at least one line of the dictated text (an estimate, at most 300 px); on macOS every card keeps its
+exact pre-round-24 size (pinned by a unit test). The page bounds every block on both: the buttons never shrink, the
+text keeps one line (1lh), and a long warning scrolls inside the card. CI renders every Windows notice variant in
+Electron's Chromium with the BUNDLED font (the check fails unless that face loads; round 25) at the size the app
+gives it, checks that exactly the buttons the view asked for are shown and in view with a line of the text, and
+clicks each button through the overlay window's own URL pattern. An offer card's buttons name the record the page
+shows, and the app acts only on that record (a click never reaches an offer that became current since). A Restore
+that got no answer in time is matched to its later result by its record (round 25: a rebuilt record has no
+delivery); an event that names neither a delivery nor a record never changes the current notice.
 
 | Class | What | The save | The put-back | What the user is told |
 | --- | --- | --- | --- | --- |

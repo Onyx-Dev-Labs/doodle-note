@@ -23,7 +23,7 @@ defines.__DOODLENOTE_BARK_WHITE__ = asset('src/renderer/src/assets/bark/bark-whi
 
 /**
  * The no-paste reasons the HELPER can send (round 25: taken from its source, not from the app's own table): every
- * quoted token assigned to deliveryNoSave, LastNoSaveReason or NotStarted in Delivery.cs.
+ * quoted token on the right of an assignment to deliveryNoSave, LastNoSaveReason or NotStarted in Delivery.cs.
  */
 export function helperNoSaveReasons(): string[] {
   const source = readFileSync(
@@ -31,9 +31,9 @@ export function helperNoSaveReasons(): string[] {
     'utf8'
   )
   const reasons = new Set<string>()
-  for (const line of source.split('\n'))
-    if (/\b(deliveryNoSave|LastNoSaveReason|NotStarted)\s*=/.test(line))
-      for (const m of line.matchAll(/"([a-z][a-z-]*)"/g)) reasons.add(m[1]!)
+  // The right-hand side of each assignment only (a ternary chain of literals, or one literal).
+  for (const m of source.matchAll(/\b(?:deliveryNoSave|LastNoSaveReason|NotStarted)\s*=\s*([^;]+);/g))
+    for (const token of m[1]!.matchAll(/"([a-z][a-z-]*)"/g)) reasons.add(token[1]!)
   return [...reasons].sort()
 }
 

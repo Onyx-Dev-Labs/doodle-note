@@ -444,10 +444,20 @@ export const CLIPBOARD_NOT_SAVED_MESSAGES: ReadonlyMap<string, string> = new Map
 const TOO_LARGE_HINT =
   ' Copy something smaller first, or copy the dictated text from DoodleNote and paste it yourself.'
 
-/** A string cut to `max` code points (never inside a surrogate pair), with an ellipsis. */
+const GRAPHEMES =
+  typeof Intl !== 'undefined' && 'Segmenter' in Intl
+    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    : null
+
+/** A text's user-perceived characters (grapheme clusters; code points where Intl.Segmenter is absent). */
+export function graphemes(text: string): string[] {
+  return GRAPHEMES ? Array.from(GRAPHEMES.segment(text), (s) => s.segment) : Array.from(text)
+}
+
+/** A string cut to `max` characters, never inside a grapheme cluster (round 25), with an ellipsis. */
 function clip(text: string, max: number): string {
-  const points = Array.from(text)
-  return points.length > max ? `${points.slice(0, max).join('')}…` : text
+  const parts = graphemes(text)
+  return parts.length > max ? `${parts.slice(0, max).join('')}…` : text
 }
 
 /**

@@ -263,6 +263,7 @@ process.stdin.on('data', (d) => {
       send({ event: 'clipboard', phase: 'late-restore', id: req.id, clipboard: 'skipped', missing: ['FileContents (not provided by the app that copied it)'] })
       send({ event: 'reply', id: req.id, ok: true, outcome: 'uncertain', verified: false, method: 'paste', clipboard: 'unrestored', clipboardHolds: 'unknown' })
       send({ event: 'clipboard', phase: 'late-restore', id: 'older', clipboard: 'partial', missing: ['CF_BITMAP (no picture to rebuild it from)'] })
+      send({ event: 'clipboard', phase: 'recovered', id: '', record: 'abcdefabcdefabcdefabcdefabcdefab', clipboard: 'restored-partially', missing: ['X (y)'] })
     } else send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
   }
 })
@@ -275,8 +276,8 @@ process.stdin.on('end', () => process.exit(0))
     platform: 'win32'
   })
   const late: string[] = []
-  client.onClipboardLate((clipboard, id, missing) =>
-    late.push(`${clipboard} ${id} ${(missing ?? []).join('|')}`)
+  client.onClipboardLate((clipboard, id, missing, record) =>
+    late.push(`${clipboard} ${id} ${(missing ?? []).join('|')}${record ? ' ' + record : ''}`)
   )
   try {
     const result = await client.deliver('s1', 'x', {}, 'd1')
@@ -284,8 +285,12 @@ process.stdin.on('end', () => process.exit(0))
     assert.deepEqual(result.clipboardMissing, [
       'FileContents (not provided by the app that copied it)'
     ])
-    assert.ok(await waitFor(() => late.length === 1))
-    assert.deepEqual(late, ['partial older CF_BITMAP (no picture to rebuild it from)'])
+    assert.ok(await waitFor(() => late.length === 2))
+    // Round 25: a recovered event carries its record (a rebuilt record's delivery is empty).
+    assert.deepEqual(late, [
+      'partial older CF_BITMAP (no picture to rebuild it from)',
+      'restored-partially undefined X (y) abcdefabcdefabcdefabcdefabcdefab'
+    ])
   } finally {
     await client.dispose()
   }
