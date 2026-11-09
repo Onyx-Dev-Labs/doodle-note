@@ -196,6 +196,56 @@ test('Windows: a kept clipboard is offered (never sent as a late result), restor
   }
 })
 
+test('Windows (round 22): an incomplete offer carries what is missing; a Restore that accepts it says so and the answer names it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-offer-'))
+  const script = join(dir, 'helper.js')
+  writeFileSync(
+    script,
+    `
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+const offer = { record: 'fedcba9876543210fedcba9876543210', delivery: 'd1', formats: 3, bytes: 900, sequence: 7, created: '', likelyOurs: false, incomplete: true, missing: ['FileContents (not provided by the app that copied it)', 5] }
+send({ event: 'ready', pid: process.pid, platform: 'win32' })
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    if (req.op === 'clipboard-offers') send({ event: 'reply', id: req.id, ok: true, offers: [offer] })
+    else if (req.op === 'clipboard-restore') send({ event: 'reply', id: req.id, ok: true, ...(req.acceptIncomplete === true ? { result: 'restored-partially', missing: offer.missing } : { result: 'incomplete', missing: offer.missing }) })
+    else if (req.op === 'deliver') send({ event: 'reply', id: req.id, ok: true, outcome: 'delivered', verified: true, method: 'paste', clipboard: 'skipped', clipboardMissing: ['FileContents (not provided by the app that copied it)'], clipboardNotice: 'bogus' })
+    else send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`
+  )
+  const client = new DictationHelperClient({
+    command: process.execPath,
+    args: [script],
+    platform: 'win32'
+  })
+  try {
+    const offers = (await client.clipboardOffers()) ?? []
+    assert.equal(offers.length, 1)
+    assert.equal(offers[0]!.incomplete, true)
+    assert.deepEqual(
+      offers[0]!.missing,
+      ['FileContents (not provided by the app that copied it)'],
+      'non-strings dropped'
+    )
+    assert.deepEqual(await client.restoreClipboardOffer(offers[0]!.record, 7), {
+      result: 'incomplete',
+      missing: ['FileContents (not provided by the app that copied it)']
+    })
+    assert.deepEqual(await client.restoreClipboardOffer(offers[0]!.record, 7, true), {
+      result: 'restored-partially',
+      missing: ['FileContents (not provided by the app that copied it)']
+    })
+  } finally {
+    await client.dispose()
+  }
+})
+
 test('Windows: deliveries outstanding at once are bounded; a late result of an outstanding one is never evicted', async () => {
   const client = new DictationHelperClient({ ...offerHelper(), platform: 'win32' })
   try {

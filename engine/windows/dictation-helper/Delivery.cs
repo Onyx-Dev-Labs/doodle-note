@@ -54,6 +54,13 @@ namespace DoodleNote.DictationHelper
         public GuardStats Settle;
         /// <summary>The slowest single provider (UIA) call during THIS delivery, in ms (diagnostics).</summary>
         public double ProviderSlowestMs = -1;
+        /// <summary>
+        /// Round 22: for a put-back that could not be whole (skipped, partial), what was not put back, by name and reason
+        /// (for example "FileContents (not provided by the app that copied it)"), so the app can say so.
+        /// </summary>
+        public List<string> ClipboardMissing;
+        /// <summary>Round 22: not-saved when the clipboard could not be saved, so nothing was pasted (the app says why).</summary>
+        public string ClipboardNotice;
 
         public DeliveryResult(DeliveryOutcome outcome, string reason) { Outcome = outcome; Reason = reason; }
 
@@ -69,6 +76,8 @@ namespace DoodleNote.DictationHelper
             if (Guard != null && Guard.Count > 0) output["guard"] = Guard.Fields();
             if (Settle != null && Settle.Count > 0) output["settle"] = Settle.Fields();
             if (ProviderSlowestMs >= 0) output["providerSlowestMs"] = Math.Round(ProviderSlowestMs, 1);
+            if (ClipboardMissing != null && ClipboardMissing.Count > 0) output["clipboardMissing"] = ClipboardMissing;
+            if (ClipboardNotice != null) output["clipboardNotice"] = ClipboardNotice;
             return output;
         }
     }
@@ -170,6 +179,10 @@ namespace DoodleNote.DictationHelper
         /// <summary>The deliver request being served on this thread (so a late clipboard rollback can name it).</summary>
         public static string CurrentRequestId { get { return currentRequestId; } set { currentRequestId = value; } }
         [ThreadStatic] static string currentRequestId;
+        /// <summary>This delivery's established save (for the names of what its put-back could not include).</summary>
+        [ThreadStatic] static SavedClipboard deliverySave;
+        /// <summary>This delivery's paste could not save the clipboard (no window, or no established save).</summary>
+        [ThreadStatic] static bool deliveryNotSaved;
 
         static int Ms(Stopwatch watch) { return (int)watch.ElapsedMilliseconds; }
 
@@ -180,12 +193,29 @@ namespace DoodleNote.DictationHelper
             BoundedStats stats = Bounded.Track();
             try
             {
+                deliverySave = null;
+                deliveryNotSaved = false;
                 DeliveryResult result = DeliverInner(snapshot, text, guards, timings, deadlineMs, alreadyElapsedMs, stats);
                 result.Timings = timings;
+                ClipboardNotes(result, deliverySave, deliveryNotSaved);
                 if (result.ProviderSlowestMs < 0 && stats.SlowestMs > 0) result.ProviderSlowestMs = stats.SlowestMs;
                 return result;
             }
-            finally { Bounded.Untrack(); }
+            finally { Bounded.Untrack(); deliverySave = null; deliveryNotSaved = false; }
+        }
+
+        /// <summary>
+        /// Round 22: the reply names what a put-back short of whole did not include (skipped, partial), and says when the
+        /// clipboard could not be saved at all (so nothing was pasted), so the user is told, never left guessing.
+        /// </summary>
+        internal static void ClipboardNotes(DeliveryResult result, SavedClipboard saved, bool notSaved)
+        {
+            if (saved != null && (result.Clipboard == "skipped" || result.Clipboard == "partial"))
+            {
+                List<string> missing = saved.Missing();
+                if (missing.Count > 0) result.ClipboardMissing = missing;
+            }
+            if (notSaved && result.Clipboard == "untouched") result.ClipboardNotice = "not-saved";
         }
 
         /// <summary>How long a paste is expected to take, start to settled, for the deadline check.</summary>
@@ -395,7 +425,11 @@ namespace DoodleNote.DictationHelper
             // Test build only: a target that pastes by reading the synthesized ANSI text formats (an ANSI or
             // RichEdit app does), on another thread right after "Ctrl+V", as a real target would.
             if (TestMode.Env("DICTATION_HELPER_TEST_TARGET_READ") == "ansi") SimulateAnsiTargetRead();
-            return saved.Restore(ours) + "|" + savedFormats;
+            string put = saved.Restore(ours);
+            // Round 22: what the delivery's reply would name as not put back (clipboardMissing).
+            DeliveryResult notes = new DeliveryResult(DeliveryOutcome.Delivered, null) { Clipboard = put };
+            ClipboardNotes(notes, saved, false);
+            return put + "|" + savedFormats + (notes.ClipboardMissing != null ? "|missing=" + string.Join(";", notes.ClipboardMissing.ToArray()) : "");
         }
 
         static void SimulateAnsiTargetRead()
@@ -471,7 +505,7 @@ namespace DoodleNote.DictationHelper
             late = null;
             saved = null;
             // Round 22: without the helper's own window nothing is opened at all (no save, no write): not pasting.
-            if (Ui.ClipboardWindow == IntPtr.Zero) { Wire.Log("the helper has no clipboard window; not pasting (nothing opened)"); return "no-save"; }
+            if (Ui.ClipboardWindow == IntPtr.Zero) { Wire.Log("the helper has no clipboard window; not pasting (nothing opened)"); deliveryNotSaved = true; return "no-save"; }
             // An earlier transaction that could not be put back gets its chance first (before our write).
             PendingClipboard.RecoverLeftover("delivery");
             // That check can take a while with several kept records (each opens the clipboard): the paste starts only if it
@@ -480,7 +514,8 @@ namespace DoodleNote.DictationHelper
             // Saving the user's clipboard renders lazily-provided formats (OLE "Embed Source" and the
             // like), which can take arbitrarily long; it runs in the reader process, bounded per format.
             saved = SavedClipboard.CaptureBounded(CaptureBudgetMs);
-            if (saved == null) return "no-save";
+            if (saved == null) { deliveryNotSaved = true; return "no-save"; }
+            deliverySave = saved;
             if (afterSave != null) afterSave(saved);
             // Emptying the clipboard sends WM_DESTROYCLIPBOARD to its owner and waits for its answer
             // (measured on Dev04: Windows gave up after about 5.2 s on a hung owner). An owner that does
@@ -2044,6 +2079,23 @@ namespace DoodleNote.DictationHelper
         /// <summary>The formats the save could not keep, by name and reason (written down; the restore result names them to the app).</summary>
         internal readonly List<string> skippedNames = new List<string>();
         public IList<string> SkippedNames { get { return skippedNames; } }
+        /// <summary>What a record read back could not bring back (ReadFrom), by name and reason (never written down).</summary>
+        readonly List<string> lostNames = new List<string>();
+
+        /// <summary>
+        /// Round 22 (S3): part of this clipboard could not be saved, kept or read back. Its put-back can only be partial:
+        /// the user's Restore of such an offer runs only when the card said so (acceptIncomplete).
+        /// </summary>
+        public bool Incomplete { get { return contentLost || reportedSkip || !complete; } }
+
+        /// <summary>What a put-back of this save cannot include, by name and reason (a generic line when no name is known).</summary>
+        public List<string> Missing()
+        {
+            List<string> missing = new List<string>(skippedNames);
+            missing.AddRange(lostNames);
+            if (missing.Count == 0 && Incomplete) missing.Add("part of the copied content (it could not be kept)");
+            return missing;
+        }
 
         /// <summary>A format's name for a notice: its registered name, or the standard name.</summary>
         internal static string DisplayName(uint format, string name)
@@ -2119,7 +2171,8 @@ namespace DoodleNote.DictationHelper
                 {
                     // A presence-only format (round 22): it must name one of the known ones, or the record is incomplete.
                     uint registered = PresenceOnly.Contains(name) ? Native.RegisterClipboardFormat(name) : 0;
-                    if (registered != 0) saved.presenceOnly.Add(registered); else saved.contentLost = true;
+                    if (registered != 0) saved.presenceOnly.Add(registered);
+                    else { saved.contentLost = true; saved.lostNames.Add((name.Length > 0 ? name : "a registered format") + " (could not be read back)"); }
                     continue;
                 }
                 byte[] bytes = reader.ReadBytes(length);
@@ -2127,10 +2180,10 @@ namespace DoodleNote.DictationHelper
                 // Round 21: a registered format with no name, or one that cannot be registered again, cannot go back:
                 // the record is INCOMPLETE (never "restored", never deleted as already there), not silently smaller.
                 if (format != 0) saved.items.Add(new KeyValuePair<uint, byte[]>(format, bytes));
-                else saved.contentLost = true;
+                else { saved.contentLost = true; saved.lostNames.Add((name.Length > 0 ? name : "a registered format") + " (its name could not be read back)"); }
             }
             int metaLength = reader.ReadInt32();
-            if (metaLength < 0) { saved.contentLost = true; saved.metafileExpected = true; } // round 22: an EMF that could not be written down: incomplete, never absent
+            if (metaLength < 0) { saved.contentLost = true; saved.metafileExpected = true; saved.lostNames.Add("CF_ENHMETAFILE (it could not be written down)"); } // round 22: an EMF that could not be written down: incomplete, never absent
             if (metaLength > 0)
             {
                 byte[] bits = reader.ReadBytes(metaLength);
@@ -2138,11 +2191,11 @@ namespace DoodleNote.DictationHelper
                 saved.metafile = Native.SetEnhMetaFileBits((uint)bits.Length, bits);
                 // A metafile that cannot be rebuilt is part of the save that cannot go back: never "restored", never
                 // "already on the clipboard" (so such a record is never dropped as untouched).
-                if (saved.metafile == IntPtr.Zero) saved.contentLost = true;
+                if (saved.metafile == IntPtr.Zero) { saved.contentLost = true; saved.lostNames.Add("CF_ENHMETAFILE (it could not be rebuilt)"); }
             }
             saved.forceMarkers = reader.ReadBoolean();
             saved.complete = reader.ReadBoolean() && !saved.contentLost;
-            if (TestMode.Env("DICTATION_HELPER_TEST_RECORD_LOSES_NAME") == "1" && saved.items.Count > 0) { saved.items.RemoveAt(saved.items.Count - 1); saved.contentLost = true; saved.complete = false; } // test build only
+            if (TestMode.Env("DICTATION_HELPER_TEST_RECORD_LOSES_NAME") == "1" && saved.items.Count > 0) { saved.items.RemoveAt(saved.items.Count - 1); saved.contentLost = true; saved.complete = false; saved.lostNames.Add("a registered format (its name could not be read back)"); } // test build only
             saved.reportedSkip = reader.ReadBoolean();
             if (reader.BaseStream.Position < reader.BaseStream.Length)
             {

@@ -332,7 +332,9 @@ test('Windows: the clipboard offer card names formats and size only, with Restor
         bytes: 900,
         sequence: 3,
         created: '',
-        likelyOurs: false
+        likelyOurs: false,
+        incomplete: false,
+        missing: []
       }
     },
     base

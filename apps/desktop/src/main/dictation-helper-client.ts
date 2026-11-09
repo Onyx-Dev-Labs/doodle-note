@@ -212,8 +212,19 @@ function toOffer(value: unknown): ClipboardOffer | null {
     bytes: o.bytes,
     sequence: o.sequence,
     created: typeof o.created === 'string' ? o.created : '',
-    likelyOurs: o.likelyOurs === true
+    likelyOurs: o.likelyOurs === true,
+    incomplete: o.incomplete === true,
+    missing: toNames(o.missing)
   }
+}
+
+/** Format names and reasons from the helper (strings only, bounded): what a put-back did not include. */
+function toNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((name): name is string => typeof name === 'string' && name.length > 0)
+    .slice(0, 16)
+    .map((name) => (name.length > 160 ? `${name.slice(0, 160)}…` : name))
 }
 
 export class DictationHelperClient {
@@ -364,14 +375,25 @@ export class DictationHelperClient {
    * `sequence` (the offer's, or the one a "changed" answer gave); otherwise "changed" says what a
    * restore would overwrite (formats and size only).
    */
-  async restoreClipboardOffer(record: string, sequence: number): Promise<ClipboardOfferRestore> {
+  async restoreClipboardOffer(
+    record: string,
+    sequence: number,
+    acceptIncomplete = false
+  ): Promise<ClipboardOfferRestore> {
     if (!this.windows) return { result: 'gone' }
+    // acceptIncomplete: the card showed the user what an incomplete offer cannot put back.
     const reply = await this.serialOffer(() =>
-      this.request('clipboard-restore', { record, sequence }, this.timeouts.deliver)
+      this.request(
+        'clipboard-restore',
+        { record, sequence, ...(acceptIncomplete ? { acceptIncomplete: true } : {}) },
+        this.timeouts.deliver
+      )
     )
     if (!reply || typeof reply.result !== 'string') return { result: 'failed' }
+    const missing = toNames(reply.missing)
     return {
       result: reply.result,
+      ...(missing.length > 0 ? { missing } : {}),
       ...(typeof reply.formats === 'number' ? { formats: reply.formats } : {}),
       ...(typeof reply.bytes === 'number' || reply.bytes === null
         ? { bytes: reply.bytes as number | null }
@@ -601,7 +623,11 @@ export class DictationHelperClient {
       reply.clipboardHolds === 'foreign' ||
       reply.clipboardHolds === 'unknown'
         ? { clipboardHolds: reply.clipboardHolds }
-        : {})
+        : {}),
+      ...(toNames(reply.clipboardMissing).length > 0
+        ? { clipboardMissing: toNames(reply.clipboardMissing) }
+        : {}),
+      ...(reply.clipboardNotice === 'not-saved' ? { clipboardNotice: 'not-saved' as const } : {})
     }
   }
 

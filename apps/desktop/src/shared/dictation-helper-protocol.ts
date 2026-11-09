@@ -100,6 +100,13 @@ export interface HelperDelivery {
   charsUnconfirmed?: number
   /** Windows, when the clipboard is "unrestored": what it holds now. */
   clipboardHolds?: 'dictated' | 'foreign' | 'unknown'
+  /**
+   * Windows, when the clipboard is "skipped" or "partial": what was not put back, by name and reason
+   * (for example "FileContents (not provided by the app that copied it)").
+   */
+  clipboardMissing?: string[]
+  /** Windows: not-saved when the clipboard could not be saved, so nothing was pasted. */
+  clipboardNotice?: 'not-saved'
 }
 
 export type HoldFailure = 'input-monitoring-denied' | 'unknown-key' | 'helper-unavailable'
@@ -242,12 +249,17 @@ export interface ClipboardOffer {
   created: string
   /** A hint only (never authority to write): the state looked like ours, cut short. */
   likelyOurs: boolean
+  /** Part of this clipboard could not be saved or read back: a Restore puts back the rest (the card says what). */
+  incomplete: boolean
+  /** What an incomplete offer cannot put back, by name and reason. */
+  missing: string[]
 }
 
 /** Windows: what the user's Restore of an offer did. */
 export interface ClipboardOfferRestore {
-  /** restored | partial | skipped: done. changed: the clipboard changed since (formats/bytes: what a restore would overwrite now; sequence: ask again with it). gone: the offer no longer stands. failed | unrestored | busy | helper-busy: not done, still offered. */
+  /** restored | partial | skipped | restored-partially (an incomplete offer: everything else is back; `missing` says what is not): done. changed: the clipboard changed since (formats/bytes: what a restore would overwrite now; sequence: ask again with it). gone: the offer no longer stands. incomplete: the offer is incomplete and the request did not accept that (nothing emptied; `missing`). failed | unrestored | busy | helper-busy: not done, still offered. */
   result: string
+  missing?: string[]
   formats?: number
   bytes?: number | null
   sequence?: number

@@ -321,6 +321,8 @@ export type ClipboardProblem =
   | 'unrestored-foreign'
   /** Not put back; what it holds could not be told. */
   | 'unrestored-unknown'
+  /** The clipboard could not be saved, so it was not used (nothing pasted; left as it was). */
+  | 'not-saved'
 
 /** What the overlay says about each clipboard problem. Accurate to what the helper reported. */
 export const CLIPBOARD_PROBLEM_MESSAGES: Record<ClipboardProblem, string> = {
@@ -330,15 +332,30 @@ export const CLIPBOARD_PROBLEM_MESSAGES: Record<ClipboardProblem, string> = {
   'unrestored-foreign':
     'Your earlier clipboard could not be put back. It now holds what another app copied since.',
   'unrestored-unknown':
-    'Your clipboard could not be put back, and DoodleNote could not tell what it holds now.'
+    'Your clipboard could not be put back, and DoodleNote could not tell what it holds now.',
+  'not-saved':
+    'DoodleNote could not save your clipboard, so it did not paste with it. Your clipboard was left as it was.'
+}
+
+/**
+ * The sentence for a clipboard problem. When the helper named what a put-back did not include, the
+ * sentence names it ("Your clipboard was put back except: FileContents (not provided by the app that copied it).").
+ */
+export function clipboardProblemMessage(problem: ClipboardProblem, missing?: string[]): string {
+  if ((problem === 'skipped' || problem === 'partial') && missing && missing.length > 0)
+    return `Your clipboard was put back except: ${missing.join('; ')}.`
+  return CLIPBOARD_PROBLEM_MESSAGES[problem]
 }
 
 /** The clipboard problem a helper restore result describes, or null when there is none. */
 export function clipboardProblem(
   result: string | undefined,
-  holds?: string
+  holds?: string,
+  notice?: string
 ): ClipboardProblem | null {
   if (result === 'skipped' || result === 'partial') return result
+  if (result === 'restored-partially') return 'partial'
+  if (notice === 'not-saved' && (result === undefined || result === 'untouched')) return 'not-saved'
   if (result !== 'unrestored') return null
   // Only what the helper reported: our text, another app's newer copy, or unknown.
   if (holds === 'dictated') return 'unrestored'
@@ -352,7 +369,7 @@ export type OverlayPanel =
   | { kind: 'changed'; name: string }
   | { kind: 'diff'; name: string; segments: DiffSegment[] }
   | { kind: 'learned'; pairs: Array<{ from: string; to: string }> }
-  | { kind: 'clipboard'; problem: ClipboardProblem }
+  | { kind: 'clipboard'; problem: ClipboardProblem; missing?: string[] }
   /** Windows: a kept clipboard the helper could not prove its own; `changed`: what a restore would overwrite now. */
   | {
       kind: 'clipboard-offer'
@@ -388,7 +405,9 @@ export const CLIPBOARD_OFFER_COPY = {
   confirmTitle: 'Delete the saved clipboard?',
   confirmDetail: (saved: string): string =>
     `Delete saved copy removes what you had copied before the dictation (${saved}) for good; your clipboard stays as it is. Keep it brings the offer back.`,
-  deleteFailed: 'The saved copy could not be deleted. Try again.'
+  deleteFailed: 'The saved copy could not be deleted. Try again.',
+  incomplete: (missing: string[]): string =>
+    `Part of this clipboard could not be saved${missing.length > 0 ? `: ${missing.join('; ')}` : ''}. Restore puts back the rest.`
 } as const
 
 /** The view for a panel; `base` supplies the edge and the quiet settings. */
@@ -435,7 +454,7 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
       return {
         ...common,
         tone: 'warn',
-        title: CLIPBOARD_PROBLEM_MESSAGES[panel.problem],
+        title: clipboardProblemMessage(panel.problem, panel.missing),
         controls: { ...NONE, dismiss: true },
         diff: null
       }
@@ -461,6 +480,10 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
               describeClipboardSize(panel.changed.formats, panel.changed.bytes)
             )
           : CLIPBOARD_OFFER_COPY.detail(saved),
+        // Round 22: an incomplete offer says what a Restore cannot put back, before the user chooses.
+        warning: panel.offer.incomplete
+          ? CLIPBOARD_OFFER_COPY.incomplete(panel.offer.missing)
+          : null,
         controls: { ...NONE, offerRestore: true, offerDismiss: true },
         diff: null
       }

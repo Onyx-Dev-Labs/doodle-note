@@ -501,10 +501,12 @@ namespace DoodleNote.DictationHelper
                         // The user's Restore of an offer: runs only while the clipboard is as it was when offered.
                         string record = Wire.Str(request, "record") ?? "";
                         uint expect = (uint)(Wire.Num(request, "sequence") ?? 0);
+                        // Round 22 (S3): the app showed the user what an incomplete record is missing.
+                        bool acceptIncomplete = Wire.Bool(request, "acceptIncomplete") == true;
                         work.Async(id, delegate
                         {
                             if (!DeliveriesInFlight.Begin()) { Wire.Reply(id, true, Wire.Fields("result", "helper-busy")); return; }
-                            try { Wire.Reply(id, true, PendingClipboard.RestoreOffer(record, expect)); }
+                            try { Wire.Reply(id, true, PendingClipboard.RestoreOffer(record, expect, acceptIncomplete)); }
                             finally { DeliveriesInFlight.End(); }
                         });
                     }

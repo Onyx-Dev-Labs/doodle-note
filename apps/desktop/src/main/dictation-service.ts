@@ -75,9 +75,9 @@ import type { PermissionOutcome, PermissionPane } from '../shared/dictation-perm
 import type { CaptureLease, CaptureOwnership } from './capture-ownership'
 import { MAX_CLEANUP_CHARS, buildTransformRequest, validateTransform } from './dictation-cleanup'
 import {
-  CLIPBOARD_PROBLEM_MESSAGES,
   RECOVERY_MESSAGES,
   clipboardProblem,
+  clipboardProblemMessage,
   overlayView,
   panelView,
   type OverlayContext,
@@ -165,7 +165,11 @@ export interface HelperLike {
   onClipboardOfferGone?(listener: (record: string) => void): () => void
   /** Null when no valid list came: the service keeps what it holds. */
   clipboardOffers?(): Promise<ClipboardOffer[] | null>
-  restoreClipboardOffer?(record: string, sequence: number): Promise<ClipboardOfferRestore>
+  restoreClipboardOffer?(
+    record: string,
+    sequence: number,
+    acceptIncomplete?: boolean
+  ): Promise<ClipboardOfferRestore>
   dismissClipboardOffer?(record: string): Promise<boolean>
   /** Windows: whether this identity has kept clipboard records on disk (a cheap check; no helper started). */
   hasKeptClipboard?(): boolean
@@ -548,9 +552,20 @@ export class DictationService {
     if (!offer || !this.deps.helper.restoreClipboardOffer) return
     const changed = this.offerChanged?.record === offer.record ? this.offerChanged : null
     const sequence = changed?.sequence ?? offer.sequence
-    const done = await this.deps.helper.restoreClipboardOffer(offer.record, sequence)
+    // An incomplete offer's card says what a Restore cannot put back: the click accepts exactly that.
+    const done = await this.deps.helper.restoreClipboardOffer(
+      offer.record,
+      sequence,
+      offer.incomplete === true
+    )
     this.deps.log(`clipboard offer: restore ${done.result}`)
     if (!this.offers.has(offer.record)) return
+    if (done.result === 'incomplete') {
+      // The helper found it incomplete but the card had not said so: nothing was emptied; the card says it now.
+      this.offers.set(offer.record, { ...offer, incomplete: true, missing: done.missing ?? [] })
+      this.refreshOfferPanel()
+      return
+    }
     if (done.result === 'changed' && typeof done.sequence === 'number') {
       // Ask again, showing what a restore would overwrite now (formats and size only).
       this.offerChanged = {
@@ -562,10 +577,19 @@ export class DictationService {
       this.refreshOfferPanel()
       return
     }
-    if (done.result === 'restored' || done.result === 'partial' || done.result === 'skipped') {
+    if (
+      done.result === 'restored' ||
+      done.result === 'partial' ||
+      done.result === 'skipped' ||
+      done.result === 'restored-partially'
+    ) {
       const problem = clipboardProblem(done.result, undefined)
       await this.offerResolved(offer.record)
-      if (problem) this.setPanel({ kind: 'clipboard', problem }, NOTICE_MS)
+      if (problem)
+        this.setPanel(
+          { kind: 'clipboard', problem, ...(done.missing ? { missing: done.missing } : {}) },
+          NOTICE_MS
+        )
       return
     }
     if (done.result === 'gone') await this.offerResolved(offer.record)
@@ -1999,25 +2023,30 @@ export class DictationService {
     kind: string
     clipboard?: string
     clipboardHolds?: string
+    clipboardMissing?: string[]
+    clipboardNotice?: string
     deliveryId?: string
   }): string | null {
     // The newest delivery is the one a later clipboard result may still change.
     if (this.windows) this.clipboardDelivery = outcome.deliveryId ?? null
     const problem = this.windows
-      ? clipboardProblem(outcome.clipboard, outcome.clipboardHolds)
+      ? clipboardProblem(outcome.clipboard, outcome.clipboardHolds, outcome.clipboardNotice)
       : null
     if (!problem) return null
+    // Round 22: what the helper named as not put back is said by name.
+    const missing = outcome.clipboardMissing
+    const message = clipboardProblemMessage(problem, missing)
     if (outcome.kind === 'delivered') {
-      this.setPanel({ kind: 'clipboard', problem }, NOTICE_MS)
+      this.setPanel({ kind: 'clipboard', problem, ...(missing ? { missing } : {}) }, NOTICE_MS)
       return null
     }
     const resting = this.state.resting
     if (resting?.kind === 'recovery') {
-      this.clipboardWarning = { gen: resting.gen, message: CLIPBOARD_PROBLEM_MESSAGES[problem] }
+      this.clipboardWarning = { gen: resting.gen, message }
       this.render()
       return null
     }
-    return CLIPBOARD_PROBLEM_MESSAGES[problem]
+    return message
   }
 
   /**
@@ -2036,7 +2065,7 @@ export class DictationService {
     this.deps.log(`clipboard result after the reply: ${clipboard}`)
     if (this.clipboardWarning) {
       this.clipboardWarning = problem
-        ? { gen: this.clipboardWarning.gen, message: CLIPBOARD_PROBLEM_MESSAGES[problem] }
+        ? { gen: this.clipboardWarning.gen, message: clipboardProblemMessage(problem) }
         : null
       this.render()
     }
@@ -2047,7 +2076,7 @@ export class DictationService {
     else if (problem && !this.clipboardWarning) {
       const resting = this.state.resting
       if (resting?.kind === 'recovery') {
-        this.clipboardWarning = { gen: resting.gen, message: CLIPBOARD_PROBLEM_MESSAGES[problem] }
+        this.clipboardWarning = { gen: resting.gen, message: clipboardProblemMessage(problem) }
         this.render()
       } else this.setPanel({ kind: 'clipboard', problem }, NOTICE_MS)
     }
@@ -2063,6 +2092,8 @@ export class DictationService {
       helper?: HelperDeliveryTimings
       clipboard?: string
       clipboardHolds?: string
+      clipboardMissing?: string[]
+      clipboardNotice?: string
       deliveryId?: string
     }
   > {
@@ -2084,6 +2115,8 @@ export class DictationService {
       ...(result.timings ? { helper: result.timings } : {}),
       clipboard: result.clipboard,
       ...(result.clipboardHolds ? { clipboardHolds: result.clipboardHolds } : {}),
+      ...(result.clipboardMissing ? { clipboardMissing: result.clipboardMissing } : {}),
+      ...(result.clipboardNotice ? { clipboardNotice: result.clipboardNotice } : {}),
       ...(deliveryId ? { deliveryId } : {})
     }
     if (result.outcome === 'delivered') return { kind: 'delivered', ...helper }

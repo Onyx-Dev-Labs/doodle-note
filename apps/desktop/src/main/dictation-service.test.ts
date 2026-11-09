@@ -52,7 +52,7 @@ interface Harness {
     offerListener?: (offer: ClipboardOffer) => void
     offerGoneListener?: (record: string) => void
     restoreAnswers: ClipboardOfferRestore[]
-    restoreCalls: Array<{ record: string; sequence: number }>
+    restoreCalls: Array<{ record: string; sequence: number; acceptIncomplete?: boolean }>
     dismissCalls: string[]
     /** What the fake helper answers to a dismiss (the real deletion result). */
     dismissResult: boolean
@@ -262,8 +262,16 @@ function harness(
         return () => {}
       },
       clipboardOffers: async () => (helper.offersUnavailable ? null : helper.offers),
-      restoreClipboardOffer: async (record: string, sequence: number) => {
-        helper.restoreCalls.push({ record, sequence })
+      restoreClipboardOffer: async (
+        record: string,
+        sequence: number,
+        acceptIncomplete?: boolean
+      ) => {
+        helper.restoreCalls.push({
+          record,
+          sequence,
+          ...(acceptIncomplete ? { acceptIncomplete } : {})
+        })
         return helper.restoreAnswers.shift() ?? { result: 'restored' }
       },
       dismissClipboardOffer: async (record: string) => {
@@ -2943,6 +2951,8 @@ const offer = (over: Partial<ClipboardOffer> = {}): ClipboardOffer => ({
   sequence: 41,
   created: '2026-11-08T10:00:00Z',
   likelyOurs: true,
+  incomplete: false,
+  missing: [],
   ...over
 })
 
@@ -2970,6 +2980,88 @@ test('Windows: a kept clipboard is offered with Restore and Dismiss, formats and
   await tick()
   assert.deepEqual(h.helper.restoreCalls, [{ record: offer().record, sequence: 41 }])
   assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+})
+
+test('Windows (round 22): an incomplete offer says what is missing before Restore, and the Restore accepts exactly that', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const missing = ['FileContents (not provided by the app that copied it)']
+  h.helper.offers = [offer({ incomplete: true, missing })]
+  h.helper.restoreAnswers = [{ result: 'restored-partially', missing }]
+  await h.service.start()
+  await tick()
+  const card = h.overlay.at(-1)!
+  assert.equal(
+    card.warning,
+    'Part of this clipboard could not be saved: FileContents (not provided by the app that copied it). Restore puts back the rest.'
+  )
+  h.helper.offers = []
+  h.service.onOverlayAction('offer-restore', null)
+  await tick()
+  assert.deepEqual(h.helper.restoreCalls, [
+    { record: offer().record, sequence: 41, acceptIncomplete: true }
+  ])
+  assert.equal(
+    h.overlay.at(-1)!.title,
+    'Your clipboard was put back except: FileContents (not provided by the app that copied it).'
+  )
+})
+
+test('Windows (round 22): a Restore the helper finds incomplete empties nothing; the card then says what is missing', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  h.helper.offers = [offer()]
+  h.helper.restoreAnswers = [
+    { result: 'incomplete', missing: ['CF_ENHMETAFILE (it could not be rebuilt)'] }
+  ]
+  await h.service.start()
+  await tick()
+  assert.equal(h.overlay.at(-1)!.warning, null)
+  h.service.onOverlayAction('offer-restore', null)
+  await tick()
+  assert.deepEqual(h.helper.restoreCalls, [{ record: offer().record, sequence: 41 }])
+  assert.match(
+    h.overlay.at(-1)!.warning ?? '',
+    /could not be saved: CF_ENHMETAFILE \(it could not be rebuilt\)/
+  )
+  h.service.onOverlayAction('offer-restore', null)
+  await tick()
+  assert.deepEqual(h.helper.restoreCalls.at(-1), {
+    record: offer().record,
+    sequence: 41,
+    acceptIncomplete: true
+  })
+})
+
+test('Windows (round 22): a paste whose put-back skipped an owner-unrendered format names it; an unsaved clipboard is said too', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await h.service.start()
+  h.helper.delivery = {
+    outcome: 'delivered',
+    method: 'paste',
+    verified: true,
+    clipboard: 'skipped',
+    clipboardMissing: ['FileContents (not provided by the app that copied it)']
+  }
+  await speak(h, 'some words')
+  await tick()
+  assert.equal(
+    h.overlay.at(-1)!.title,
+    'Your clipboard was put back except: FileContents (not provided by the app that copied it).'
+  )
+  const n = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await n.service.start()
+  n.helper.delivery = {
+    outcome: 'delivered',
+    method: 'type',
+    verified: true,
+    clipboard: 'untouched',
+    clipboardNotice: 'not-saved'
+  }
+  await speak(n, 'typed words')
+  await tick()
+  assert.match(
+    n.overlay.at(-1)!.title,
+    /could not save your clipboard, so it did not paste with it/
+  )
 })
 
 test('Windows: a clipboard that changed since the offer is shown and asked again, never overwritten silently', async () => {

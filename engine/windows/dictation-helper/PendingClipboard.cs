@@ -75,6 +75,9 @@ namespace DoodleNote.DictationHelper
         public DateTime Created;
         /// <summary>A hint only (the order of offers), never authority to write: the state looked like ours cut short.</summary>
         public bool LikelyOurs;
+        /// <summary>Round 22 (S3): part of this clipboard could not be saved or read back; Missing names what (the card says so).</summary>
+        public bool Incomplete;
+        public List<string> Missing = new List<string>();
         /// <summary>The first offer's tick and boot (kept in memory too, in case the state file could not take them).</summary>
         public long Tick;
         public string Boot = "";
@@ -82,7 +85,8 @@ namespace DoodleNote.DictationHelper
         public Dictionary<string, object> Fields()
         {
             return Wire.Fields("record", Record, "delivery", Delivery ?? "", "formats", Formats, "bytes", (double)Bytes,
-                "sequence", (double)Sequence, "created", Created.ToString("o"), "likelyOurs", LikelyOurs);
+                "sequence", (double)Sequence, "created", Created.ToString("o"), "likelyOurs", LikelyOurs,
+                "incomplete", Incomplete, "missing", Missing);
         }
     }
 
@@ -763,14 +767,17 @@ namespace DoodleNote.DictationHelper
         /// when offered (the same sequence): otherwise "changed", with what a restore would overwrite (formats
         /// and size only) and the new sequence, so the app can ask again.
         /// </summary>
-        public static Dictionary<string, object> RestoreOffer(string id, uint expectSequence)
+        /// Round 22 (S3): an INCOMPLETE record is put back only when the app showed the user what is missing
+        /// (acceptIncomplete); otherwise "incomplete" with the missing names, nothing emptied. Its put-back answers
+        /// "restored-partially" with what it could not include.
+        public static Dictionary<string, object> RestoreOffer(string id, uint expectSequence, bool acceptIncomplete = false)
         {
             lock (gate)
             {
                 if (!RecordName.IsMatch(Prefix + id + ".state") || Probe(StatePath(id)) == Presence.Absent) return Wire.Fields("result", "gone");
                 RecoverResult result;
                 Dictionary<string, object> reply = Wire.Fields();
-                string verdict = RecoverOne(id, out result, true, expectSequence, reply);
+                string verdict = RecoverOne(id, out result, true, expectSequence, reply, 0, acceptIncomplete);
                 if (verdict != null) Wire.Log("clipboard record " + id.Substring(0, 8) + " (the user's restore): " + verdict);
                 if (result != RecoverResult.Done && result != RecoverResult.Foreign) ScheduleRetry(id, RetryKind.Check); // never for another session's
                 return reply;
@@ -806,7 +813,7 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>Under gate. Null when there was nothing to say. `byUser`: the user's restore of an offer (reply filled).</summary>
-        static string RecoverOne(string id, out RecoverResult result, bool byUser, uint expectSequence, Dictionary<string, object> reply = null, int depth = 0)
+        static string RecoverOne(string id, out RecoverResult result, bool byUser, uint expectSequence, Dictionary<string, object> reply = null, int depth = 0, bool acceptIncomplete = false)
         {
             result = RecoverResult.Done;
             if (reply == null) reply = Wire.Fields();
@@ -849,7 +856,7 @@ namespace DoodleNote.DictationHelper
                 if (kept == "busy") { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state (" + invalid + "); its payload could not be read now; kept"; }
                 if (kept != "rebuilt") return "invalid state, no usable payload; " + (DeleteId(id, "an invalid state (" + invalid + ") and no usable payload (" + kept + ")") ? "deleted" : "deletion deferred (kept)");
                 Wire.Log("clipboard record " + id.Substring(0, 8) + ": an invalid state (" + invalid + ") was rebuilt from its payload (offer-only, unknown identity)");
-                return RecoverOne(id, out result, byUser, expectSequence, reply, depth + 1);
+                return RecoverOne(id, out result, byUser, expectSequence, reply, depth + 1, acceptIncomplete);
             }
             RecordFacts facts = RecordFacts.Of(state); // facts.OfferOnly is the ON-DISK value (a later write heals a failed one)
             // First of all: another session's record (same user, same boot, shared %TEMP%) is never touched here.
@@ -999,6 +1006,16 @@ namespace DoodleNote.DictationHelper
                     Offer(id, facts, saved, view);
                     return "the user's restore: the clipboard changed since the offer (" + seen + "); asked again";
                 }
+                // Round 22 (S3): part of it could not be saved or read back. Nothing is emptied unless the user was told
+                // exactly what is missing (the card shows it and the app says so with acceptIncomplete).
+                if (saved.Incomplete && !acceptIncomplete)
+                {
+                    result = RecoverResult.Pending;
+                    reply["result"] = "incomplete";
+                    reply["missing"] = saved.Missing();
+                    Offer(id, facts, saved, view);
+                    return "the user's restore: the record is incomplete and the user was not shown what is missing; nothing emptied, kept";
+                }
                 // Journaled like a delivery, offer-only from the start (an interrupted Restore is offered again, never
                 // finished on its own). It carries no sequence facts: nothing on disk is proof of anything.
                 PendingRecord journal = new PendingRecord(id, nonce) { Persisted = true, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, DictatedHash = dictatedHash,
@@ -1031,8 +1048,12 @@ namespace DoodleNote.DictationHelper
                 bool journaled = Stage(journal, "recovering-emptied", Native.GetClipboardSequenceNumber());
                 int stall = TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_MS", 0);
                 if (stall > 0) Thread.Sleep(stall); // test build only: die with the clipboard emptied by the user's Restore
-                string restored = saved.PutBackResult(saved.PutBackOpen(trace));
-                reply["result"] = restored;
+                bool setOk = saved.PutBackOpen(trace);
+                string restored = saved.PutBackResult(setOk);
+                // Round 22 (S3): an incomplete record's put-back of everything that survived answers exactly that.
+                bool partially = setOk && saved.Incomplete;
+                reply["result"] = partially ? "restored-partially" : restored;
+                if (partially) reply["missing"] = saved.Missing();
                 if (!journaled)
                 {
                     // Put back now (the user's content must not stay off the clipboard); the record is kept, as an offer.
@@ -1236,7 +1257,7 @@ namespace DoodleNote.DictationHelper
             {
                 Record = id, Delivery = facts.Delivery, Formats = saved.FormatCount, Bytes = saved.ByteCount,
                 Sequence = facts.OfferedSequence, Created = facts.CreatedUtc, LikelyOurs = view.LooksInterrupted,
-                Tick = facts.OfferedTick, Boot = facts.OfferedBoot
+                Tick = facts.OfferedTick, Boot = facts.OfferedBoot, Incomplete = saved.Incomplete, Missing = saved.Incomplete ? saved.Missing() : new List<string>()
             };
             if (offers.ContainsKey(id)) return; // already announced by this helper: unchanged (the app lists offers itself)
             offers[id] = offer;
