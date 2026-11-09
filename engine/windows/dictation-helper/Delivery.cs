@@ -1160,8 +1160,8 @@ namespace DoodleNote.DictationHelper
                 if (stall > 0) Thread.Sleep(stall);
                 if (Native.EmptyClipboard())
                 {
-                    // The sequence right after OUR EmptyClipboard, read under the same lock: the only proof an
-                    // empty clipboard is our doing (PendingClipboard.Decide).
+                    // The sequence right after OUR EmptyClipboard, read under the same lock (journaled for diagnostics;
+                    // since round 18 no sequence on disk is proof of anything).
                     uint emptiedAt = Native.GetClipboardSequenceNumber();
                     bool journaled = PendingClipboard.Stage(record, "emptied", emptiedAt);
                     int afterEmpty = TestMode.Int("DICTATION_HELPER_TEST_STALL_AFTER_EMPTY_MS", 0);
@@ -1190,7 +1190,8 @@ namespace DoodleNote.DictationHelper
                     // managers that honor it, leave entries with these formats alone.
                     SetConservativeMarkers();
                     // Our transaction's sentinel, LAST (it is never the first format a reader sees): with our
-                    // exact markers and our text (by hash) it proves our complete write (Decide).
+                    // exact markers and our text (by hash) it identifies our complete write to THIS live transaction
+                    // (its confirmation and its later looks); nothing read from disk acts on it.
                     // The locale Windows will state at our close: this thread's input language (the sentinel carries it,
                     // so every later look knows which code pages Windows converted our text with).
                     ownership.TextLocale = InputLocale();
@@ -2185,10 +2186,9 @@ namespace DoodleNote.DictationHelper
                 }
                 // If the clipboard cannot be emptied, do not partially overwrite it: report it plainly.
                 // (A test build can simulate EmptyClipboard failing here.)
-                // Journaled before our EmptyClipboard (with the sequence then: our write), and again right after
-                // it under the same lock (the sequence our empty left), so a restore cut short anywhere is
-                // provably ours to finish (PendingClipboard.Decide). A restore sets no sentinel: a restored
-                // clipboard holds only the user's content.
+                // Journaled before our EmptyClipboard and again right after it under the same lock, so a restore cut
+                // short anywhere leaves a record that is offered (since round 18 nothing on disk finishes it on its
+                // own). A restore sets no sentinel: a restored clipboard holds only the user's content.
                 // Every journal result is honored: without "restoring" nothing is emptied (kept, retried).
                 if (!PendingClipboard.Stage(Record, "restoring", Native.GetClipboardSequenceNumber()))
                 {

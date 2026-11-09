@@ -95,27 +95,19 @@ namespace DoodleNote.DictationHelper
     /// formats, whether the save was complete, the transaction's nonce and the dictated text's SHA-256)
     /// and a small plain state file (no user content) in the per-user %TEMP% under the app identity.
     ///
-    /// The state file journals the transaction, each stage with the clipboard sequence number that goes
-    /// with it. Stages BEFORE an EmptyClipboard of ours carry the sequence before it (emptying, restoring,
-    /// recovering); stages AFTER one carry the sequence read under the same lock right after our
-    /// EmptyClipboard returned (emptied, restore-emptied, recovering-emptied) and, when the clipboard was
-    /// closed afterwards with the record kept, the sequence read again after the close with our window
-    /// still the owner. "written" carries the sequence read inside our write's lock and the one confirmed
-    /// after the close. A recovery keeps the stage it FOUND as its origin. Every record carries its logon
+    /// The state file journals the transaction's stage around every EmptyClipboard of ours (emptying, emptied,
+    /// written, restoring, restore-emptied, recovering, recovering-emptied, settled), with the sequence number of
+    /// that moment for diagnostics only (round 18: no sequence on disk is proof). Every record carries its logon
     /// identity: the window-station session, the logon session (LUID), a per-logon key in a volatile
     /// registry key, Windows' boot counter and the tick count; the wall clock is never part of it.
     ///
-    /// POLICY. The helper writes the user's saved content back on its own ONLY when the clipboard is
-    /// provably ours (Decide): (a) our complete write (every format's bytes ours: sentinel with this
-    /// transaction's nonce, our text by its hash and the ANSI, OEM and locale forms Windows makes of it, our exact markers) at a
-    /// sequence within our own operations, or (b) an empty clipboard at exactly the sequence journaled under
-    /// our lock right after OUR EmptyClipboard. Ownership of the clipboard is not proof. Every other state is
-    /// PENDING: the record is kept, nothing is written, and the app offers the user a Restore (a journaled
-    /// transaction of its own, run only if the clipboard is still as it was when offered) or a Dismiss. The
-    /// full list of what deletes a record is in docs/WINDOWS-RELEASE-QA.md; retention and the boot limit are
-    /// policies, not proofs the content is no longer wanted. OFFER-ONLY (round 17): once a record loses authority
-    /// (a rejection, kept as an offer, offered, rebuilt, adopted, a restore that did not complete) the fact is
-    /// persisted and Decide never restores it on its own again. The state file is validated strictly
+    /// POLICY (round 18). No automatic restore authority ever comes from disk: a record read back here is OFFERED
+    /// (Decide), except another session's (left alone) and one whose saved content is already exactly on the clipboard
+    /// (deleted, nothing written). The only automatic restore is the live transaction's own, in the process that wrote
+    /// (SavedClipboard.Restore, behind its one guard). The app offers the user a Restore (a journaled transaction of
+    /// its own, run only if the clipboard is still as it was when offered) or a Dismiss. The full list of what deletes
+    /// a record is in docs/WINDOWS-RELEASE-QA.md; retention and the boot limit are policies, not proofs the content is
+    /// no longer wanted. The persisted offerOnly field is informational. The state file is validated strictly
     /// (RecordFacts.Validate): an invalid one proves nothing and never deletes a valid payload.
     ///
     /// Privacy: content that carries any clipboard privacy marker (password managers set them to say
@@ -1298,9 +1290,8 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>
         /// The retention's own check runs the full decision procedure for every record of this identity (RecoverLeftover):
-        /// the state is read, another session's records and those of a running helper are left alone, a provable
-        /// state is restored, and only a pending one is measured against the retention. Nothing is deleted here on age
-        /// alone.
+        /// the state is read, another session's records and those of a running helper are left alone, and an offered
+        /// record is measured against the retention (nothing is restored here). Nothing is deleted on age alone.
         /// </summary>
         internal static void ExpireSweep()
         {
