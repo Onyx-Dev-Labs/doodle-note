@@ -1022,6 +1022,17 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(false, complete(new uint[0], 0, 4), "nothing listed but 4 counted: incomplete");
         }
 
+        public static void OnlyAWholeSaveIsEverAlreadyThere()
+        {
+            // Round 23 (B2): the retained subset of an incomplete save back on the clipboard is never "nothing missing".
+            var text = new KeyValuePair<uint, byte[]>(13, new byte[] { 65, 0, 0, 0 });
+            var present = new List<uint> { 13 };
+            Assert.Equal(true, SavedClipboard.ForTest(new[] { text }, false).AllPresent(present), "control: a whole save, all present");
+            Assert.Equal(false, SavedClipboard.ForTest(new[] { text }, false, true, true).AllPresent(present), "a reported skip (class 3, a cap, a policy): never already there");
+            Assert.Equal(false, SavedClipboard.ForTest(new[] { text }, false, false, false).AllPresent(present), "not complete (a bitmap not rebuilt): never already there");
+            Assert.Equal(false, SavedClipboard.ForTest(new[] { text }, false, true, true).Incomplete == false, "and it is incomplete (its Restore says restored-partially)");
+        }
+
         public static void ARecordThatCannotGoBackWholeIsNeverRestored()
         {
             // Round 21: on reading a record, a registered format with an empty name (or one that cannot be registered)

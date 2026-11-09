@@ -989,7 +989,8 @@ namespace DoodleNote.DictationHelper
                 RecoveryVerdict verdict = Decide(facts, view, match);
                 string seen = view.Describe() + "; sequence " + view.Sequence + ", recorded " + facts.Stage + ", logon " + match.ToString().ToLowerInvariant();
                 if (verdict == RecoveryVerdict.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record (" + seen + "); left to it"; } // not retried here (S-A)
-                if (verdict == RecoveryVerdict.Untouched)
+                // Round 23 (B2): only a WHOLE save can be "already there" (AllPresent says so too; checked here again).
+                if (verdict == RecoveryVerdict.Untouched && !saved.Incomplete)
                 {
                     if (byUser) reply["result"] = "restored";
                     bool gone = DeleteId(id, "nothing of the user's is missing");

@@ -1331,7 +1331,6 @@ namespace DoodleNote.DictationHelper
                         Wire.Log((abandoned ? "the late clipboard write" : "the unjournaled clipboard write") + " put the user's saved content back: " + ownership.PutBack);
                         return false;
                     }
-                    ownership.Emptied = true;
                     // Test build only: the write throws right after emptying the clipboard (round 22, Opus S2).
                     if (TestMode.Env("DICTATION_HELPER_TEST_THROW_AFTER_EMPTY") == "1") throw new InvalidOperationException("test: thrown after EmptyClipboard");
                     // Test build only: simulate SetClipboardData failing after the clipboard was emptied.
@@ -2390,6 +2389,9 @@ namespace DoodleNote.DictationHelper
                 if (trace != null) trace.Set(0, -1, marked, marked ? 0 : -1);
                 if (!marked) ok = false;
             }
+            // Test build only (round 23, B2): die with every retained format set back, before the close.
+            int stallEnd = TestMode.Int("DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS", 0);
+            if (stallEnd > 0) Thread.Sleep(stallEnd);
             return ok;
         }
 
@@ -2407,10 +2409,15 @@ namespace DoodleNote.DictationHelper
                 return total;
             }
         }
-        /// <summary>Every saved format is among the present ones (with MatchesOpenClipboard: the clipboard holds exactly the saved content).</summary>
+        /// <summary>
+        /// Every saved format is among the present ones (with MatchesOpenClipboard: the clipboard holds exactly the saved
+        /// content). Round 23 (B2): only for a WHOLE save. A save that skipped anything (a class-3 or cap or policy skip),
+        /// was not complete, or lost content on read-back is never "already on the clipboard": what is there can be the
+        /// retained subset only, so the record is never deleted as untouched nor answered "restored" through that proof.
+        /// </summary>
         public bool AllPresent(IList<uint> present)
         {
-            if (contentLost) return false;
+            if (Incomplete) return false;
             uint sentinel = Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat);
             foreach (KeyValuePair<uint, byte[]> item in items) if (item.Key != sentinel && !present.Contains(item.Key)) return false;
             foreach (uint format in presenceOnly) if (!present.Contains(format)) return false;
