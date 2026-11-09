@@ -745,38 +745,149 @@ namespace DoodleNote.DictationHelper.Tests
             uint[] markers = ClipboardText.MarkerNames.Select(n => Native.RegisterClipboardFormat(n)).ToArray();
             string id = "0123456789abcdef0123456789abcdef", nonce = "fedcba9876543210fedcba9876543210";
             byte[] hash = PendingClipboard.Hash("dictated");
-            // Our write: every format with bytes we know (the text forms written explicitly; the locale stated in the sentinel).
+            // Our write: our text, markers and sentinel (which states the locale), and the text forms Windows synthesizes
+            // from the text on that locale's code pages (round 17: we no longer write them ourselves).
+            Func<uint, string, byte[]> form = (f, t) => ClipboardText.ExpectedTextForm(f, t, 1033).Concat(new byte[] { 0 }).ToArray();
             var ours = new Dictionary<uint, byte[]>
             {
                 { 13, System.Text.Encoding.Unicode.GetBytes("dictated\0") },
-                { 1, ClipboardText.AnsiBytes("dictated") }, { 7, ClipboardText.OemBytes("dictated") }, { 16, BitConverter.GetBytes(1033) },
+                { 1, form(1, "dictated") }, { 7, form(7, "dictated") }, { 16, BitConverter.GetBytes(1033) },
                 { markers[0], new byte[] { 0 } }, { markers[1], BitConverter.GetBytes(0) }, { markers[2], BitConverter.GetBytes(0) },
                 { sentinel, System.Text.Encoding.UTF8.GetBytes(id + ":" + nonce + ":1033") }
             };
             Func<Dictionary<uint, byte[]>, Func<uint, int, byte[]>> reader = (now) => (f, cap) => now.ContainsKey(f) ? now[f].Take(Math.Min(cap, now[f].Length)).ToArray() : null;
             Func<Dictionary<uint, byte[]>, OurWrite> classify = (now) => ClipboardText.ClassifyOurWrite(now.Keys.ToList(), reader(now), id, nonce, hash);
-            Assert.Equal(OurWrite.Complete, classify(ours), "every format ours, bytes compared");
+            Assert.Equal(OurWrite.Complete, classify(ours), "every format ours or Windows' from our text, bytes compared");
+            var padded = new Dictionary<uint, byte[]>(ours); padded[1] = form(1, "dictated").Concat(new byte[] { 0, 0, 0 }).ToArray();
+            Assert.Equal(OurWrite.Complete, classify(padded), "an allocation larger than the text (Windows rounds up): the text up to its terminator decides");
+            var noForms = new Dictionary<uint, byte[]>(ours); noForms.Remove(1); noForms.Remove(7); noForms.Remove(16);
+            Assert.Equal(OurWrite.Complete, classify(noForms), "before Windows added its forms: still exactly our write");
             var noSentinel = new Dictionary<uint, byte[]>(ours); noSentinel.Remove(sentinel); noSentinel.Remove(16);
-            Assert.Equal(OurWrite.Partial, classify(noSentinel), "cut short before the locale and the sentinel");
+            Assert.Equal(OurWrite.Partial, classify(noSentinel), "cut short before the sentinel");
             Assert.Equal(OurWrite.None, ClipboardText.ClassifyOurWrite(ours.Keys.ToList(), reader(ours), id, "00000000000000000000000000000000", hash), "another nonce (a replayed older sentinel)");
             var otherText = new Dictionary<uint, byte[]>(ours); otherText[13] = System.Text.Encoding.Unicode.GetBytes("dictatee\0");
             Assert.Equal(OurWrite.None, classify(otherText), "other text with our sentinel");
-            // Round 16 (Astra P1-A): the ANSI, OEM and locale forms are compared by their bytes too.
+            // P1-A (round 16), kept: the ANSI, OEM and locale forms are compared by their bytes too.
             var otherAnsi = new Dictionary<uint, byte[]>(ours); otherAnsi[1] = System.Text.Encoding.ASCII.GetBytes("replaced\0");
             Assert.Equal(OurWrite.None, classify(otherAnsi), "an ANSI form replaced (our Unicode text, markers and sentinel kept)");
             var otherOem = new Dictionary<uint, byte[]>(ours); otherOem[7] = System.Text.Encoding.ASCII.GetBytes("dictatee\0");
             Assert.Equal(OurWrite.None, classify(otherOem), "an OEM form replaced");
             var otherLocale = new Dictionary<uint, byte[]>(ours); otherLocale[16] = BitConverter.GetBytes(1031);
             Assert.Equal(OurWrite.None, classify(otherLocale), "a locale other than the one our sentinel states");
-            var longerAnsi = new Dictionary<uint, byte[]>(ours); longerAnsi[1] = ClipboardText.AnsiBytes("dictated").Concat(new byte[] { 65 }).ToArray();
-            Assert.Equal(OurWrite.None, classify(longerAnsi), "ANSI bytes that start with ours but go on");
+            var longerAnsi = new Dictionary<uint, byte[]>(ours); longerAnsi[1] = System.Text.Encoding.ASCII.GetBytes("dictatedA\0");
+            Assert.Equal(OurWrite.None, classify(longerAnsi), "ANSI text that starts with ours but goes on");
+            var unterminated = new Dictionary<uint, byte[]>(ours); unterminated[1] = System.Text.Encoding.ASCII.GetBytes("dictated");
+            Assert.Equal(OurWrite.None, classify(unterminated), "an ANSI form without its terminator");
+            Func<uint, int, byte[]> failing = (f, cap) => f == 1 ? null : reader(ours)(f, cap);
+            Assert.Equal(OurWrite.None, ClipboardText.ClassifyOurWrite(ours.Keys.ToList(), failing, id, nonce, hash), "a text form that cannot be read now: not proof (round 17: the rejection is durable)");
+            // Windows' conversion is on CF_LOCALE's code pages (CI compares this with Windows' own synthesis).
+            Assert.Equal("c6", BitConverter.ToString(ClipboardText.ExpectedTextForm(1, "\u0416", 0x0419)).ToLowerInvariant(), "Russian locale: CP1251");
+            Assert.Equal("86", BitConverter.ToString(ClipboardText.ExpectedTextForm(7, "\u0416", 0x0419)).ToLowerInvariant(), "Russian locale: CP866");
             var otherMarker = new Dictionary<uint, byte[]>(ours); otherMarker[markers[1]] = BitConverter.GetBytes(1);
             Assert.Equal(OurWrite.None, classify(otherMarker), "a marker value that is not ours");
             var foreign = new Dictionary<uint, byte[]>(ours); foreign[0xC333] = new byte[] { 1 };
             Assert.Equal(OurWrite.None, classify(foreign), "a format our write never sets");
-            var ansiOnly = new Dictionary<uint, byte[]> { { 1, ClipboardText.AnsiBytes("dictated") }, { markers[0], new byte[] { 0 } } };
+            var ansiOnly = new Dictionary<uint, byte[]> { { 1, form(1, "dictated") }, { markers[0], new byte[] { 0 } } };
             Assert.Equal(OurWrite.None, classify(ansiOnly), "a text form without our text");
             Assert.Equal(OurWrite.None, classify(new Dictionary<uint, byte[]>()), "an empty clipboard is not a write");
+        }
+
+        public static void OfferOnlyRecordsAreNeverRestoredOnTheirOwn()
+        {
+            Func<uint, OurWrite, int, ClipboardView> view = (seq, write, count) => new ClipboardView { Sequence = seq, OurWrite = write, FormatCount = count, RestoreOps = 4 };
+            Func<string, uint, RecordFacts> offerOnly = (stage, at) => new RecordFacts { Stage = stage, SequenceAtStage = at, SequenceAfterWrite = 7, OfferOnly = true };
+            // The round-16 trace: a rejection, then a retry that finds our complete write within our own operations.
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Pending, PendingClipboard.Decide(offerOnly("written", 7), view(9, OurWrite.Complete, 8), LogonMatch.Same), "offer-only: our complete write within our own operations is no longer (a)");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Pending, PendingClipboard.Decide(offerOnly("emptied", 4), view(4, OurWrite.None, 0), LogonMatch.Same), "offer-only: an empty clipboard at exactly M is no longer (b) (an adopted payload)");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Pending, PendingClipboard.Decide(offerOnly("saved", 4), view(4, OurWrite.None, 1), LogonMatch.Same), "offer-only: not even 'nothing emptied' is believed");
+            ClipboardView exact = view(15, OurWrite.None, 5); exact.HoldsSavedExactly = true; exact.OnlySavedFormats = true;
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Untouched, PendingClipboard.Decide(offerOnly("restore-emptied", 8), exact, LogonMatch.Same), "the saved content already there: deleted, losing nothing");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.OtherSession, PendingClipboard.Decide(offerOnly("written", 7), view(9, OurWrite.Complete, 8), LogonMatch.OtherSession), "another session's: still left alone");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.OursByWrite, PendingClipboard.Decide(new RecordFacts { Stage = "written", SequenceAtStage = 7, SequenceAfterWrite = 7 }, view(9, OurWrite.Complete, 8), LogonMatch.Same), "control: the same record, never rejected, is still (a)");
+        }
+
+        public static void StatesAreValidatedStrictly()
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dn-pending-schema-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            string old = PendingClipboard.Directory;
+            PendingClipboard.Directory = dir;
+            try
+            {
+                var items = new[] { new KeyValuePair<uint, byte[]>(13, System.Text.Encoding.Unicode.GetBytes("schema\0")) };
+                PendingRecord record = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
+                record.PayloadWriter.Join(10000);
+                string path = System.IO.Directory.GetFiles(dir, "*.state").Single();
+                string text = System.IO.File.ReadAllText(path);
+                Assert.Equal(null, RecordFacts.Validate(Wire.Parse(text), record.Id), "a state this helper wrote is valid");
+                Func<Action<Dictionary<string, object>>, string> mutated = (change) => { var state = Wire.Parse(text); change(state); return RecordFacts.Validate(state, record.Id); };
+                var cases = new Dictionary<string, string>
+                {
+                    { "{}", RecordFacts.Validate(Wire.Parse("{}"), record.Id) },
+                    { "missing stage", mutated(st => st.Remove("stage")) },
+                    { "unknown stage", mutated(st => st["stage"] = "restored-ish") },
+                    { "stage of the wrong type", mutated(st => st["stage"] = 3) },
+                    { "missing session", mutated(st => st.Remove("session")) },
+                    { "missing logon", mutated(st => st.Remove("logon")) },
+                    { "missing session key", mutated(st => st.Remove("sessionKey")) },
+                    { "missing boot id", mutated(st => st.Remove("bootId")) },
+                    { "session as a string", mutated(st => st["session"] = "1") },
+                    { "a negative sequence", mutated(st => st["sequenceAtStage"] = -1) },
+                    { "a fractional sequence", mutated(st => st["sequenceAtStage"] = 1.5) },
+                    { "a sequence beyond 32 bits", mutated(st => st["sequenceClosed"] = 4294967296.0) },
+                    { "offerOnly missing (an older build)", mutated(st => st.Remove("offerOnly")) },
+                    { "offerOnly as a string", mutated(st => st["offerOnly"] = "false") },
+                    { "extra junk", mutated(st => st["junk"] = 1) },
+                    { "another record's id", mutated(st => st["id"] = "fedcba9876543210fedcba9876543210") },
+                    { "another format", mutated(st => st["format"] = 2) },
+                    { "five offer boots", mutated(st => st["offerBoots"] = 5) },
+                    { "a null stage", mutated(st => st["stage"] = null) },
+                    { "truncated JSON", RecordFacts.Validate(Wire.Parse(text.Substring(0, text.Length / 2)), record.Id) },
+                    { "an array", RecordFacts.Validate(Wire.Parse("[1,2]"), record.Id) },
+                    { "zeroed bytes", RecordFacts.Validate(Wire.Parse(new string('\0', 64)), record.Id) }
+                };
+                foreach (KeyValuePair<string, string> c in cases) Assert.True(c.Value != null, c.Key + ": invalid (never a default that could make proof)");
+                Assert.Equal(null, mutated(st => st["stage"] = "settled"), "the settled stage is a known one");
+                Assert.Equal(null, mutated(st => { st["session"] = -1; st["logon"] = ""; st["sessionKey"] = ""; st["bootId"] = ""; st["pid"] = 0; }), "a rebuilt record's unknown identity is a valid (offer-only) state");
+                Assert.Equal(true, RecordFacts.Of(Wire.Parse(text)).OfferOnly == false, "a fresh transaction is not offer-only");
+                PendingClipboard.Finish(record, "restored");
+            }
+            finally
+            {
+                PendingClipboard.Directory = old;
+                try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
+            }
+        }
+
+        public static void ASettledRecordIsNeverOfferedAgain()
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dn-pending-settled-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            string old = PendingClipboard.Directory;
+            PendingClipboard.Directory = dir;
+            try
+            {
+                var items = new[] { new KeyValuePair<uint, byte[]>(13, System.Text.Encoding.Unicode.GetBytes("settled\0")) };
+                PendingRecord record = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
+                record.PayloadWriter.Join(10000);
+                string payload = System.IO.Directory.GetFiles(dir, "*.bin").Single();
+                string state = System.IO.Directory.GetFiles(dir, "*.state").Single();
+                // Another process holds the payload (an AV scan): the deletion after the restore is refused, nothing deleted.
+                using (new System.IO.FileStream(payload, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read))
+                {
+                    PendingClipboard.Finish(record, "restored");
+                    Assert.Equal(true, PendingClipboard.OnDisk(record.Id), "the deletion waited (the payload was held): intact");
+                    Assert.Equal("settled", Wire.Str(Wire.Parse(System.IO.File.ReadAllText(state)), "stage"), "but journaled settled before it left in-flight");
+                }
+                // The next check deletes it on sight, never offers it (it found no clipboard to compare: it never opened one).
+                PendingClipboard.RecoverLeftover("test");
+                Assert.Equal(false, PendingClipboard.OnDisk(record.Id), "a settled record is deleted, never offered again");
+            }
+            finally
+            {
+                PendingClipboard.Directory = old;
+                try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
+            }
         }
 
         public static void ARecordIsOfferedInAtMostTwoBoots()
