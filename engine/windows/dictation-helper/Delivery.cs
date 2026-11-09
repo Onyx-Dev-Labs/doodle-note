@@ -2189,7 +2189,9 @@ namespace DoodleNote.DictationHelper
                     outcomes.Append(" over the cap (" + size + " bytes)" + (marker ? "; exclusion markers forced" : ""));
                     continue;
                 }
-                bool unrendered = (parts[0] == "none" || parts[0] == "nosize" || parts[0] == "unlocked") && parts.Length == 4;
+                int replyError;
+                // Round 23 (nit): a negative reply's error field must be a number, or the reply is malformed.
+                bool unrendered = (parts[0] == "none" || parts[0] == "nosize" || parts[0] == "unlocked") && parts.Length == 4 && int.TryParse(parts[3], out replyError);
                 // Only these replies carry an error code in field 3 (never data: nothing but lengths is logged).
                 string why = parts[0] + (unrendered ? " error " + parts[3] : "");
                 if (unrendered && marker)
