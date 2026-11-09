@@ -1069,9 +1069,10 @@ async function main() {
     await h.stop()
   }
 
-  // 20. Round 17 P2-4: a payload adopted from .bin.tmp next to a same-logon state that carries authority ("emptied"
-  // with the clipboard empty at the journaled sequence; "written" with our complete write unchanged): offered, never
-  // restored on its own. Each with a control: the same crash without the rename IS restored on its own.
+  // 20. Round 17 P2-4: a payload adopted from .bin.tmp next to a same-logon "emptied" (clipboard empty at the journaled
+  // sequence) or "written" (our complete write unchanged) state: offered, never restored on its own. ROUND 18 (owner
+  // decision, no authority from disk): the former controls without the rename, restored on their own until round 17,
+  // are now offered too, the clipboard untouched (sequence unchanged).
   for (const stage of ['emptied', 'written']) {
     for (const rename of [false, true]) {
       copyMulti(user)
@@ -1093,33 +1094,25 @@ async function main() {
       if (rename && bin)
         fs.renameSync(path.join(os.tmpdir(), bin), path.join(os.tmpdir(), bin + '.tmp'))
       const before = names()
+      const sequence = GetClipboardSequenceNumber()
       const h = start(release)
       await h.ready
       await sleep(1500)
       const listed = await h.req('clipboard-offers')
-      if (rename) {
-        check(
-          `adopted next to "${stage}": offered, not restored on its own`,
-          !!bin &&
-            !!listed &&
-            listed.offers.length === 1 &&
-            names() === before &&
-            names() !== userFormats,
-          `${JSON.stringify(listed)}; ${before} -> ${names()}`
-        )
-        const offer = listed && listed.offers[0]
-        if (offer) await h.req('clipboard-dismiss', { record: offer.record })
-      } else {
-        check(
-          `control, "${stage}" without the rename: restored on its own (${stage === 'emptied' ? 'proof b' : 'proof a'})`,
-          !!bin &&
-            !!listed &&
-            listed.offers.length === 0 &&
-            names() === userFormats &&
-            recordFiles().length === 0,
-          `${JSON.stringify(listed)}; ${before} -> ${names()}; ${recordFiles()}`
-        )
-      }
+      check(
+        rename
+          ? `adopted next to "${stage}": offered, not restored on its own`
+          : `"${stage}" without the rename (round 17: restored on its own): offered, the clipboard untouched`,
+        !!bin &&
+          !!listed &&
+          listed.offers.length === 1 &&
+          names() === before &&
+          names() !== userFormats &&
+          GetClipboardSequenceNumber() === sequence,
+        `${JSON.stringify(listed)}; ${before} -> ${names()}; sequence ${sequence} -> ${GetClipboardSequenceNumber()}`
+      )
+      const offer = listed && listed.offers[0]
+      if (offer) await h.req('clipboard-dismiss', { record: offer.record })
       await h.stop()
       cleanup()
     }
@@ -1190,9 +1183,7 @@ async function main() {
     const after = GetClipboardSequenceNumber()
     const result = await reply
     const route = await a.req('__text-forms', { text: dictated, locale: 0 })
-    console.log(
-      `# read-back inside our own open: ${route && route.lastReadBack}; input locale 0x${route && route.inputLocale.toString(16)}`
-    )
+    console.log(`# input locale 0x${route && route.inputLocale.toString(16)}`)
     check(
       'a passive reader of CF_TEXT/CF_OEMTEXT after the confirmation leaves the sequence unchanged',
       !!ansi && !!oem && before === after,
@@ -1318,28 +1309,339 @@ async function main() {
     await h.stop()
   }
 
-  // 7. Our complete write, unchanged since: the release helper restores it on its own at start (proof a).
-  {
+  // 7 / 25. ROUND 18 (owner decision): a helper killed mid-transaction never has its clipboard written by a restarted
+  // helper; the saved clipboard is OFFERED. 7 (round 17: "our own complete write is put back on its own") is (a) below.
+  // (a) killed after our write, before the paste; (b) after the paste, before the restore; (c) inside the restore,
+  // after its EmptyClipboard. A restarted RELEASE helper offers each and leaves the clipboard sequence unchanged.
+  for (const [label, env, wait] of [
+    ['(a) after the write, before the paste (round 17 case 7: restored on its own)', {}, 'text'],
+    [
+      '(b) after the paste, before the restore',
+      { DICTATION_HELPER_TEST_STALL_BEFORE_RESTORE_MS: '15000' },
+      'text'
+    ],
+    [
+      '(c) inside the restore, after its EmptyClipboard',
+      { DICTATION_HELPER_TEST_RESTORE_STALL_MS: '15000' },
+      'restore-emptied'
+    ]
+  ]) {
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
     await a.ready
-    void a.req('__clipboard-txn', { text: 'dictated text F', holdMs: 8000 })
-    for (let i = 0; i < 200 && text() !== 'dictated text F'; i++) await sleep(50)
-    await sleep(300)
+    void a.req('__clipboard-txn', {
+      text: 'dictated text F',
+      holdMs: label.startsWith('(a)') ? 8000 : 300
+    })
+    if (wait === 'text')
+      for (let i = 0; i < 200 && text() !== 'dictated text F'; i++) await sleep(50)
+    else await waitStage(wait)
+    await sleep(label.startsWith('(a)') ? 300 : 1200)
     await a.kill()
+    const before = names()
+    const sequence = GetClipboardSequenceNumber()
     const h = start(release)
     await h.ready
     await sleep(1500)
     const listed = await h.req('clipboard-offers')
     check(
-      'our own complete write is put back on its own (no offer)',
-      names() === userFormats &&
-        !!listed &&
-        listed.offers.length === 0 &&
+      `killed ${label}: a restarted release helper offers it and never writes the clipboard`,
+      !!listed &&
+        listed.offers.length === 1 &&
+        names() === before &&
+        names() !== userFormats &&
+        GetClipboardSequenceNumber() === sequence,
+      `${JSON.stringify(listed)}; ${before} -> ${names()}; sequence ${sequence} -> ${GetClipboardSequenceNumber()}`
+    )
+    const offer = listed && listed.offers[0]
+    const restored = offer ? await restoreConfirming(h, offer) : null
+    check(
+      `and the user's Restore of it gives back the user clipboard (${label.slice(0, 3)})`,
+      !!restored &&
+        restored.result === 'restored' &&
+        names() === userFormats &&
         recordFiles().length === 0,
-      `${names()}; ${JSON.stringify(listed)}`
+      `${JSON.stringify(restored)}; ${names()}`
     )
     await h.stop()
+    cleanup()
+  }
+
+  // 26. Astra round-17 P2-2: a failed restore that already emptied the clipboard (the user's Restore, every set-back
+  // failing by a test hook) -> unrestored; the same helper's retry (3 s) and a restarted release helper never write.
+  {
+    copyMulti(user)
+    await keptRecord('dictated text V')
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_FAIL_PUTBACKS: '99'
+    })
+    await a.ready
+    const listed = await a.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const failed = offer ? await restoreConfirming(a, offer) : null
+    const sequence = GetClipboardSequenceNumber()
+    await sleep(5000)
+    const quiet = GetClipboardSequenceNumber() === sequence
+    await a.stop()
+    const h = start(release)
+    await h.ready
+    await sleep(1500)
+    const again = await h.req('clipboard-offers')
+    check(
+      'a failed restore (every set-back failed): unrestored, no retry or restart writes, offered again',
+      !!failed &&
+        failed.result === 'unrestored' &&
+        quiet &&
+        !!again &&
+        again.offers.length === 1 &&
+        GetClipboardSequenceNumber() === sequence,
+      `${JSON.stringify(failed)}; quiet ${quiet}; ${JSON.stringify(again)}; ${sequence} -> ${GetClipboardSequenceNumber()}`
+    )
+    const o2 = again && again.offers[0]
+    if (o2) await h.req('clipboard-dismiss', { record: o2.record })
+    await h.stop()
+  }
+
+  // 27. Astra round-17 P2-3: killed during adoption (after its offer-only fact is persisted, before the .bin.tmp move;
+  // round 17 moved first): the restarted release helper adopts and offers it, our write left on the clipboard.
+  {
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    void a.req('__clipboard-txn', { text: 'dictated text W', holdMs: 8000 })
+    for (let i = 0; i < 200 && text() !== 'dictated text W'; i++) await sleep(50)
+    for (let i = 0; i < 100 && !recordFiles().some((f) => f.endsWith('.bin')); i++) await sleep(50)
+    await sleep(300)
+    await a.kill()
+    const bin = recordFiles().find((f) => f.endsWith('.bin'))
+    if (bin) fs.renameSync(path.join(os.tmpdir(), bin), path.join(os.tmpdir(), bin + '.tmp'))
+    const b = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_STALL_IN_ADOPT_MS: '15000'
+    })
+    await b.ready
+    void b.req('clipboard-offers')
+    await sleep(1500)
+    await b.kill()
+    const st = recordFiles().find((f) => f.endsWith('.state'))
+    const quarantined = st
+      ? JSON.parse(fs.readFileSync(path.join(os.tmpdir(), st), 'utf8')).offerOnly
+      : null
+    const tmpLeft = !!bin && fs.existsSync(path.join(os.tmpdir(), bin + '.tmp'))
+    const sequence = GetClipboardSequenceNumber()
+    const h = start(release)
+    await h.ready
+    await sleep(1500)
+    const listed = await h.req('clipboard-offers')
+    check(
+      "killed between the adoption's persist and its move: persisted first, then adopted and offered, never restored",
+      quarantined === true &&
+        tmpLeft &&
+        !!listed &&
+        listed.offers.length === 1 &&
+        text() === 'dictated text W' &&
+        GetClipboardSequenceNumber() === sequence,
+      `offerOnly ${quarantined}; tmp ${tmpLeft}; ${JSON.stringify(listed)}; ${text()}`
+    )
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+
+  // 28. Astra round-17 P1: a payload whose metadata cannot be read (test hook: the probe answers UNKNOWN) is never
+  // "missing": next to an invalid state, and next to a valid one, both files are kept; once it can be looked at, the
+  // release helper offers it. And a state whose payload is POSITIVELY absent is deleted (nothing to restore from).
+  for (const invalidState of [true, false]) {
+    copyMulti(user)
+    await keptRecord('dictated text X ' + invalidState)
+    const st = recordFiles().find((f) => f.endsWith('.state'))
+    if (st && invalidState) fs.writeFileSync(path.join(os.tmpdir(), st), '{}')
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_PROBE_UNKNOWN: '.bin'
+    })
+    await a.ready
+    await a.req('clipboard-offers')
+    const kept = recordFiles().length
+    await a.stop()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check(
+      `a payload that cannot be looked at, next to ${invalidState ? 'an invalid' : 'a valid'} state: kept whole, offered once it can be`,
+      kept === 2 && !!listed && listed.offers.length === 1,
+      `${kept}; ${JSON.stringify(listed)}`
+    )
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+  {
+    copyMulti(user)
+    await keptRecord('dictated text X2')
+    const bin = recordFiles().find((f) => f.endsWith('.bin'))
+    if (bin) fs.rmSync(path.join(os.tmpdir(), bin))
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check(
+      'a state whose payload is positively absent (no .bin, no .bin.tmp): deleted, nothing offered',
+      !!bin && !!listed && listed.offers.length === 0 && recordFiles().length === 0,
+      `${JSON.stringify(listed)}; ${recordFiles()}`
+    )
+    await h.stop()
+  }
+
+  // 29. Round 18 item 2: the user's Restore succeeds but the files cannot be deleted (the payload held with sharing that
+  // allows reading, not deletion): restored, the offer withdrawn at once and the state journaled "settled"; never
+  // offered again; deleted once released.
+  {
+    copyMulti(user)
+    await keptRecord('dictated text Y')
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const bin = recordFiles().find((f) => f.endsWith('.bin'))
+    const st = recordFiles().find((f) => f.endsWith('.state'))
+    const script = `$f = [System.IO.File]::Open($env:DN_LOCK, 'Open', 'Read', 'Read'); Start-Sleep -Milliseconds 6000; $f.Close()`
+    const lock = bin
+      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+          stdio: 'ignore',
+          env: { ...process.env, DN_LOCK: path.join(os.tmpdir(), bin) }
+        })
+      : null
+    await sleep(1200)
+    const restored = offer ? await restoreConfirming(h, offer) : null
+    const left = recordFiles().length
+    const stage =
+      st && fs.existsSync(path.join(os.tmpdir(), st))
+        ? JSON.parse(fs.readFileSync(path.join(os.tmpdir(), st), 'utf8')).stage
+        : null
+    const gone = h.events.some(
+      (e) => e.phase === 'offer-gone' && offer && e.record === offer.record
+    )
+    const again = await h.req('clipboard-offers')
+    check(
+      'a restore whose file deletion is held: restored, settled, the offer withdrawn, not offered again',
+      !!restored &&
+        restored.result === 'restored' &&
+        names() === userFormats &&
+        left === 2 &&
+        stage === 'settled' &&
+        gone &&
+        !!again &&
+        again.offers.length === 0,
+      `${JSON.stringify(restored)}; left ${left}; stage ${stage}; gone ${gone}; ${JSON.stringify(again)}`
+    )
+    if (lock) await waitExit(lock)
+    await h.req('clipboard-offers')
+    check(
+      'and the settled record is deleted once the payload is released',
+      recordFiles().length === 0,
+      `${recordFiles()}`
+    )
+    await h.stop()
+  }
+
+  // 30. Round 18 item 3: an older-build (invalid: no offerOnly) state from an EARLIER boot naming another session is
+  // rebuilt and offered here (the boot is checked before the session), not left to a session that no longer exists.
+  {
+    copyMulti(user)
+    await keptRecord('dictated text Z')
+    const st = recordFiles().find((f) => f.endsWith('.state'))
+    const full = st ? path.join(os.tmpdir(), st) : ''
+    if (st) {
+      const state = JSON.parse(fs.readFileSync(full, 'utf8'))
+      delete state.offerOnly
+      delete state.offerOnlyWhy
+      fs.writeFileSync(
+        full,
+        JSON.stringify({ ...state, session: state.session + 7, bootId: 'an-earlier-boot' })
+      )
+    }
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check(
+      'an invalid state from an earlier boot in another session: rebuilt and offered here',
+      !!st && !!listed && listed.offers.length === 1,
+      JSON.stringify(listed)
+    )
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+
+  // 13d. Round 18 item 4: the mixed rollback (state .tmp, payload .tmp and state marked; the payload's mark fails;
+  // clearing the payload .tmp's mark fails, the others clear): the deletion is completed from the beginning, never a
+  // state left without its payload.
+  {
+    copyMulti(user)
+    await keptRecord('dictated text L4')
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_FAIL_DELETE_MARK: '4',
+      DICTATION_HELPER_TEST_FAIL_DELETE_UNMARK: '2'
+    })
+    await a.ready
+    const listed = await a.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    if (offer) {
+      const base = path.join(os.tmpdir(), `${recordPrefix}${offer.record}`)
+      fs.writeFileSync(base + '.state.tmp', '{}')
+      fs.writeFileSync(base + '.bin.tmp', 'x')
+    }
+    const gone = offer ? await a.req('clipboard-dismiss', { record: offer.record }) : null
+    await a.stop()
+    const left = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith(recordPrefix))
+    check(
+      'a rollback that cannot finish completes the deletion from the beginning (nothing left, no state without payload)',
+      !!gone && gone.dismissed === true && left.length === 0,
+      `${JSON.stringify(gone)}; ${left}`
+    )
+  }
+
+  // 31. Several input languages (Opus round 17): the write thread on another layout (test hook: 00000419, 00000415),
+  // and this test process's thread on a third: the CF_LOCALE Windows stamps is the one the helper pinned, and the
+  // confirmation passes (the dictation is restored, not left as an offer).
+  {
+    const LoadKeyboardLayoutW = user32.func(
+      'void* __stdcall LoadKeyboardLayoutW(str16 klid, uint32 flags)'
+    )
+    const mine = LoadKeyboardLayoutW('00000411', 1)
+    console.log(
+      `# this process's thread layout: ${mine ? '00000411 loaded' : 'could not be loaded'}`
+    )
+    for (const layout of ['00000419', '00000415', '']) {
+      copyMulti(user)
+      const a = start(testops, {
+        DICTATION_HELPER_TEST: '1',
+        ...(layout ? { DICTATION_HELPER_TEST_KEYBOARD_LAYOUT: layout } : {})
+      })
+      await a.ready
+      const dictated = 'dictated text Ж ' + (layout || 'default')
+      const reply = a.req('__clipboard-txn', { text: dictated, holdMs: 1500 })
+      for (let i = 0; i < 200 && text() !== dictated; i++) await sleep(50)
+      await sleep(500)
+      const stamped = readFormat(16)
+      const result = await reply
+      const forms = await a.req('__text-forms', { text: 'x', locale: 0 })
+      const pinned = forms && forms.lastWriteLocale
+      console.log(
+        `# write thread layout ${layout || '(default)'}: pinned 0x${(pinned || 0).toString(16)}, stamped 0x${stamped && stamped.readUInt32LE(0).toString(16)}`
+      )
+      check(
+        `write thread layout ${layout || '(default)'}: Windows stamps the pinned locale (0x${(pinned || 0).toString(16)}) and the confirmation passes`,
+        !!stamped &&
+          stamped.readUInt32LE(0) === pinned &&
+          !!result &&
+          /^restored\|/.test(String(result.result)),
+        `stamped 0x${stamped && stamped.readUInt32LE(0).toString(16)}; pinned 0x${(pinned || 0).toString(16)}; ${JSON.stringify(result)}`
+      )
+      await a.stop()
+    }
   }
 }
 
