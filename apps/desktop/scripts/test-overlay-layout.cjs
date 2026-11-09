@@ -32,9 +32,14 @@ const measure = `(() => {
 })()`
 
 app.disableHardwareAcceleration()
+// One window per card, destroyed after it: the last one closing must not quit the app before the next card.
+app.on('window-all-closed', () => {})
+process.on('unhandledRejection', (error) => {
+  console.error('not ok - unhandled:', error && error.stack ? error.stack : error)
+  app.exit(1)
+})
 app.whenReady().then(async () => {
   let failed = 0
-  const rows = []
   for (const c of cases) {
     const win = new BrowserWindow({
       show: false,
@@ -84,18 +89,17 @@ app.whenReady().then(async () => {
       const text = m.detail
         ? `text ${m.detail.top.toFixed(0)}-${m.detail.bottom.toFixed(0)}`
         : 'no text'
-      rows.push(
+      console.log(
         `${problems.length ? 'not ok' : 'ok'} - ${c.name}: ${m.width}x${m.height}; ${buttons}; ${text}${problems.length ? ' (' + problems.join('; ') + ')' : ''}`
       )
       if (problems.length) failed++
     } catch (error) {
       failed++
-      rows.push(`not ok - ${c.name}: ${error && error.message}`)
+      console.log(`not ok - ${c.name}: ${error && error.stack ? error.stack : error}`)
     } finally {
       win.destroy()
     }
   }
-  for (const row of rows) console.log(row)
   console.log(
     `# overlay layout: ${cases.length - failed}/${cases.length} cards keep their buttons and a line of text in view`
   )
