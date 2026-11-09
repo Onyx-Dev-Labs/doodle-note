@@ -74,6 +74,40 @@ const CreateWindowExW = user32.func(
 const DestroyWindow = user32.func('bool __stdcall DestroyWindow(void* h)')
 const seeds = { ok: 0, failed: 0 }
 /**
+ * Round 20: every save line of a test-ops helper, tallied per case group. A save established on attempt 1 is counted;
+ * every other line (a retry, a not-established verdict, a no-save) is kept VERBATIM for the report.
+ */
+function tallySaves(group, logs) {
+  const t = (saveTally[group] = saveTally[group] || {
+    saves: 0,
+    firstTry: 0,
+    retried: 0,
+    noSave: 0,
+    lines: []
+  })
+  const finish = (attempts, established) => {
+    t.saves++
+    if (established && attempts.length === 1) return t.firstTry++
+    if (established) t.retried++
+    else t.noSave++
+    for (const a of attempts) t.lines.push(a.replace(/^.*?saving the clipboard /, ''))
+  }
+  let attempts = []
+  for (const l of logs) {
+    const m = /saving the clipboard \(attempt (\d+)\)/.exec(l)
+    if (!m) continue
+    if (m[1] === '1' && attempts.length) finish(attempts, false)
+    if (m[1] === '1') attempts = []
+    attempts.push(l)
+    if (/: ESTABLISHED/.test(l)) {
+      finish(attempts, true)
+      attempts = []
+    }
+  }
+  if (attempts.length) finish(attempts, false)
+}
+const saveTally = {}
+/**
  * Round 19 (Opus's lead on 25(a)): the clipboard is SEEDED with a real owner window (OpenClipboard(NULL) +
  * EmptyClipboard leaves no owner, and Microsoft documents that SetClipboardData then fails), every SetClipboardData
  * result is checked, and the seed is read back (content, under one open) before any helper is driven. The window is
@@ -1492,6 +1526,7 @@ async function main() {
     // lengths of what the saved record held).
     const trace = h.logs.find((l) => /put-back trace: user-restore/.test(l))
     const saving = a.logs.find((l) => /saving the clipboard \(attempt|test: saved formats/.test(l))
+    if (label.startsWith('(a)')) tallySaves('25(a)', a.logs)
     if (!ok)
       console.log(
         `# 25 test-ops log: ${a.logs
@@ -1562,6 +1597,7 @@ async function main() {
       }
     }
     await a.stop()
+    tallySaves('33 stress', a.logs)
     console.log(
       `# 33 save-only stress: ${runs} saves in ${Date.now() - started} ms; expected ${expected}; ${mismatches} mismatch(es), ${notEstablished} not established (no paste would follow)`
     )
@@ -1949,6 +1985,13 @@ main()
   .finally(() => {
     cleanup()
     console.log(`# seeds: ${seeds.ok} held, ${seeds.failed} failed`)
+    for (const [group, t] of Object.entries(saveTally)) {
+      console.log(
+        `# saves ${group}: ${t.saves} saves, ${t.firstTry} established on the first try, ${t.retried} established after a retry, ${t.noSave} ended no-save`
+      )
+      for (const l of t.lines.slice(0, 60)) console.log(`# saves ${group} | ${l}`)
+      if (t.lines.length > 60) console.log(`# saves ${group} | (${t.lines.length - 60} more lines)`)
+    }
     const failed = results.filter((ok) => !ok).length
     console.log(`# ${results.length - failed}/${results.length} passed`)
     process.exit(failed === 0 && results.length > 0 ? 0 : 1)
