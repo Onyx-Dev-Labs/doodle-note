@@ -621,69 +621,35 @@ namespace DoodleNote.DictationHelper.Tests
             }
         }
 
-        public static void RecoveryWritesOnlyWhenProvablyOurs()
+        public static void RecoveryNeverWritesOnItsOwn()
         {
+            // Round 18: a record read back from disk carries no authority to write. Every case that round 17 restored on
+            // its own by proof (a) or (b) is now offered (Pending); only another session's (left alone) and an exact
+            // saved copy already there (deleted, losing nothing) differ.
             Func<uint, OurWrite, int, bool, ClipboardView> view = (seq, write, count, only) =>
-                new ClipboardView { Sequence = seq, OurWrite = write, FormatCount = count, OnlySavedFormats = only, RestoreOps = 4 };
+                new ClipboardView { Sequence = seq, OurWrite = write, FormatCount = count, OnlySavedFormats = only };
             Func<string, uint, RecordFacts> facts = (stage, atStage) => new RecordFacts { Stage = stage, SequenceAtStage = atStage, SequenceAfterWrite = 7 };
             Action<PendingClipboard.RecoveryVerdict, RecordFacts, ClipboardView, LogonMatch, string> expect = (want, f, v, logon, why) => Assert.Equal(want, PendingClipboard.Decide(f, v, logon), why);
             LogonMatch same = LogonMatch.Same, other = LogonMatch.Different, unknown = LogonMatch.Unknown;
-            // Provable, so it is restored on its own: (a) our complete write within our own operations, (b) empty at exactly our M (ownership alone is no proof).
-            foreach (string stage in new[] { "emptied", "written", "restoring", "restore-emptied", "recovering", "recovering-emptied" })
-                expect(PendingClipboard.RecoveryVerdict.OursByWrite, facts(stage, 3), view(9, OurWrite.Complete, 8, false), same, stage + ": (a) our complete write, within our own operations");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("emptied", 4), view(4, OurWrite.None, 0, false), same, "(b) empty at exactly M (journaled under our lock)");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, new RecordFacts { Stage = "restore-emptied", SequenceAtStage = 8, SequenceClosed = 9 }, view(9, OurWrite.None, 0, false), same, "(b) empty at the sequence confirmed after our close");
+            var pending = PendingClipboard.RecoveryVerdict.Pending;
+            foreach (string stage in new[] { "emptied", "written", "restoring", "restore-emptied", "recovering", "recovering-emptied", "unknown" })
+                expect(pending, facts(stage, 3), view(9, OurWrite.Complete, 8, false), same, stage + ": our complete write within our own operations (was proof a): offered, never written");
+            expect(pending, facts("emptied", 4), view(4, OurWrite.None, 0, false), same, "empty at exactly M (was proof b): offered");
+            expect(pending, new RecordFacts { Stage = "restore-emptied", SequenceAtStage = 8, SequenceClosed = 9 }, view(9, OurWrite.None, 0, false), same, "empty at the sequence confirmed after the close (was proof b): offered");
+            expect(pending, new RecordFacts { Stage = "recovering", SequenceAtStage = 18, OriginStage = "restore-emptied", OriginSequenceAtStage = 18 }, view(18, OurWrite.None, 0, false), same, "a recovery's found origin (was proof b): offered");
+            expect(pending, facts("emptying", 3), view(3, OurWrite.None, 2, false), same, "emptying with the sequence unchanged (was 'nothing emptied'): offered");
+            expect(pending, facts("emptying", 0), view(0, OurWrite.None, 0, false), same, "a zero sequence deletes nothing");
             ClipboardView mine = view(12, OurWrite.None, 3, true); mine.OwnerIsUs = true; mine.OwnerAlive = true;
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), mine, same, "ownership alone is no proof any more (an app can add a format without emptying): offered");
-            ClipboardView added = view(12, OurWrite.None, 3, false); added.OwnerIsUs = true; added.OwnerAlive = true;
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7), added, same, "(c) refused: our window owns it, but a foreign format was added without emptying");
-            ClipboardView otherTxn = view(12, OurWrite.None, 3, false); otherTxn.OwnerIsUs = true; otherTxn.OwnerAlive = true;
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), otherTxn, same, "our window owns it for ANOTHER transaction: never ours for this one");
-            // (a) needs continuity: a manager replaying every format (our sentinel too) after the crash, at a later sequence.
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7), view(7 + (uint)PendingClipboard.CloseMoves + 8 + 1, OurWrite.Complete, 8, false), same, "a complete write BEYOND our own operations: a replay, offered, not restored on its own");
-            // Pending: kept, nothing written, offered.
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptied", 4), view(6, OurWrite.Partial, 2, false), same, "our write cut short, without the sentinel");
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), view(10, OurWrite.None, 2, true), same, "only saved formats");
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptying", 3), view(4, OurWrite.None, 0, false), same, "empty at N+1 after a pre-empty stage");
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7), view(7, OurWrite.Complete, 8, false), unknown, "an unknown logon: even our complete write waits for the user");
-            // Never deleted for these (the blocker): our own later transactions, the user's later copy, a live foreign owner.
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), view(8 + 40, OurWrite.None, 3, false), same, "far beyond our bounds (another delivery, another offer's restore, the user's copy): still offered");
+            expect(pending, facts("restore-emptied", 8), mine, same, "ownership: offered");
             ClipboardView foreign = view(9, OurWrite.None, 3, false); foreign.OwnerAlive = true;
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), foreign, same, "a live foreign owner: offered, not deleted");
-            // Deleted without writing, losing nothing.
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), view(10, OurWrite.Complete, 8, false), other, "another boot: nothing proven, but offered (an offer writes only on the user's confirmation)");
-            ClipboardView exactAfterReboot = view(3, OurWrite.None, 5, true); exactAfterReboot.HoldsSavedExactly = true;
-            expect(PendingClipboard.RecoveryVerdict.Untouched, facts("restore-emptied", 8), exactAfterReboot, other, "another boot, the saved content already there: nothing to offer");
-            expect(PendingClipboard.RecoveryVerdict.OtherSession, facts("restore-emptied", 8), view(10, OurWrite.None, 2, false), LogonMatch.OtherSession, "another session's record: left alone");
-            expect(PendingClipboard.RecoveryVerdict.Untouched, facts("emptying", 3), view(3, OurWrite.None, 2, true), same, "nothing emptied yet");
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptying", 3), view(3, OurWrite.None, 2, false), unknown, "the same sequence after a relogin proves nothing (the numbers start over): pending, never deleted");
+            expect(pending, facts("restore-emptied", 8), foreign, same, "a live foreign owner: offered, not deleted");
+            expect(pending, facts("restore-emptied", 8), view(8 + 40, OurWrite.None, 3, false), same, "far beyond any bound: offered, not deleted");
+            expect(pending, facts("written", 7), view(7, OurWrite.Complete, 8, false), unknown, "an unknown logon: offered");
+            expect(pending, facts("restore-emptied", 8), view(10, OurWrite.Complete, 8, false), other, "another boot: offered");
             ClipboardView exact = view(15, OurWrite.None, 5, true); exact.HoldsSavedExactly = true;
-            expect(PendingClipboard.RecoveryVerdict.Untouched, facts("restore-emptied", 8), exact, unknown, "the clipboard already holds exactly the saved content");
-            expect(PendingClipboard.RecoveryVerdict.Untouched, facts("saved", 7), view(7, OurWrite.Complete, 1, true), same, "nothing was emptied");
-            // D3 origin.
-            RecordFacts chain = new RecordFacts { Stage = "recovering", SequenceAtStage = 20, SequenceAfterWrite = 7, OriginStage = "recovering-emptied", OriginSequenceAtStage = 18 };
-            expect(PendingClipboard.RecoveryVerdict.Pending, chain, view(20, OurWrite.None, 2, true), same, "the four-helper chain: pending, not stale");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, new RecordFacts { Stage = "recovering", SequenceAtStage = 18, OriginStage = "restore-emptied", OriginSequenceAtStage = 18 }, view(18, OurWrite.None, 0, false), same, "a recovery that never emptied: the found empty at its M still proves (b)");
-        }
-
-        public static void ContinuityCountsOnlyOperationsWePerformed()
-        {
-            Func<string, uint, RecordFacts> facts = (stage, at) => new RecordFacts { Stage = stage, SequenceAtStage = at };
-            Func<uint, ClipboardView> view = (seq) => new ClipboardView { Sequence = seq, RestoreOps = 9 };
-            uint slack = (uint)PendingClipboard.CloseMoves;
-            // A restore journaled but not yet begun establishes no continuity: a replay of every format after a crash
-            // before its empty (Empty + 8 sets) is beyond, whatever operations that restore would have performed.
-            Assert.Equal(true, PendingClipboard.Beyond(facts("restoring", 100), view(100 + 1 + 8)), "restoring: a replay after a crash before the empty is beyond");
-            Assert.Equal(false, PendingClipboard.Beyond(facts("restoring", 100), view(100 + slack)), "restoring: unchanged (plus a close) is continuous");
-            Assert.Equal(true, PendingClipboard.Beyond(facts("recovering", 100), view(100 + slack + 1)), "recovering: nothing it had not done counts");
-            // "emptied": our write's sets and its sentinel are one locked step after the journal.
-            Assert.Equal(false, PendingClipboard.Beyond(facts("emptied", 100), view(100 + (uint)PendingClipboard.WriteOps + slack)), "emptied: our own write's sets count");
-            Assert.Equal(true, PendingClipboard.Beyond(facts("emptied", 100), view(100 + (uint)PendingClipboard.WriteOps + slack + 1)), "emptied: one more is beyond");
-            // Wrap-safe forward distance; a sequence behind the basis is beyond.
-            Assert.Equal(false, PendingClipboard.Beyond(facts("written", 0xFFFFFFFFu), view(0u + 1)), "across the wrap: two steps forward");
-            Assert.Equal(true, PendingClipboard.Beyond(facts("written", 0xFFFFFFF0u), view(0x10u)), "across the wrap: far forward");
-            Assert.Equal(true, PendingClipboard.Beyond(facts("written", 100), view(99)), "behind the basis");
-            Assert.Equal(true, PendingClipboard.Beyond(new RecordFacts { Stage = "written" }, view(5)), "nothing journaled: no continuity");
+            foreach (LogonMatch logon in new[] { same, other, unknown })
+                expect(PendingClipboard.RecoveryVerdict.Untouched, facts("restore-emptied", 8), exact, logon, "the saved content is already there exactly (" + logon + "): deleted, nothing written");
+            expect(PendingClipboard.RecoveryVerdict.OtherSession, facts("restore-emptied", 8), view(10, OurWrite.Complete, 2, false), LogonMatch.OtherSession, "another session's record: left alone");
         }
 
         public static void TheLogonIdentityNeverUsesTheWallClock()
@@ -794,7 +760,7 @@ namespace DoodleNote.DictationHelper.Tests
 
         public static void OfferOnlyRecordsAreNeverRestoredOnTheirOwn()
         {
-            Func<uint, OurWrite, int, ClipboardView> view = (seq, write, count) => new ClipboardView { Sequence = seq, OurWrite = write, FormatCount = count, RestoreOps = 4 };
+            Func<uint, OurWrite, int, ClipboardView> view = (seq, write, count) => new ClipboardView { Sequence = seq, OurWrite = write, FormatCount = count };
             Func<string, uint, RecordFacts> offerOnly = (stage, at) => new RecordFacts { Stage = stage, SequenceAtStage = at, SequenceAfterWrite = 7, OfferOnly = true };
             // The round-16 trace: a rejection, then a retry that finds our complete write within our own operations.
             Assert.Equal(PendingClipboard.RecoveryVerdict.Pending, PendingClipboard.Decide(offerOnly("written", 7), view(9, OurWrite.Complete, 8), LogonMatch.Same), "offer-only: our complete write within our own operations is no longer (a)");
@@ -803,7 +769,7 @@ namespace DoodleNote.DictationHelper.Tests
             ClipboardView exact = view(15, OurWrite.None, 5); exact.HoldsSavedExactly = true; exact.OnlySavedFormats = true;
             Assert.Equal(PendingClipboard.RecoveryVerdict.Untouched, PendingClipboard.Decide(offerOnly("restore-emptied", 8), exact, LogonMatch.Same), "the saved content already there: deleted, losing nothing");
             Assert.Equal(PendingClipboard.RecoveryVerdict.OtherSession, PendingClipboard.Decide(offerOnly("written", 7), view(9, OurWrite.Complete, 8), LogonMatch.OtherSession), "another session's: still left alone");
-            Assert.Equal(PendingClipboard.RecoveryVerdict.OursByWrite, PendingClipboard.Decide(new RecordFacts { Stage = "written", SequenceAtStage = 7, SequenceAfterWrite = 7 }, view(9, OurWrite.Complete, 8), LogonMatch.Same), "control: the same record, never rejected, is still (a)");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Pending, PendingClipboard.Decide(new RecordFacts { Stage = "written", SequenceAtStage = 7, SequenceAfterWrite = 7 }, view(9, OurWrite.Complete, 8), LogonMatch.Same), "the same record never rejected: also offered since round 18 (no authority from disk)");
         }
 
         public static void StatesAreValidatedStrictly()
@@ -930,8 +896,9 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal("", unknown.OriginStage ?? "", "an unknown logon: no origin either");
             PendingRecord same = new PendingRecord("0123456789abcdef0123456789abcdef", "n");
             PendingClipboard.Inherit(same, old, LogonMatch.Same, 4000);
-            Assert.Equal("restore-emptied", same.OriginStage, "the same logon and boot: the found stage is the origin");
-            Assert.Equal(100u, same.OriginSequenceAtStage, "with its sequence");
+            Assert.Equal("", same.OriginStage ?? "", "round 18: even the same logon and boot carries no origin (nothing on disk is proof)");
+            Assert.Equal(0u, same.OriginSequenceAtStage, "and no sequence");
+            Assert.Equal(9000000L, same.CreatedTick, "only the creation tick, from the same boot");
         }
 
         public static void AnInterruptedRestoreHoldsOnlyWhatWeSaved()

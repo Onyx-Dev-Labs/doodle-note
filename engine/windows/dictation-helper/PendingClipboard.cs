@@ -132,8 +132,6 @@ namespace DoodleNote.DictationHelper
         public const int PayloadWaitMs = 250;
         /// <summary>The private format our WRITE carries last ("&lt;record id&gt;:&lt;nonce&gt;"). Restores never set it.</summary>
         public const string SentinelFormat = "DoodleNote.Bark.Transaction";
-        /// <summary>Clipboard operations of our write after its EmptyClipboard (text, three markers, sentinel; the text forms are Windows').</summary>
-        public const int WriteOps = 5;
         /// <summary>Allowance for the sequence moves Windows makes when the clipboard is closed (bounds only).</summary>
         public const int CloseMoves = 2;
         /// <summary>The state-file format this helper writes; older records are removed, never restored from.</summary>
@@ -909,17 +907,14 @@ namespace DoodleNote.DictationHelper
             catch (OverflowException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
             if (corrupt != null) { DeleteId(id, "payload corrupt"); return "ERROR: payload corrupt (" + corrupt + ")"; }
             if (!ClipboardText.Open()) { result = RecoverResult.Busy; reply["result"] = "busy"; return "the clipboard is busy; kept for a retry"; }
-            PendingRecord journal = null;
             string outcome;
             try
             {
                 ClipboardView view = ClipboardView.Read(saved, id, nonce, dictatedHash);
                 LogonMatch match = facts.Compare(Now());
                 RecoveryVerdict verdict = Decide(facts, view, match);
-                string seen = view.Describe() + "; sequence " + view.Sequence + ", recorded " + facts.Stage + " " + facts.SequenceAtStage + "/" + facts.SequenceClosed + "/" + facts.SequenceAfterWrite
-                    + (facts.OriginStage.Length > 0 ? " (found " + facts.OriginStage + " " + facts.OriginSequenceAtStage + "/" + facts.OriginSequenceClosed + ")" : "") + ", logon " + match.ToString().ToLowerInvariant();
+                string seen = view.Describe() + "; sequence " + view.Sequence + ", recorded " + facts.Stage + ", logon " + match.ToString().ToLowerInvariant();
                 if (verdict == RecoveryVerdict.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record (" + seen + "); left to it"; } // not retried here (S-A)
-                if (verdict == RecoveryVerdict.Stale) { DeleteId(id, "stale"); return "stale (" + seen + "); deleted"; } // not produced by Decide any more
                 if (verdict == RecoveryVerdict.Untouched)
                 {
                     if (byUser) reply["result"] = "restored";
@@ -928,34 +923,17 @@ namespace DoodleNote.DictationHelper
                     if (facts.Unrestored) Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", "restored"));
                     return "untouched (" + seen + "): the user's content is there";
                 }
-                if (byUser)
+                if (!byUser)
                 {
-                    // The user's Restore: only while the clipboard is exactly as offered.
-                    if (view.Sequence != expectSequence)
-                    {
-                        result = RecoverResult.Pending;
-                        reply["result"] = "changed";
-                        reply["sequence"] = (double)view.Sequence;
-                        reply["formats"] = view.FormatCount;
-                        long bytes = ClipboardText.OpenClipboardBytes(view.OwnerAlive && !view.OwnerIsUs);
-                        reply["bytes"] = bytes >= 0 ? (object)(double)bytes : null;
-                        Offer(id, facts, saved, view, verdict);
-                        return "the user's restore: the clipboard changed since the offer (" + seen + "); asked again";
-                    }
-                }
-                else if (verdict == RecoveryVerdict.Pending)
-                {
-                    // The retention applies only to what was offered and never restored (a provable state restores
-                    // however old it is), measured on the tick count from the first offer.
-                    // Offered in an earlier boot and not answered: offered once more in this boot (a fresh offer: sequence
-                    // numbers restarted), and deleted when a second reboot finds it still unanswered.
+                    // ROUND 18: no automatic restore authority ever comes from disk. Whatever the journal and the clipboard
+                    // say, a record read back here is OFFERED; only the user's Restore writes. The boot limit and the
+                    // retention (policies) apply to what is offered.
                     if (OfferBootStep(facts, bootId, (long)Native.GetTickCount64()) == "delete")
                     {
                         DeleteId(id, "offered in two boots without an answer");
                         return "offered in two boots without an answer; deleted";
                     }
-                    // Offered first (this fixes the offered sequence and tick if it was not offered yet), then the retention.
-                    Offer(id, facts, saved, view, verdict);
+                    Offer(id, facts, saved, view);
                     if (Expired(facts, Now()))
                     {
                         DeleteId(id, "expired: offered longer than the " + Retention.TotalHours + " h retention");
@@ -963,22 +941,32 @@ namespace DoodleNote.DictationHelper
                     }
                     result = RecoverResult.Pending;
                     reply["result"] = "pending";
-                    return "pending (" + seen + "): not provably ours, kept and offered; nothing written";
+                    return "offered (" + seen + "); nothing written";
                 }
-                // Journaled like a delivery, keeping the stage FOUND as its origin (unwrapped only when the found
-                // stage is itself a recovery that never emptied: then the clipboard is as that recovery found it).
-                journal = new PendingRecord(id, nonce) { Persisted = true, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, DictatedHash = dictatedHash,
+                // The user's Restore: only while the clipboard is exactly as offered.
+                if (view.Sequence != expectSequence)
+                {
+                    result = RecoverResult.Pending;
+                    reply["result"] = "changed";
+                    reply["sequence"] = (double)view.Sequence;
+                    reply["formats"] = view.FormatCount;
+                    long bytes = ClipboardText.OpenClipboardBytes(view.OwnerAlive && !view.OwnerIsUs);
+                    reply["bytes"] = bytes >= 0 ? (object)(double)bytes : null;
+                    Offer(id, facts, saved, view);
+                    return "the user's restore: the clipboard changed since the offer (" + seen + "); asked again";
+                }
+                // Journaled like a delivery, offer-only from the start (an interrupted Restore is offered again, never
+                // finished on its own). It carries no sequence facts: nothing on disk is proof of anything.
+                PendingRecord journal = new PendingRecord(id, nonce) { Persisted = true, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, DictatedHash = dictatedHash,
                     OfferedSequence = facts.OfferedSequence, OfferedTick = facts.OfferedTick, OfferedBoot = facts.OfferedBoot, OfferedUtc = facts.OfferedUtc, OfferBoots = facts.OfferBoots,
-                    OfferOnly = facts.OfferOnly, OfferOnlyWhy = facts.OfferOnlyWhy }; // a failed recovery keeps the first offer, and offer-only
+                    OfferOnly = true, OfferOnlyWhy = "the user's Restore of an offer" };
                 Inherit(journal, facts, match, (long)Native.GetTickCount64());
                 if (!Stage(journal, "recovering", view.Sequence))
                 {
                     result = RecoverResult.Failed;
                     reply["result"] = "failed";
-                    return "the recovery could not be journaled; nothing emptied, kept (" + verdict + ")";
+                    return "the restore could not be journaled; nothing emptied, kept";
                 }
-                int beforeEmpty = TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_BEFORE_EMPTY_MS", 0);
-                if (beforeEmpty > 0) Thread.Sleep(beforeEmpty); // test build only: die before the recovery empties
                 // EmptyClipboard waits on a live foreign owner's WM_DESTROYCLIPBOARD (up to ~5 s on a hung one) while we hold the
                 // lock: an owner that does not answer a WM_NULL now is not asked at all (kept, tried again later).
                 string ownerProblem = view.OwnerAlive && !view.OwnerIsUs ? ClipboardText.OwnerUnresponsive() : null;
@@ -992,33 +980,25 @@ namespace DoodleNote.DictationHelper
                 {
                     result = RecoverResult.Failed;
                     reply["result"] = "failed";
-                    journal = null;
-                    return "the clipboard could not be emptied; kept for a retry (" + verdict + ")";
+                    return "the clipboard could not be emptied; kept for a retry";
                 }
                 bool journaled = Stage(journal, "recovering-emptied", Native.GetClipboardSequenceNumber());
                 int stall = TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_MS", 0);
-                if (stall > 0) Thread.Sleep(stall); // test build only: die with the clipboard emptied by the recovery
+                if (stall > 0) Thread.Sleep(stall); // test build only: die with the clipboard emptied by the user's Restore
                 string restored = saved.PutBackResult(saved.PutBackOpen());
                 reply["result"] = restored;
                 if (!journaled)
                 {
-                    // Put back now (the user's content must not stay off the clipboard), but an interruption could not
-                    // have been proven ours: the backup is kept, as an offer.
+                    // Put back now (the user's content must not stay off the clipboard); the record is kept, as an offer.
                     result = RecoverResult.Pending;
-                    return "put back (" + verdict + "; " + seen + "): " + restored + ", but its stage could not be journaled: kept as an offer";
+                    return "put back (" + seen + "): " + restored + ", but its stage could not be journaled: kept as an offer";
                 }
-                if (restored == "unrestored") { result = RecoverResult.Failed; return "put back only in part; kept for a retry (" + verdict + ")"; }
-                outcome = "put back (" + verdict + "; " + seen + "): " + restored;
+                if (restored == "unrestored") { result = RecoverResult.Failed; return "put back only in part; kept, offered again"; }
+                outcome = "the user's restore put back (" + seen + "): " + restored;
                 DeleteId(id, outcome);
-                journal = null;
                 Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", restored));
             }
-            finally
-            {
-                Native.CloseClipboard();
-                // A kept record whose recovery emptied the clipboard: the sequence after our close, confirmed.
-                if (journal != null) ConfirmClosed(journal);
-            }
+            finally { Native.CloseClipboard(); }
             return outcome;
         }
 
@@ -1125,29 +1105,18 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// The rule (unit-tested): what a recovery journal inherits from the record it found. Its state file is stamped with
-        /// THIS helper's identity, so it may carry the found record's sequence facts (origin stage, sequences, the write's
-        /// sequence, the creation tick) only when that record was written in this same logon and boot. A record from
-        /// another or an unknown logon or boot carries none: its old sequence numbers never become proof under the new
-        /// identity (it can only be offered).
+        /// The rule (unit-tested): what the user's Restore journal inherits from the record it found. Since round 18 no
+        /// sequence fact on disk is proof of anything, so it inherits none (no origin stage, no sequences, no write
+        /// sequence); only the creation tick, and only from a record of this same logon and boot (a tick of another boot
+        /// would make a fresh journal look older or newer than it is).
         /// </summary>
         internal static void Inherit(PendingRecord journal, RecordFacts facts, LogonMatch match, long nowTick)
         {
-            if (match != LogonMatch.Same)
-            {
-                journal.SequenceAfterWrite = 0;
-                journal.OriginStage = "";
-                journal.OriginSequenceAtStage = 0;
-                journal.OriginSequenceClosed = 0;
-                journal.CreatedTick = nowTick;
-                return;
-            }
-            journal.SequenceAfterWrite = facts.SequenceAfterWrite;
-            journal.CreatedTick = facts.Tick;
-            RecordFacts origin = facts.Stage == "recovering" && facts.OriginStage.Length > 0 ? facts.AsOrigin() : facts;
-            journal.OriginStage = origin.Stage;
-            journal.OriginSequenceAtStage = origin.SequenceAtStage;
-            journal.OriginSequenceClosed = origin.SequenceClosed;
+            journal.SequenceAfterWrite = 0;
+            journal.OriginStage = "";
+            journal.OriginSequenceAtStage = 0;
+            journal.OriginSequenceClosed = 0;
+            journal.CreatedTick = match == LogonMatch.Same ? facts.Tick : nowTick;
         }
 
         /// <summary>
@@ -1155,7 +1124,7 @@ namespace DoodleNote.DictationHelper
         /// are fixed when it is first offered (persisted in the state file): a retry never refreshes them, so a
         /// later change to the clipboard always shows as "changed" at the user's click.
         /// </summary>
-        static void Offer(string id, RecordFacts facts, SavedClipboard saved, ClipboardView view, RecoveryVerdict verdict)
+        static void Offer(string id, RecordFacts facts, SavedClipboard saved, ClipboardView view)
         {
             ClipboardOffer known;
             if (facts.OfferedSequence == 0 && offers.TryGetValue(id, out known) && known.Boot == bootId && known.Tick > 0)
@@ -1273,71 +1242,20 @@ namespace DoodleNote.DictationHelper
             catch (Exception error) { Wire.Log("ERROR: the retention check failed: " + error.GetType().Name); }
         }
 
-        public enum RecoveryVerdict { Stale, Untouched, Pending, OtherSession, OursByWrite, InterruptedEmpty }
-
-        static bool PostEmpty(string stage) { return stage == "emptied" || stage == "restore-emptied" || stage == "recovering-emptied"; }
+        public enum RecoveryVerdict { Untouched, Pending, OtherSession }
 
         /// <summary>
-        /// The rule (unit-tested). Writes back on its own ONLY when the clipboard is provably ours:
-        ///  (a) our complete write: our sentinel with this transaction's nonce, our exact marker values, our text
-        ///      by its hash, and nothing else but what Windows synthesizes from that text, AT a sequence within our
-        ///      own operations from the journaled write (continuity: a replay of every format is offered instead);
-        ///  (b) an empty clipboard at exactly the sequence journaled for a stage after OUR EmptyClipboard (under
-        ///      our lock, or confirmed after our close); for a recovery that never emptied, its found stage's.
-        /// Every proof needs the same logon (Compare: session, LUID, per-logon key, boot). A record is deleted here
-        /// without writing only when that loses nothing: nothing was emptied (same logon), or the clipboard already
-        /// holds exactly the saved content (any logon). Another session's record is left alone; one from another
-        /// boot is offered. Everything else is PENDING (offered): an unknown logon, our write cut short, only saved
-        /// formats, an empty clipboard right after a pre-empty stage, a live foreign owner, a sequence beyond our
-        /// bounds. A pending record goes only by the user's Restore or Dismiss, the retention, or a reboot.
+        /// The rule (unit-tested). ROUND 18: a record read back from disk never carries authority to write: whatever its
+        /// journal says (a stage, a sequence, our complete write, an empty clipboard at a journaled sequence), it is
+        /// OFFERED (Pending). The only exceptions: another session's record is left alone (OtherSession), and a record
+        /// whose saved content is already on the clipboard exactly is deleted without writing (Untouched: nothing of the
+        /// user's is missing). The only automatic restore is the live transaction's own, in the process that wrote
+        /// (SavedClipboard.Restore).
         /// </summary>
         public static RecoveryVerdict Decide(RecordFacts facts, ClipboardView view, LogonMatch logonMatch)
         {
-            string stage = facts.Stage;
             if (logonMatch == LogonMatch.OtherSession) return RecoveryVerdict.OtherSession;
-            // OFFER-ONLY first (round 17): a record that was ever rejected, kept as an offer, offered, rebuilt, adopted, or
-            // whose restore did not complete can only be offered, or deleted when that loses nothing (the saved content is
-            // already there). Never (a), never (b): authority is not re-derived from fields once it was given up.
-            if (facts.OfferOnly) return view.HoldsSavedExactly ? RecoveryVerdict.Untouched : RecoveryVerdict.Pending;
-            if (stage == "saved") return RecoveryVerdict.Untouched;
-            // Another boot: sequence numbers and ownership mean nothing, so nothing is proven; but an OFFER only needs the
-            // user's confirmation against the clipboard as it is now (Restore re-checks at the click): offered.
-            if (logonMatch == LogonMatch.Different) return view.HoldsSavedExactly ? RecoveryVerdict.Untouched : RecoveryVerdict.Pending;
-            if (view.HoldsSavedExactly) return RecoveryVerdict.Untouched;
-            if (logonMatch == LogonMatch.Unknown) return RecoveryVerdict.Pending;
-            // Nothing of the user's was emptied: the clipboard is unchanged since before our EmptyClipboard. A sequence
-            // comparison, so only within the same logon (after a relogin the numbers start over and may coincide).
-            if (stage == "emptying" && view.Sequence == facts.SequenceAtStage) return RecoveryVerdict.Untouched;
-            // Ownership is NOT proof (round 15): another process can add a format without emptying, which keeps our window
-            // the owner. Only (a) content with continuity and (b) our exact empty write back on their own.
-            // (a) needs continuity too: the content proves where it came from, not that nobody replayed it since
-            // (a clipboard manager that kept every format, our sentinel included). Within our own operations from
-            // the journaled write, or our window owning it: ours. Beyond them: offered, never written on its own.
-            if (view.OurWrite == OurWrite.Complete && !Beyond(facts, view)) return RecoveryVerdict.OursByWrite;
-            RecordFacts proof = stage == "recovering" && facts.OriginStage.Length > 0 ? facts.AsOrigin() : facts;
-            if (view.FormatCount == 0 && PostEmpty(proof.Stage) && proof.SequenceAtStage != 0
-                && (view.Sequence == proof.SequenceAtStage || (proof.SequenceClosed != 0 && view.Sequence == proof.SequenceClosed)))
-                return RecoveryVerdict.InterruptedEmpty;
-            // Everything else is offered. A live foreign owner, a sequence beyond our bounds (the user's later copy,
-            // or our own later transactions), another offer's restore: none of them deletes the user's backup.
-            return RecoveryVerdict.Pending;
-        }
-
-        /// <summary>
-        /// The rule (unit-tested): the sequence moved beyond the operations we actually performed from the journaled
-        /// stage. Only "emptied" counts operations after its journal, because our write's sets and its sentinel are
-        /// one locked step (the sentinel, set last, proves they ran). Every other stage counts nothing it has not
-        /// journaled as done: a restore that was only about to run establishes no continuity. Plus Windows' moves at
-        /// a close and one per synthesized format present. Compared as a forward distance (wrap-safe; a sequence
-        /// behind the basis counts as beyond). Used ONLY to withhold proof (a): it never deletes anything.
-        /// </summary>
-        internal static bool Beyond(RecordFacts facts, ClipboardView view)
-        {
-            uint basis = Math.Max(facts.SequenceAtStage, Math.Max(facts.SequenceClosed, facts.SequenceAfterWrite));
-            if (basis == 0) return true; // nothing journaled to be continuous with
-            uint allowance = (uint)(CloseMoves + view.SynthesizedPresent) + (facts.Stage == "emptied" ? (uint)WriteOps : 0u);
-            uint distance = unchecked(view.Sequence - basis);
-            return distance > allowance;
+            return view.HoldsSavedExactly ? RecoveryVerdict.Untouched : RecoveryVerdict.Pending;
         }
 
         /// <summary>
@@ -1483,19 +1401,6 @@ namespace DoodleNote.DictationHelper
             return facts;
         }
 
-        /// <summary>The stage a recovery found, judged as if the recovery had not journaled.</summary>
-        public RecordFacts AsOrigin()
-        {
-            RecordFacts origin = (RecordFacts)MemberwiseClone();
-            origin.Stage = OriginStage;
-            origin.SequenceAtStage = OriginSequenceAtStage;
-            origin.SequenceClosed = OriginSequenceClosed;
-            origin.OriginStage = "";
-            origin.OriginSequenceAtStage = 0;
-            origin.OriginSequenceClosed = 0;
-            return origin;
-        }
-
         /// <summary>
         /// The rule (unit-tested). DIFFERENT (another boot): Windows' boot counter differs, or the tick count is below
         /// the record's (ticks restart at boot); nothing is proven then, and the record is offered (an offer only
@@ -1530,10 +1435,6 @@ namespace DoodleNote.DictationHelper
         public OurWrite OurWrite;
         public uint Sequence;
         public int FormatCount;
-        /// <summary>Clipboard operations a put-back of the saved content performs after its EmptyClipboard.</summary>
-        public int RestoreOps;
-        /// <summary>Present standard formats Windows may synthesize (each can move the sequence once when first read).</summary>
-        public int SynthesizedPresent;
         /// <summary>A hint for the offer only: our write or the saved content, cut short.</summary>
         public bool LooksInterrupted { get { return OurWrite == OurWrite.Partial || OnlySavedFormats || FormatCount == 0; } }
 
@@ -1551,15 +1452,9 @@ namespace DoodleNote.DictationHelper
             view.OwnerIsUs = owner != IntPtr.Zero && owner == Ui.ClipboardWindow;
             view.OwnerAlive = owner != IntPtr.Zero && Native.IsWindow(owner);
             view.Sequence = Native.GetClipboardSequenceNumber();
-            view.RestoreOps = saved.RestoreOps;
             List<uint> present = new List<uint>();
             for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
             view.FormatCount = present.Count;
-            // Present formats Windows may synthesize that neither our write nor the saved content set (our write sets
-            // every text form explicitly): Windows adds them at a close or a first read, one sequence step each. Each one
-            // counted WIDENS the sequence bound within which proof (a) is granted (the permissive direction), so only
-            // formats nobody set are counted.
-            foreach (uint f in present) if (SavedClipboard.MaybeSynthesized(f) && !ClipboardText.OurWriteFormat(f) && !saved.Has(f)) view.SynthesizedPresent++;
             // A live owner that is not ours could render on demand: never read its data.
             if (view.OwnerAlive && !view.OwnerIsUs) return view;
             Func<uint, int, byte[]> read = delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); };
