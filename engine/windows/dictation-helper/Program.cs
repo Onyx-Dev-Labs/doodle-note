@@ -83,7 +83,8 @@ namespace DoodleNote.DictationHelper
         [STAThread]
         static int Main(string[] args)
         {
-            // The clipboard reader (see ClipboardReader): no hooks, no window, no protocol of its own.
+            // The clipboard reader (see ClipboardReader): no hooks and no UI; its only window is the message-only one it
+            // opens the clipboard with (round 21), and its only protocol is the framed reader protocol.
             if (args.Length == 1 && args[0] == ClipboardReader.Argument) return ClipboardReader.Serve();
             // The app's pipes are this helper's alone: a clipboard reader it starts must not inherit
             // them, or a reader still waiting in a render would keep the app from seeing them close.

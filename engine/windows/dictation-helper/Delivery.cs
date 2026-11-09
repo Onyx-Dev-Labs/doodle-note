@@ -1491,7 +1491,8 @@ namespace DoodleNote.DictationHelper
         /// <summary>
         /// Under the lock: the bytes on the clipboard, formats and size only (an offer that changed shows what a
         /// restore would overwrite). Never for a live foreign owner (it may render: -1), and synthesized formats
-        /// are not read (a read would render them). GDI-handle formats count as 0.
+        /// are not read (a read would render them). GDI-handle formats count as 0. Round 22: any other format that
+        /// cannot be read or sized makes the total UNKNOWN (-1), never smaller.
         /// </summary>
         /// <summary>
         /// THE complete enumeration of the open clipboard (round 21), shared by every proof: the last error cleared before
@@ -1793,11 +1794,14 @@ namespace DoodleNote.DictationHelper
 
     /// <summary>
     /// The user's clipboard, saved before a paste and put back afterwards. Every registered format
-    /// and the known-safe standard formats (text, bitmaps, a file list) are preserved, so an app's
-    /// own content (Excel cells, editor formats) round-trips; only OLE/private bookkeeping formats
-    /// and the privacy markers get special handling. Total bytes and copy time are capped so a huge
-    /// clipboard cannot stall a delivery; when a user-visible format is dropped by a cap the restore
-    /// reports "skipped" so the overlay can warn.
+    /// and the known-safe standard formats (text, a DIB, a file list, ...) are preserved by their bytes, and
+    /// an EMF by its bits, so an app's own content (Excel cells, editor formats) round-trips. Special handling:
+    /// the bitmap, palette and metafile picture Windows rebuilds from a retained DIB or EMF; OLE bookkeeping
+    /// (dropped); our own sentinel; the privacy markers (forced to the conservative values when not read
+    /// cleanly); the known presence-only formats (saved and put back as presence only, round 22); standard
+    /// formats outside SafeStandard (not saved: reported). Total bytes and copy time are capped so a huge
+    /// clipboard cannot stall a delivery. Anything not kept (a cap, a policy, or, on the retry, a format its
+    /// owner did not render) is reported by name: the restore reports "skipped" and the app says what is missing.
     /// </summary>
     internal sealed class SavedClipboard
     {
@@ -1949,12 +1953,17 @@ namespace DoodleNote.DictationHelper
         /// listing; and then EVERY listed format ended in a definite outcome, with the sequence unchanged: saved (a
         /// complete framed reply, its declared length met), or a NAMED skip, which is only a positively measured excess
         /// over the cap or an explicit format policy (the bitmap and palette Windows rebuilds from a DIB we retained,
-        /// a metafile picture rebuilt from an EMF we retained, our own sentinel, OLE bookkeeping, a standard format we
-        /// cannot replay). Listed 0 + counted 0 + no error is a POSITIVE EMPTY, the only source of a zero-item save
-        /// that reports "restored". Anything else is NOT ESTABLISHED: null, `retry` set: a lost hold, an enumeration
-        /// error, listed != counted, a zero sequence, busy, a malformed, fragmentary or out-of-order reply, a "none",
-        /// "unlocked" or "nosize" (zero is not a size) for a listed format, a missing registered name, a failed EMF
-        /// rebuild, the deadline running out. Null without `retry`: an overrun, or the clipboard changed.
+        /// a metafile picture rebuilt from an EMF we retained, our own sentinel, OLE bookkeeping, a standard format this
+        /// helper does not save: policy, reported). Round 22 (owner decision), three classes for what cannot be read:
+        /// (1) a known presence-only format (PresenceOnly) is saved and put back as presence only; (2) a privacy marker
+        /// not cleanly read forces the conservative exclusion markers; (3) on the second attempt (`allowUnrendered`), a
+        /// format its owner did not render ("none", "unlocked", "nosize") under the proven hold with the sequence
+        /// unchanged is a NAMED, REPORTED skip, only beside content that does go back. Listed 0 + counted 0 + no error is
+        /// a POSITIVE EMPTY, the only source of a zero-item save that reports "restored". Anything else is NOT
+        /// ESTABLISHED: null, `retry` set: a lost hold, an enumeration error, listed != counted, a zero sequence, busy, a
+        /// malformed, fragmentary or out-of-order reply, an unrendered format on the first attempt, a missing registered
+        /// name, a failed EMF rebuild, the deadline running out. Null without `retry`: an overrun, an unresponsive
+        /// owner, no format with data provided, or the clipboard changed.
         /// </summary>
         internal static SavedClipboard Judge(Func<string, int, string> request, int timeoutMs, Func<uint> sequenceNow, out bool retry, out string line, bool allowUnrendered = false)
         {
@@ -2020,10 +2029,13 @@ namespace DoodleNote.DictationHelper
                 {
                     if (format != CF_ENHMETAFILE && !SafeStandard.Contains(format))
                     {
-                        // Policy: a standard format we cannot replay (GDI handles, private/display formats) is a real
-                        // loss and is reported, never dropped silently.
+                        // Policy: a standard format outside SafeStandard (GDI-handle formats such as CF_BITMAP's relatives,
+                        // CF_DSP*, CF_OWNERDISPLAY, the private and GDI-object ranges) is not saved by this helper. Some
+                        // could be replayed with format-specific code; this helper does not, so it is a real loss,
+                        // reported by name, never dropped silently.
                         saved.reportedSkip = true;
-                        outcomes.Append(" not saved (not replayable: policy)");
+                        saved.skippedNames.Add(DisplayName(format, name) + " (not saved by DoodleNote)");
+                        outcomes.Append(" not saved (policy: a standard format this helper does not save; reported)");
                         continue;
                     }
                     cap = Math.Min(MaxFormatBytes, MaxBytes - total);

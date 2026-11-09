@@ -331,8 +331,10 @@ namespace DoodleNote.DictationHelper
         public static void Keep(PendingRecord record, string why)
         {
             if (record == null) return;
-            MarkOfferOnly(record, why);
-            lock (gate) { inFlight.Remove(record.Id); ScheduleRetry(record.Id, RetryKind.Failed); }
+            // Round 22 (nit): the record leaves in-flight whatever the offer-only journal does (a throw there must never
+            // leave it in flight for ever, where no check would ever look at it).
+            try { MarkOfferOnly(record, why); }
+            finally { lock (gate) { inFlight.Remove(record.Id); ScheduleRetry(record.Id, RetryKind.Failed); } }
         }
 
         /// <summary>A restore result that leaves nothing to do later: anything but "unrestored" and "user-changed" (both keep the record).</summary>
@@ -766,6 +768,10 @@ namespace DoodleNote.DictationHelper
         /// when offered (the same sequence): otherwise "changed", with what a restore would overwrite (formats
         /// and size only) and the new sequence, so the app can ask again.
         /// </summary>
+        /// Round 22 (F5), an abandoned late write: its own record stays in flight here until its rollback is done ("busy",
+        /// never judged meanwhile), and while it waits inside EmptyClipboard it holds the clipboard open, so neither this
+        /// Restore nor a leftover check can open the clipboard ("busy", retried) until it returns and has put its saved
+        /// content back. They are serialized by the clipboard lock, so nothing here waits for it.
         /// Round 22 (S3): an INCOMPLETE record is put back only when the app showed the user what is missing
         /// (acceptIncomplete); otherwise "incomplete" with the missing names, nothing emptied. Its put-back answers
         /// "restored-partially" with what it could not include.
