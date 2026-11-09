@@ -806,9 +806,14 @@ namespace DoodleNote.DictationHelper
                 // What it still says about isolation is honoured: another session's, or a running helper's, is left alone.
                 if (state != null)
                 {
-                    double? otherSession = Wire.Num(state, "session"), otherPid = Wire.Num(state, "pid"), otherStart = Wire.Num(state, "pidStart");
-                    if (otherSession.HasValue && otherSession.Value >= 0 && (int)otherSession.Value != session) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "an invalid state naming another session (" + invalid + "); left to it"; }
-                    if (otherPid.HasValue && otherPid.Value > 0 && (int)otherPid.Value != Process.GetCurrentProcess().Id && HelperRunning((int)otherPid.Value, (long)(otherStart ?? 0))) { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state whose helper still runs (" + invalid + "); left to it"; }
+                    double? otherSession = Wire.Num(state, "session"), otherPid = Wire.Num(state, "pid"), otherStart = Wire.Num(state, "pidStart"), otherTick = Wire.Num(state, "tick");
+                    string otherBootId = Wire.Str(state, "bootId");
+                    // The boot first, as Compare does for a valid state: a record of an EARLIER boot (its session number means
+                    // nothing now) is rebuilt and offered here, never left to a session that no longer exists.
+                    bool earlierBoot = (!string.IsNullOrEmpty(otherBootId) && bootId.Length > 0 && otherBootId != bootId)
+                        || (otherTick.HasValue && otherTick.Value > 0 && (long)Native.GetTickCount64() < (long)otherTick.Value);
+                    if (!earlierBoot && otherSession.HasValue && otherSession.Value >= 0 && (int)otherSession.Value != session) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "an invalid state naming another session (" + invalid + "); left to it"; }
+                    if (!earlierBoot && otherPid.HasValue && otherPid.Value > 0 && (int)otherPid.Value != Process.GetCurrentProcess().Id && HelperRunning((int)otherPid.Value, (long)(otherStart ?? 0))) { result = RecoverResult.Busy; reply["result"] = "busy"; return "an invalid state whose helper still runs (" + invalid + "); left to it"; }
                 }
                 // Its payload may still be whole: then the record is rebuilt OFFER-ONLY with an unknown identity and offered,
                 // never deleted and never restored on its own. Without a usable payload there is nothing to restore from.
