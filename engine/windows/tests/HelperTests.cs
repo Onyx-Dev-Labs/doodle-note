@@ -858,6 +858,37 @@ namespace DoodleNote.DictationHelper.Tests
             }
         }
 
+        public static void ASavedStageRecordIsDeletedEvenFromAnotherBoot()
+        {
+            // Pins the CURRENT behaviour (Opus round 18): a record whose journal says "saved" (nothing was emptied: our
+            // journal precedes any EmptyClipboard of ours) is deleted on sight, also from another boot; nothing is
+            // written. Test only: whether a reboot should change that is an owner question, not changed here.
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dn-pending-saved-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            string old = PendingClipboard.Directory;
+            PendingClipboard.Directory = dir;
+            try
+            {
+                var items = new[] { new KeyValuePair<uint, byte[]>(13, System.Text.Encoding.Unicode.GetBytes("saved stage\0")) };
+                PendingRecord record = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
+                record.PayloadWriter.Join(10000);
+                ((HashSet<string>)typeof(PendingClipboard).GetField("inFlight", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null)).Remove(record.Id);
+                string state = System.IO.Directory.GetFiles(dir, "*.state").Single();
+                var parsed = Wire.Parse(System.IO.File.ReadAllText(state));
+                Assert.Equal("saved", Wire.Str(parsed, "stage"), "Begin journals \"saved\"");
+                parsed["bootId"] = "an-earlier-boot";
+                System.IO.File.WriteAllText(state, Wire.Serialize(parsed));
+                Assert.Equal(null, RecordFacts.Validate(Wire.Parse(System.IO.File.ReadAllText(state)), record.Id), "still a valid state");
+                PendingClipboard.RecoverLeftover("test");
+                Assert.Equal(false, PendingClipboard.OnDisk(record.Id), "a \"saved\" record of another boot: deleted on sight (current behaviour)");
+            }
+            finally
+            {
+                PendingClipboard.Directory = old;
+                try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
+            }
+        }
+
         public static void ASettledRecordIsNeverOfferedAgain()
         {
             string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dn-pending-settled-" + Guid.NewGuid().ToString("N"));
