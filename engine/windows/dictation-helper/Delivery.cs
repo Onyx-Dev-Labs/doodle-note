@@ -2141,6 +2141,14 @@ namespace DoodleNote.DictationHelper
                 }
                 if (left() <= 0) { saved.Discard(); line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " not read: out of time]); not pasting"; return null; }
                 string answer = request("get " + format + " " + cap, Math.Max(1, Math.Min(PerFormatMs, left())));
+                // Round 23 (Opus): an owner busy for just over one ping gets ONE more within the remaining budget (once per
+                // save), then the answer stands.
+                if (answer == "unresponsive" && !pingRetried && left() > 300)
+                {
+                    pingRetried = true;
+                    outcomes.Append(" (its owner did not answer; asked once more)");
+                    answer = request("get " + format + " " + cap, Math.Max(1, Math.Min(PerFormatMs, left())));
+                }
                 if (answer == null) { saved.Discard(); retry = false; line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " overran]): its owner is slow to render; not pasting"; return null; }
                 string[] parts = answer.Split(' ');
                 uint at;
