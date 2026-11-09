@@ -569,8 +569,9 @@ namespace DoodleNote.DictationHelper
                         if (hookUnmark == "1" || Array.IndexOf(hookUnmark.Split(','), (j + 1).ToString()) >= 0 || !Native.SetFileInformationByHandle(held[j], Native.FileDispositionInfo, ref keep, 1)) cleared = false;
                     if (cleared) { Wire.Log("every mark already set was cleared: nothing deleted, the record is kept whole"); return false; }
                     // A mark that could not be cleared: that file goes at the close. Complete the deletion instead, from the
-                    // BEGINNING in the stated order (every handle marked again), so that what the close (or a kill) leaves
-                    // is still a prefix of state .tmp, payload .tmp, state, payload: never a state without its payload.
+                    // BEGINNING in the stated order (every handle marked again). Physically, an interruption still leaves the
+                    // record intact, a payload without its state (swept), or a state without its payload (removed by recovery
+                    // on a positive ABSENT); see the deletion contract in docs/WINDOWS-RELEASE-QA.md.
                     Wire.Log("ERROR: a deletion mark could not be cleared: completing the deletion instead");
                     completing = true;
                     for (int k = 0; k < held.Count; k++)

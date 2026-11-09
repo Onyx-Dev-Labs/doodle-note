@@ -1759,18 +1759,20 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>
         /// Wall-clock bound for reading one format (a render that takes longer abandons the reader and
-        /// gives up the save; see ClipboardReader for what happens to that reader). Each read
-        /// is also bounded by what is left of the whole save's budget, so the clipboard is never held by
-        /// the reader for longer than that budget (1.5 s): a user's copy meanwhile waits at most that.
+        /// gives up the save; see ClipboardReader for what happens to that reader). Each read is also bounded by
+        /// what is left of the whole save's budget (1.5 s). Stated plainly: an abandoned reader still waiting in an
+        /// owner's render keeps its open until the render returns (since round 21 with its own window, so another
+        /// app's OpenClipboard fails meanwhile, as it would with any app reading a format rendered on demand).
         /// </summary>
         const int PerFormatMs = 1500;
 
         /// <summary>
-        /// Save the clipboard through the reader process (ClipboardReader), one bounded request per format, within
-        /// timeoutMs in total. ROUND 20, the one rule: the helper writes to the clipboard only when the save is POSITIVELY
-        /// established (Judge); anything else is "capture not established": retried while the budget lasts, then null,
-        /// and the delivery takes the no-save path (it never empties or writes the clipboard). Null also, as before,
-        /// when a read overran (an owner slow to render) or the clipboard changed while it was saved.
+        /// Save the clipboard through the reader process (ClipboardReader), one bounded request per format, under ONE
+        /// absolute deadline (timeoutMs). The helper writes to the clipboard only when the save is POSITIVELY
+        /// established (Judge). A capture that is not established is discarded whole (nothing partial is kept), its
+        /// reader generation retired, and the WHOLE capture retried while the deadline allows; then null, and the
+        /// delivery takes the no-save path (it never empties or writes the clipboard). Null without a retry when a read
+        /// overran (that reader is abandoned while an owner renders, never killed) or the clipboard changed.
         /// </summary>
 #if DICTATION_TEST
         /// <summary>Test build only: the last save's log line (the __save-only op reports it).</summary>
@@ -2439,7 +2441,6 @@ namespace DoodleNote.DictationHelper
             }
             string result = RestoreResult(ok, complete, reportedSkip);
             if (result == "unrestored") Holds = "unknown";
-            // A kept record: the sequence after our close, confirmed with our window still the owner.
             return result;
         }
 
