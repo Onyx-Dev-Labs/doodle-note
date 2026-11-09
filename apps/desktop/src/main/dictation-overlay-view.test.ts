@@ -7,6 +7,7 @@ import {
   WARNINGS,
   describeClipboardSize,
   overlaySize,
+  listMissing,
   overlayView,
   panelView,
   type OverlayContext
@@ -351,6 +352,16 @@ test('Windows (round 23): an incomplete card shows at most three names (+N more)
   assert.ok(!none.controls.offerRestore)
   assert.equal(none.controls.offerDismiss, true)
   assert.equal(none.offerRecord, offer.record)
+})
+
+test('Windows (round 24): "+N more" counts every name (or the reported total), and a long name is cut by code points, never inside a surrogate pair', () => {
+  const many = Array.from({ length: 300 }, (_, i) => `F${i}`)
+  assert.equal(listMissing(many), 'F0; F1; F2 +297 more')
+  assert.equal(listMissing(['A', 'B'], 10), 'A; B +8 more')
+  const emoji = '😀'.repeat(70)
+  const cut = listMissing([emoji])
+  assert.equal(Array.from(cut).length, 61)
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(cut), 'no lone high surrogate')
 })
 
 test('Windows: the clipboard offer card names formats and size only, with Restore and Dismiss', () => {
