@@ -113,7 +113,10 @@ namespace DoodleNote.DictationHelper
     /// PENDING: the record is kept, nothing is written, and the app offers the user a Restore (a journaled
     /// transaction of its own, run only if the clipboard is still as it was when offered) or a Dismiss. The
     /// full list of what deletes a record is in docs/WINDOWS-RELEASE-QA.md; retention and the boot limit are
-    /// policies, not proofs the content is no longer wanted.
+    /// policies, not proofs the content is no longer wanted. OFFER-ONLY (round 17): once a record loses authority
+    /// (a rejection, kept as an offer, offered, rebuilt, adopted, a restore that did not complete) the fact is
+    /// persisted and Decide never restores it on its own again. The state file is validated strictly
+    /// (RecordFacts.Validate): an invalid one proves nothing and never deletes a valid payload.
     ///
     /// Privacy: content that carries any clipboard privacy marker (password managers set them to say
     /// "do not record") is never written to disk; such a transaction stays in memory only, so after a
