@@ -610,7 +610,8 @@ namespace DoodleNote.DictationHelper.Tests
                 PendingClipboard.Finish(failed, "unrestored");
                 Assert.Equal(true, PendingClipboard.OnDisk(failed.Id), "kept after a restore that did not run");
                 Assert.Equal(false, PendingClipboard.Settled("unrestored"), "unrestored keeps the record");
-                foreach (string done in new[] { "restored", "partial", "skipped", "user-changed", "untouched" })
+                Assert.Equal(false, PendingClipboard.Settled("user-changed"), "an owner change keeps the record (offered, never deleted on that guess)");
+                foreach (string done in new[] { "restored", "partial", "skipped", "untouched" })
                     Assert.Equal(true, PendingClipboard.Settled(done), done + " deletes the record");
             }
             finally
