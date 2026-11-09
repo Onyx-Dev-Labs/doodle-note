@@ -2026,8 +2026,28 @@ namespace DoodleNote.DictationHelper
         /// name, a failed EMF rebuild, the deadline running out. Null without `retry`: an overrun, an unresponsive
         /// owner, no format with data provided, or the clipboard changed.
         /// </summary>
+        /// <summary>Round 23: why the last save (on this thread) was not established, for the user's notice: too-large,
+        /// unrendered, nothing-savable, owner-unresponsive, or unreadable (anything else).</summary>
+        [ThreadStatic] internal static string LastNoSaveReason;
+
+        /// <summary>
+        /// Round 23 (the one rule): a retained format that is the user's content. Not CF_LOCALE (a fact about text, never
+        /// content of its own), not a privacy marker, presence-only flag, our sentinel, OLE bookkeeping or Explorer's
+        /// "Preferred DropEffect" (a copy-or-move flag that means nothing without the files).
+        /// </summary>
+        internal static bool IsUserContent(uint format, string name)
+        {
+            if (format == CF_LOCALE) return false;
+            if (format < 0xC000) return true;
+            if (string.IsNullOrEmpty(name)) return true;
+            return !Markers.Contains(name) && !PresenceOnly.Contains(name) && !SilentDrop.Contains(name) && !NotContent.Contains(name)
+                && name != PendingClipboard.SentinelFormat;
+        }
+        static readonly HashSet<string> NotContent = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Preferred DropEffect" };
+
         internal static SavedClipboard Judge(Func<string, int, string> request, int timeoutMs, Func<uint> sequenceNow, out bool retry, out string line, bool allowUnrendered = false)
         {
+            LastNoSaveReason = "unreadable";
             retry = true;
             line = null;
             if (timeoutMs <= 0) { line = "NOT ESTABLISHED: no time left for a listing (nothing requested); not pasting"; return null; } // S4: no 1 ms request
@@ -2076,6 +2096,9 @@ namespace DoodleNote.DictationHelper
             System.Text.StringBuilder outcomes = new System.Text.StringBuilder();
             List<uint> deferred = new List<uint>(); // bitmap, palette, metafile picture: decided by what was retained
             int unrenderedSkips = 0; // class 3 skips (round 22)
+            int userContent = 0;     // retained formats that are the user's content (round 23, the one rule)
+            bool tooLarge = false;   // a user-content format was over its cap (the no-save reason)
+            bool pingRetried = false; // one more chance for an owner that was busy at the first ping (round 23)
             long total = 0;
             foreach (KeyValuePair<uint, string> entry in formats)
             {
@@ -2108,7 +2131,14 @@ namespace DoodleNote.DictationHelper
                 else cap = Math.Min(MaxFormatBytes, MaxBytes - total);
                 // Round 22: a recognised privacy marker that is skipped for ANY reason forces the conservative exclusion
                 // markers on the put-back (the content must never come back without its exclusion).
-                if (cap <= 0) { saved.reportedSkip = true; if (marker) saved.forceMarkers = true; else saved.skippedNames.Add(DisplayName(format, name) + " (too large)"); outcomes.Append(" over the cap (the budget is used up)" + (marker ? "; exclusion markers forced" : "")); continue; }
+                // Round 23 (class 2 reports nothing): a marker over its budget forces the markers and is no reported skip.
+                if (cap <= 0)
+                {
+                    if (marker) saved.forceMarkers = true;
+                    else { saved.reportedSkip = true; tooLarge = true; saved.skippedNames.Add(DisplayName(format, name) + " (too large)"); }
+                    outcomes.Append(" over the cap (the budget is used up)" + (marker ? "; exclusion markers forced" : ""));
+                    continue;
+                }
                 if (left() <= 0) { saved.Discard(); line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " not read: out of time]); not pasting"; return null; }
                 string answer = request("get " + format + " " + cap, Math.Max(1, Math.Min(PerFormatMs, left())));
                 if (answer == null) { saved.Discard(); retry = false; line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " overran]): its owner is slow to render; not pasting"; return null; }
@@ -2117,7 +2147,7 @@ namespace DoodleNote.DictationHelper
                 if (parts.Length < 3 || parts[1] != format.ToString() || !uint.TryParse(parts[2], out at) || at == 0)
                 {
                     saved.Discard();
-                    if (parts[0] == "unresponsive") retry = false; // its owner does not answer: never asked to render, not retried
+                    if (parts[0] == "unresponsive") { retry = false; LastNoSaveReason = "owner-unresponsive"; } // never asked to render, not retried
                     line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + " " + (parts[0] == "lost" ? "lost hold" : parts[0] == "busy" ? "busy" : parts[0] == "unresponsive" ? "its owner did not answer, so it was never asked to render" : "malformed, fragmentary or out-of-order reply") + "]); not pasting";
                     return null;
                 }
@@ -2144,6 +2174,7 @@ namespace DoodleNote.DictationHelper
                         saved.metafileBits = bytes; // the validated bytes are what is written down (round 22: never re-extracted)
                     }
                     else saved.items.Add(new KeyValuePair<uint, byte[]>(format, bytes));
+                    if (IsUserContent(format, name)) userContent++;
                     total += bytes.Length;
                     outcomes.Append(":").Append(bytes.Length).Append(" saved");
                     continue;
@@ -2151,10 +2182,10 @@ namespace DoodleNote.DictationHelper
                 long size;
                 if (parts[0] == "oversize" && parts.Length == 4 && long.TryParse(parts[3], out size) && size > cap)
                 {
-                    // A positively measured excess: the one named skip a read can give.
-                    saved.reportedSkip = true;
+                    // A positively measured excess: the one named skip a read can give. Round 23: a marker over its cap is
+                    // class 2 (the markers forced; nothing to report).
                     if (marker) saved.forceMarkers = true;
-                    else saved.skippedNames.Add(DisplayName(format, name) + " (too large)");
+                    else { saved.reportedSkip = true; tooLarge = true; saved.skippedNames.Add(DisplayName(format, name) + " (too large)"); }
                     outcomes.Append(" over the cap (" + size + " bytes)" + (marker ? "; exclusion markers forced" : ""));
                     continue;
                 }
@@ -2197,14 +2228,18 @@ namespace DoodleNote.DictationHelper
                 else if (dibRetained) outcomes.Append(" rebuilt from the retained DIB (policy)");
                 else { saved.complete = false; outcomes.Append(" not saved (no DIB retained: partial)"); }
             }
-            // Round 22 (the limit of class 3): a skip is taken only beside content that does go back. When every format
-            // with data went unrendered, nothing would come back: emptying would destroy the user's whole clipboard. That
-            // is NOT ESTABLISHED (no paste), never an established save of nothing.
-            if (unrenderedSkips > 0 && saved.items.Count == 0 && saved.metafile == IntPtr.Zero)
+            // Round 23, THE ONE RULE (owner decision, Opus S-C with Astra S3): if nothing with USER CONTENT goes back, the
+            // save is not established and nothing is pasted. User content excludes CF_LOCALE, the privacy markers, the
+            // presence-only flags, our sentinel and bookkeeping (IsUserContent). It covers class 3's limit (every content
+            // format unrendered), a clipboard holding only something over the cap (a 4K screenshot's DIB over 16 MiB),
+            // and a delayed-render text owner answering none for the text while its CF_LOCALE reads. A positively empty
+            // clipboard (listed 0) is not this case: nothing is lost by emptying it.
+            if (listed > 0 && userContent == 0 && saved.metafile == IntPtr.Zero)
             {
                 saved.Discard();
                 retry = false;
-                line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + "]): no format with data was provided by its owner, so nothing could be put back; not pasting";
+                LastNoSaveReason = tooLarge ? "too-large" : unrenderedSkips > 0 ? "unrendered" : "nothing-savable";
+                line = "NOT ESTABLISHED (" + listing + "; [" + outcomes + "]): nothing with the user's content could be kept" + (tooLarge ? " (too large)" : unrenderedSkips > 0 ? " (not provided by its owner)" : "") + ", so nothing could be put back; not pasting";
                 return null;
             }
             // Someone copied while the save ran: their copy is the user's clipboard now; never paste over it.
