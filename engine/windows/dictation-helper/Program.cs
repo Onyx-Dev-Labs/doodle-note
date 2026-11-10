@@ -47,7 +47,9 @@ namespace DoodleNote.DictationHelper
             string first = opened ? Enumerate() : "";
             string openWindow1 = Native.GetOpenClipboardWindow().ToInt64().ToString("x");
             string second = "", openWindow2 = "";
-            if (opened) System.Threading.Thread.Sleep(waitMs);
+            // Round 30: the harness acts once this side holds the clipboard, and releases it (gates), never on a timed guess.
+            if (opened) TestMode.Trace(hold ? "clip-hold opened" : "clip-probe opened");
+            if (opened && !(waitMs > 0 && TestMode.Gate(hold ? "CLIPHOLD" : "CLIPPROBE"))) System.Threading.Thread.Sleep(waitMs);
             if (opened && hold) { second = Enumerate(); openWindow2 = Native.GetOpenClipboardWindow().ToInt64().ToString("x"); }
             if (opened) System.Threading.Thread.Sleep(holdMs);
             bool closed = false;
