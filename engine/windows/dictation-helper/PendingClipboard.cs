@@ -1852,7 +1852,7 @@ namespace DoodleNote.DictationHelper
             return UnchangedSinceCapture(facts, view, match, bootId, windowStation);
         }
 
-        /// <summary>The same rule with this boot's id and window station given (the logic tests isolate every guard).</summary>
+        /// <summary>The same rule with this boot's id and window station given (the logic tests isolate the guards; the two non-zero guards only together, being redundant with each other given equality).</summary>
         internal static bool UnchangedSinceCapture(RecordFacts facts, ClipboardView view, LogonMatch match, string currentBoot, string currentStation)
         {
             return facts != null && facts.Stage == "emptying" && facts.SequenceAtStage != 0 && view != null && !view.Incomplete
