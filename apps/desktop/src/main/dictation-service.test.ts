@@ -3431,6 +3431,11 @@ test('Windows (round 27): a separate later Restore of the same record has its ow
       h.helper.offers = [kept]
       h.helper.offerListener!(kept)
       await tick()
+      // Round 28 (rule c): an offer arriving never changes the notice slot; the user dismisses the notice first
+      // (rule b), and the card is back.
+      assert.equal(h.overlay.at(-1)!.title, partialTitle, 'the offer arriving leaves the notice')
+      h.service.onOverlayAction('dismiss', null)
+      await tick()
     }
     h.helper.restoreAnswers = [{ result: 'failed' }]
     clickOffer(h, 'offer-restore')
@@ -3513,6 +3518,255 @@ for (const clicks of [1, 2]) {
     assert.equal(replies.length, 1, 'no second request was queued')
     assert.equal(notices(h, partialTitle), 1, 'the one restored record has exactly one notice')
     assert.equal(h.overlay.at(-1)!.title, partialTitle, 'and it stays visible')
+  })
+}
+
+// Round 28: Astra's round-27 verification (/tmp/tmp.Uht6H7zGFH/r27-additions.ts, read-only) as named cases;
+// the delete-confirmation case reaches the newer card by dismissing the notice first (rule c leaves it up).
+// Independent round-27 verification; transport only is replaced, no helper process.
+async function astra27Client(
+  h: ReturnType<typeof harness>,
+  holdLists = false
+): Promise<{
+  restores: Array<(x: unknown) => void>
+  lists: Array<(x: unknown) => void>
+  gone: (record: string) => boolean
+  recovered: (record: string, missing?: string[]) => boolean
+}> {
+  const { DictationHelperClient } = await import('./dictation-helper-client')
+  const client = new DictationHelperClient({ command: '/never-launched', platform: 'win32' })
+  const raw = client as unknown as {
+    request(op: string, ...args: unknown[]): Promise<unknown>
+    handleLine(line: string): boolean
+  }
+  const restores: Array<(x: unknown) => void> = []
+  const lists: Array<(x: unknown) => void> = []
+  raw.request = async (op: string) => {
+    if (op === 'clipboard-offers')
+      return holdLists
+        ? new Promise((resolve) => lists.push(resolve))
+        : { ok: true, offers: h.helper.offers }
+    assert.equal(op, 'clipboard-restore')
+    return new Promise((resolve) => restores.push(resolve))
+  }
+  client.onClipboardLate(h.helper.clipboardLateListener!)
+  client.onClipboardOfferGone(h.helper.offerGoneListener!)
+  client.onClipboardOffer(h.helper.offerListener!)
+  r27Deps(h).helper.restoreClipboardOffer = client.restoreClipboardOffer.bind(client)
+  r27Deps(h).helper.clipboardOffers = client.clipboardOffers.bind(client)
+  const gone = (record: string): boolean =>
+    raw.handleLine(JSON.stringify({ event: 'clipboard', phase: 'offer-gone', record }))
+  const recovered = (record: string, missing = ['X (y)']): boolean =>
+    raw.handleLine(
+      JSON.stringify({
+        event: 'clipboard',
+        phase: 'recovered',
+        record,
+        id: '',
+        clipboard: 'restored-partially',
+        missing
+      })
+    )
+  return { restores, lists, gone, recovered }
+}
+
+for (const at of ['before reply', 'during refresh']) {
+  test(`Windows (round 28, Astra r27): real client does not resurrect Dismissed notice ${at}`, async () => {
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+    h.helper.offers = [kept]
+    await h.service.start()
+    await tick()
+    const c = await astra27Client(h, true)
+    try {
+      clickOffer(h, 'offer-restore')
+      await tick()
+      h.helper.offers = []
+      c.gone(kept.record)
+      c.recovered(kept.record)
+      assert.equal(h.overlay.at(-1)!.title, partialTitle)
+      if (at === 'during refresh') {
+        c.restores[0]!({ ok: true, result: 'restored-partially', missing: ['X (y)'] })
+        await tick()
+        assert.equal(c.lists.length, 1)
+      }
+      h.service.onOverlayAction('dismiss', null)
+      await tick()
+      assert.notEqual(h.overlay.at(-1)!.title, partialTitle)
+      if (at === 'before reply') {
+        c.restores[0]!({ ok: true, result: 'restored-partially', missing: ['X (y)'] })
+        await tick()
+      }
+      c.lists[0]!({ ok: true, offers: [] })
+      await tick()
+      assert.equal(notices(h, partialTitle), 1, 'counter still says one')
+      assert.notEqual(
+        h.overlay.at(-1)!.title,
+        partialTitle,
+        'a dismissed completion must stay dismissed'
+      )
+    } finally {
+      await h.service.dispose()
+    }
+  })
+}
+
+test('Windows (round 28, Astra r27): pending Restore has visible feedback when repeat click is ignored', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+  h.helper.offers = [kept]
+  await h.service.start()
+  await tick()
+  const c = await astra27Client(h)
+  try {
+    const before = structuredClone(h.overlay.at(-1)!)
+    clickOffer(h, 'offer-restore')
+    await tick()
+    clickOffer(h, 'offer-restore')
+    await tick()
+    assert.equal(c.restores.length, 1)
+    assert.notDeepEqual(
+      h.overlay.at(-1)!,
+      before,
+      'pending card is byte-for-byte unchanged, including enabled Restore'
+    )
+    assert.equal(h.overlay.at(-1)!.restoring, true, 'the card shows Restoring…')
+    assert.equal(h.overlay.at(-1)!.controls.offerDismiss, true, 'Dismiss stays')
+  } finally {
+    c.restores[0]?.(null)
+    await tick()
+    await h.service.dispose()
+  }
+})
+
+test('Windows (round 28, Astra r27): real client timeout permits retry and success remains visible', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+  h.helper.offers = [kept]
+  await h.service.start()
+  await tick()
+  const c = await astra27Client(h)
+  try {
+    clickOffer(h, 'offer-restore')
+    await tick()
+    c.restores[0]!(null)
+    await tick()
+    clickOffer(h, 'offer-restore')
+    await tick()
+    assert.equal(c.restores.length, 2)
+    h.helper.offers = []
+    c.gone(kept.record)
+    c.recovered(kept.record)
+    c.restores[1]!({ ok: true, result: 'restored-partially', missing: ['X (y)'] })
+    await tick()
+    assert.equal(notices(h, partialTitle), 1)
+    assert.equal(h.overlay.at(-1)!.title, partialTitle)
+  } finally {
+    await h.service.dispose()
+  }
+})
+
+test('Windows (round 28, Astra r27): real client older successful reply must not overwrite newer record completion', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const a = offer({ record: 'a'.repeat(32), delivery: '', incomplete: true, missing: ['X (y)'] })
+  const b = offer({ record: 'b'.repeat(32), delivery: '', incomplete: true, missing: ['Z (z)'] })
+  h.helper.offers = [a, b]
+  await h.service.start()
+  await tick()
+  const c = await astra27Client(h)
+  try {
+    clickOffer(h, 'offer-restore')
+    await tick()
+    h.helper.offers = [b]
+    c.gone(a.record)
+    clickOffer(h, 'offer-restore')
+    await tick()
+    assert.equal(c.restores.length, 1, 'B queued behind A')
+    c.recovered(a.record)
+    c.restores[0]!({ ok: true, result: 'restored-partially', missing: ['X (y)'] })
+    await tick()
+    assert.equal(c.restores.length, 2, 'different record is accepted and sent')
+    h.helper.offers = []
+    c.gone(b.record)
+    c.recovered(b.record, ['Z (z)'])
+    const newest = 'Your clipboard was put back except: Z (z).'
+    assert.equal(h.overlay.at(-1)!.title, newest)
+    c.restores[1]!(null)
+    await tick()
+    assert.equal(notices(h, partialTitle), 1)
+    assert.equal(notices(h, newest), 1)
+    assert.equal(
+      h.overlay.at(-1)!.title,
+      newest,
+      'A refresh was queued behind B and must not replay older A over B'
+    )
+  } finally {
+    await h.service.dispose()
+  }
+})
+
+test('Windows (round 28, Astra r27): another record offer-gone must not clear successful event before failed reply', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const a = offer({ record: 'a'.repeat(32), delivery: '', incomplete: true, missing: ['X (y)'] })
+  const b = offer({ record: 'b'.repeat(32) })
+  h.helper.offers = [a, b]
+  await h.service.start()
+  await tick()
+  const c = await astra27Client(h)
+  try {
+    clickOffer(h, 'offer-restore')
+    await tick()
+    h.helper.offers = [b]
+    c.gone(a.record)
+    c.recovered(a.record)
+    assert.equal(h.overlay.at(-1)!.title, partialTitle)
+    h.helper.offers = []
+    c.gone(b.record)
+    c.restores[0]!(null)
+    await tick()
+    assert.equal(h.overlay.at(-1)!.title, partialTitle, 'unrelated offer-gone erased the notice')
+  } finally {
+    await h.service.dispose()
+  }
+})
+
+for (const outcome of ['restored-partially', 'failed']) {
+  test(`Windows (round 28, Astra r27): an arriving offer's delete confirmation survives older ${outcome} reply`, async () => {
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    const a = offer({ record: 'a'.repeat(32), delivery: '', incomplete: true, missing: ['X (y)'] })
+    const b = offer({ record: 'b'.repeat(32) })
+    h.helper.offers = [a]
+    await h.service.start()
+    await tick()
+    const c = await astra27Client(h)
+    try {
+      clickOffer(h, 'offer-restore')
+      await tick()
+      h.helper.offers = []
+      c.gone(a.record)
+      c.recovered(a.record)
+      assert.equal(h.overlay.at(-1)!.title, partialTitle)
+      h.helper.offers = [b]
+      h.helper.offerListener!(b)
+      // Round 28 (rule c): B arriving leaves A's notice on screen; the user dismisses it (rule b) to reach B's card.
+      assert.equal(h.overlay.at(-1)!.title, partialTitle)
+      h.service.onOverlayAction('dismiss', null)
+      await tick()
+      clickOffer(h, 'offer-dismiss')
+      await tick()
+      const title = h.overlay.at(-1)!.title
+      assert.equal(h.overlay.at(-1)!.controls.offerDelete, true)
+      c.restores[0]!({ ok: true, result: outcome, missing: ['X (y)'] })
+      await tick()
+      assert.equal(
+        h.overlay.at(-1)!.title,
+        title,
+        'older completion must not replace interaction with newer offer'
+      )
+      assert.equal(h.overlay.at(-1)!.controls.offerDelete, true)
+    } finally {
+      await h.service.dispose()
+    }
   })
 }
 
@@ -3766,4 +4020,257 @@ test('Windows: paste last and a refused paste report the clipboard too', async (
     /could not be put back\. It now holds the dictated text/,
     'a refused paste still says what happened to the clipboard'
   )
+})
+
+// Round 28: the PERMUTATION test of the notice model. Every ordering of a script of primitive events, for one record
+// and for two, runs through the PRODUCTION client (its request serialization, result parser and event dispatch; only
+// the transport is replaced, no helper process) and the service. After every step and at the end the invariants hold:
+// (1) never two notices for one completed Restore; (2) a dismissed or superseded notice never reappears; (3) a
+// completed Restore's notice is visible at the end unless something superseded it; (4) the notice shown is always the
+// one raised last (never an older record's over a newer one).
+type PermStep =
+  | 'click'
+  | 'eventA'
+  | 'eventB'
+  | 'replyA'
+  | 'replyB'
+  | 'timeoutA'
+  | 'goneOther'
+  | 'added'
+  | 'dismiss'
+  | 'refresh'
+  | 'dictation'
+
+function permutations<T>(items: T[]): T[][] {
+  if (items.length <= 1) return [items.slice()]
+  const out: T[][] = []
+  const seen = new Set<string>()
+  items.forEach((item, i) => {
+    for (const rest of permutations([...items.slice(0, i), ...items.slice(i + 1)])) {
+      const p = [item, ...rest]
+      const key = p.join(',')
+      if (!seen.has(key)) {
+        seen.add(key)
+        out.push(p)
+      }
+    }
+  })
+  return out
+}
+
+const permTitle = (missing: string): string => `Your clipboard was put back except: ${missing}.`
+
+async function runPermutation(steps: PermStep[], twoRecords: boolean): Promise<string | null> {
+  const { DictationHelperClient } = await import('./dictation-helper-client')
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const a = offer({ record: 'a'.repeat(32), delivery: '', incomplete: true, missing: ['X (y)'] })
+  const b = offer({ record: 'b'.repeat(32), delivery: '', incomplete: true, missing: ['Z (z)'] })
+  const other = offer({ record: 'c'.repeat(32) })
+  h.helper.offers = twoRecords ? [a, b, other] : [a, other]
+  await h.service.start()
+  await tick()
+  const client = new DictationHelperClient({ command: '/never-launched', platform: 'win32' })
+  const raw = client as unknown as {
+    request(op: string, fields?: Record<string, unknown>): Promise<unknown>
+    handleLine(line: string): boolean
+  }
+  // The helper: requests as the client sends them (serialized), each run at most once.
+  const sent: Array<{
+    record: string
+    resolve: (x: unknown) => void
+    executed: boolean
+    answered: boolean
+  }> = []
+  raw.request = async (op: string, fields?: Record<string, unknown>) => {
+    if (op === 'clipboard-offers') return { ok: true, offers: h.helper.offers }
+    return new Promise((resolve) =>
+      sent.push({ record: String(fields?.record), resolve, executed: false, answered: false })
+    )
+  }
+  client.onClipboardLate(h.helper.clipboardLateListener!)
+  client.onClipboardOfferGone(h.helper.offerGoneListener!)
+  client.onClipboardOffer(h.helper.offerListener!)
+  r27Deps(h).helper.restoreClipboardOffer = client.restoreClipboardOffer.bind(client)
+  r27Deps(h).helper.clipboardOffers = client.clipboardOffers.bind(client)
+  const missingOf = (record: string): string => (record === a.record ? 'X (y)' : 'Z (z)')
+  const execute = (request: (typeof sent)[number]): void => {
+    request.executed = true
+    h.helper.offers = h.helper.offers.filter((o) => o.record !== request.record)
+    raw.handleLine(
+      JSON.stringify({ event: 'clipboard', phase: 'offer-gone', record: request.record })
+    )
+    raw.handleLine(
+      JSON.stringify({
+        event: 'clipboard',
+        phase: 'recovered',
+        record: request.record,
+        id: '',
+        clipboard: 'restored-partially',
+        missing: [missingOf(request.record)]
+      })
+    )
+  }
+  const completions = new Map<string, number>()
+  const raiseStep = new Map<string, number>()
+  let lastRaise: string | null = null
+  let lastRaiseAt = -1
+  let lastSupersede = -1
+  const raised = (): string[] => (h.service as unknown as { noticesRaised: string[] }).noticesRaised
+  const shownTitle = (): string => h.overlay.at(-1)?.title ?? ''
+  const isNotice = (title: string): boolean =>
+    title.startsWith('Your clipboard was put back except')
+  try {
+    for (const [i, step] of steps.entries()) {
+      const before = raised().length
+      const view = h.overlay.at(-1)
+      const recordOf = (x: 'A' | 'B'): string => (x === 'A' ? a.record : b.record)
+      switch (step) {
+        case 'click':
+          // A click on whatever is shown: a card's Restore (accepted, or ignored while pending), or nothing.
+          if (view?.offerRecord && view.controls.offerRestore && !view.restoring) lastSupersede = i
+          h.service.onOverlayAction('offer-restore', null, view?.offerRecord)
+          break
+        case 'eventA':
+        case 'eventB': {
+          const request = sent.find(
+            (r) => r.record === recordOf(step === 'eventA' ? 'A' : 'B') && !r.executed
+          )
+          if (request) {
+            execute(request)
+            completions.set(request.record, (completions.get(request.record) ?? 0) + 1)
+          }
+          break
+        }
+        case 'replyA':
+        case 'replyB':
+        case 'timeoutA': {
+          const record = recordOf(step === 'replyB' ? 'B' : 'A')
+          const request = sent.find((r) => r.record === record && !r.answered)
+          if (!request) break
+          request.answered = true
+          if (step === 'timeoutA') request.resolve(null)
+          else {
+            // The helper sends the event before its reply.
+            if (!request.executed) {
+              execute(request)
+              completions.set(record, (completions.get(record) ?? 0) + 1)
+            }
+            request.resolve({
+              ok: true,
+              result: 'restored-partially',
+              missing: [missingOf(record)]
+            })
+          }
+          break
+        }
+        case 'goneOther':
+          h.helper.offers = h.helper.offers.filter((o) => o.record !== other.record)
+          raw.handleLine(
+            JSON.stringify({ event: 'clipboard', phase: 'offer-gone', record: other.record })
+          )
+          break
+        case 'added': {
+          const added = offer({ record: 'd'.repeat(32) })
+          h.helper.offers = [...h.helper.offers, added]
+          h.helper.offerListener!(added)
+          break
+        }
+        case 'dismiss':
+          lastSupersede = i
+          h.service.onOverlayAction('dismiss', null)
+          break
+        case 'refresh':
+          // Not awaited: the client serializes the list request behind an outstanding Restore (as in production).
+          void (
+            h.service as unknown as { loadClipboardOffers(): Promise<void> }
+          ).loadClipboardOffers()
+          break
+        case 'dictation':
+          lastSupersede = i
+          h.service.onOverlayAction('pill', null)
+          await tick()
+          h.service.onOverlayAction('cancel', null)
+          break
+      }
+      await tick()
+      await tick()
+      for (const title of raised().slice(before)) {
+        raiseStep.set(title, i)
+        lastRaise = title
+        lastRaiseAt = i
+      }
+      // (1) never two notices for one completion
+      for (const record of [a.record, b.record]) {
+        const title = permTitle(missingOf(record))
+        const count = raised().filter((t) => t === title).length
+        if (count > (completions.get(record) ?? 0))
+          return `step ${i} (${step}): ${count} notices for ${completions.get(record) ?? 0} completion(s) of ${title}`
+      }
+      const shown = shownTitle()
+      if (isNotice(shown)) {
+        // (2) never a superseded notice again; (4) only the one raised last
+        if ((raiseStep.get(shown) ?? -1) <= lastSupersede)
+          return `step ${i} (${step}): the superseded notice "${shown}" is shown again`
+        if (shown !== lastRaise)
+          return `step ${i} (${step}): "${shown}" shown, but "${lastRaise}" was raised last`
+      }
+    }
+    // (3) a completion's notice, not superseded since, is visible at the end
+    if (lastRaise && lastRaiseAt > lastSupersede && shownTitle() !== lastRaise)
+      return `end: "${lastRaise}" was raised after the last supersede but "${shownTitle()}" is shown`
+    return null
+  } finally {
+    for (const request of sent) if (!request.answered) request.resolve(null)
+    await tick()
+    await h.service.dispose()
+  }
+}
+
+const PERMUTATION_SCRIPTS: Array<{ name: string; two: boolean; steps: PermStep[] }> = [
+  {
+    name: 'one record: click, its event, its reply, another offer gone, Dismiss, a refresh',
+    two: false,
+    steps: ['click', 'eventA', 'replyA', 'goneOther', 'dismiss', 'refresh']
+  },
+  {
+    name: 'one record: click, a timeout, its event, a second click, an offer added, a dictation',
+    two: false,
+    steps: ['click', 'timeoutA', 'eventA', 'click', 'added', 'dictation']
+  },
+  {
+    name: 'one record: two clicks, its event, its reply, Dismiss, a refresh, another offer gone',
+    two: false,
+    steps: ['click', 'click', 'eventA', 'replyA', 'dismiss', 'refresh', 'goneOther']
+  },
+  {
+    name: 'two records: two clicks, both events, both replies',
+    two: true,
+    steps: ['click', 'click', 'eventA', 'eventB', 'replyA', 'replyB']
+  },
+  {
+    name: 'two records: two clicks, both events, a timeout, the other reply, Dismiss',
+    two: true,
+    steps: ['click', 'click', 'eventA', 'eventB', 'timeoutA', 'replyB', 'dismiss']
+  }
+]
+
+test('Windows (round 28): every interleaving of the primitive events keeps the notice invariants (production client and service)', async () => {
+  let runs = 0
+  let failed = 0
+  const failures: string[] = []
+  for (const script of PERMUTATION_SCRIPTS) {
+    let scriptRuns = 0
+    for (const order of permutations(script.steps)) {
+      const problem = await runPermutation(order, script.two)
+      runs++
+      scriptRuns++
+      if (problem) {
+        failed++
+        if (failures.length < 10) failures.push(`[${order.join(' ')}] ${problem}`)
+      }
+    }
+    console.log(`# notice permutations: ${script.name}: ${scriptRuns} orderings`)
+  }
+  console.log(`# notice permutations: ${runs} orderings, ${failed} failing`)
+  assert.equal(failed, 0, failures.join('\n'))
 })

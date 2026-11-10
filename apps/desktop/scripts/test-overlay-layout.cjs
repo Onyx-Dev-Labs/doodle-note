@@ -37,7 +37,7 @@ const measure = (family) => `(async () => {
   const faces = [...document.fonts].filter((f) => f.family.replace(/["']/g, '') === '${family}' && f.status === 'loaded')
   const inside = (r) => ({ top: r.top, bottom: r.bottom, left: r.left, right: r.right })
   const shown = (el) => el && !el.hidden && el.getClientRects().length > 0
-  const buttons = [...document.querySelectorAll('#card .btn')].filter(shown).map((b) => ({ id: b.id, href: b.getAttribute('href'), ...inside(b.getBoundingClientRect()) }))
+  const buttons = [...document.querySelectorAll('#card .btn')].filter(shown).map((b) => ({ id: b.id, href: b.getAttribute('href'), disabled: b.getAttribute('aria-disabled') === 'true', label: b.textContent, ...inside(b.getBoundingClientRect()) }))
   const detail = document.getElementById('cardDetail')
   const style = shown(detail) ? getComputedStyle(detail) : null
   const card = document.getElementById('card').getBoundingClientRect()
@@ -126,6 +126,16 @@ app.whenReady().then(async () => {
         const url = navigations[0]
         const match = url ? actionUrl.exec(url) : null
         const offer = b.id.startsWith('offer')
+        // Round 28: an outstanding Restore reads "Restoring…" and a click on it must do nothing at all.
+        const pendingRestore = b.id === 'offerRestore' && c.view.restoring === true
+        if (pendingRestore) {
+          if (!b.disabled || b.label !== 'Restoring…')
+            problems.push(`the outstanding Restore reads "${b.label}", disabled ${b.disabled}`)
+          if (url) problems.push(`the outstanding Restore navigated to ${url}`)
+          continue
+        }
+        if (b.id === 'offerRestore' && (b.disabled || b.label !== 'Restore'))
+          problems.push(`Restore reads "${b.label}", disabled ${b.disabled}`)
         if (!match)
           problems.push(`button ${b.id} navigated to ${url ?? 'nothing'}: not an action URL`)
         else if (match[1] !== BUTTONS[b.id])

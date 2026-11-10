@@ -504,6 +504,28 @@ test('Windows (round 25): names are cut on grapheme boundaries (an emoji sequenc
   )
 })
 
+test('Windows (round 28): an offer whose Restore is outstanding says so (restoring), keeps Restore shown and Dismiss enabled', () => {
+  const base = overlayView(initialSessionState(), ctx())
+  const offer = {
+    record: '0'.repeat(32),
+    delivery: '',
+    formats: 2,
+    bytes: 900,
+    sequence: 3,
+    created: '',
+    likelyOurs: false,
+    incomplete: false,
+    missing: [],
+    content: 2
+  }
+  const idle = panelView({ kind: 'clipboard-offer', offer }, base)
+  const pending = panelView({ kind: 'clipboard-offer', offer, pending: true }, base)
+  assert.equal(idle.restoring, undefined)
+  assert.equal(pending.restoring, true)
+  assert.equal(pending.controls.offerRestore, true)
+  assert.equal(pending.controls.offerDismiss, true)
+})
+
 test('Windows: the clipboard offer card names formats and size only, with Restore and Dismiss', () => {
   const base = overlayView(initialSessionState(), ctx())
   const view = panelView(

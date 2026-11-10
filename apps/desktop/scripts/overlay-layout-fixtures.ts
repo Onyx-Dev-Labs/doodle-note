@@ -150,6 +150,24 @@ async function main(): Promise<void> {
     ),
     transcript: false
   })
+  // Round 28: an offer whose Restore is outstanding (Restoring…, not clickable; Dismiss stays).
+  cases.push({
+    name: 'offer card, Restore outstanding',
+    view: panelView({ kind: 'clipboard-offer', offer: offer(), pending: true }, base),
+    transcript: false
+  })
+  cases.push({
+    name: 'incomplete offer card, 3 + 6 names, Restore outstanding',
+    view: panelView(
+      {
+        kind: 'clipboard-offer',
+        offer: offer({ incomplete: true, missing: names }),
+        pending: true
+      },
+      base
+    ),
+    transcript: false
+  })
   cases.push({
     name: 'changed offer card',
     view: panelView(
