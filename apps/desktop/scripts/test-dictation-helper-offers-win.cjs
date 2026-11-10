@@ -314,6 +314,7 @@ function observe() {
  * forms are materialized first, so a later read moves nothing; then, under one open, the sequence and the bytes of the
  * Unicode text, CF_TEXT, the custom bytes and the added format.
  */
+const theirCopy = 'a copy by another app'
 function contentSnapshot() {
   for (const f of [1, 7, 16]) readFormat(f)
   if (!open()) return null
@@ -846,7 +847,9 @@ async function keptRecord(dictated) {
     /written down \(/.test(payload) &&
     exited &&
     !!id &&
-    stageOf(id) === 'restore-emptied' &&
+    // Round 33: no journal inside the restore's open: killed inside its put-back, the record's last stage on disk is
+    // the write's ("written", queued after its close) or Begin's durable "emptying".
+    ['written', 'emptying'].includes(stageOf(id)) &&
     fs.existsSync(path.join(os.tmpdir(), `${recordPrefix}${id}.bin`))
   if (!ok)
     check(
@@ -1098,7 +1101,7 @@ async function main() {
     await h.stop()
   }
 
-  // 8. A crash after journaling "restoring" but before its empty, then a replay of every format: offered. A restore
+  // 8. A crash in the restore before its empty (round 33: nothing journaled there any more), then a replay of every format: offered. A restore
   // that was only about to run establishes no continuity (Beyond counts only operations performed).
   {
     await begin('8')
@@ -2076,9 +2079,10 @@ async function main() {
     const after = observe()
     await a.stop() // round 31: its log is complete once stop() returns (output closed)
     const lines = a.logs.filter((l) => /saving the clipboard \(attempt/.test(l))
+    // Round 33: "journal-emptying" fails Begin's first DURABLE state write: no record at all ("no-record"), nothing
+    // ever on disk, nothing touched (until round 32 the write itself refused after its own journal failed).
     const notStarted = {
       'zero-sequence-write': 'zero-sequence',
-      'journal-emptying': 'no-record',
       'write-open-fails': 'clipboard-busy',
       'empty-fails': 'empty-failed'
     }[fault]
@@ -2097,7 +2101,9 @@ async function main() {
             )
           : fault === 'zero-sequence'
             ? result && result.result === 'zero-sequence'
-            : result && result.result === 'no-save'
+            : fault === 'journal-emptying'
+              ? result && result.result === 'no-record'
+              : result && result.result === 'no-save'
     check(
       `reader fault "${fault}": not established, the delivery never touches the clipboard (byte-identical, sequence unchanged, no record${written ? ' left; the reason said' : ' ever'})`,
       seeded &&
@@ -2492,19 +2498,24 @@ async function main() {
     )
   }
 
-  // 37b. Round 23 (Astra B1): the write's own rollback (its emptied stage not journaled: test hook) throws before its
-  // put-back, or after it but before its result is assigned. Emptied is recorded first: never "untouched"; the record
-  // is kept (offered and put back by the user's Restore, or found already whole on the clipboard and deleted).
+  // 37b. Round 23 (Astra B1): the write's own rollback throws before its put-back, or after it but before its result is
+  // assigned. Emptied is recorded first: never "untouched"; the record is kept (offered and put back by the user's
+  // Restore, or found already whole on the clipboard and deleted). Round 33: a journal failure no longer leads to the
+  // rollback (journals are diagnostics after the close); the rollback is the late one: the write abandoned while it
+  // emptied (the EMPTIED gate holds it right after its EmptyClipboard under the real 1 s budget).
   for (const where of ['before-set', 'after-set']) {
     await begin(`37b ${where}`)
     copyMulti(user)
-    const a = start(testops, {
-      DICTATION_HELPER_TEST: '1',
-      DICTATION_HELPER_TEST_FAIL_JOURNAL: 'emptied',
-      DICTATION_HELPER_TEST_THROW_IN_ROLLBACK: where
-    })
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_THROW_IN_ROLLBACK: where },
+      { gates: ['EMPTIED'], realBudget: true }
+    )
     await a.ready
-    const live = await a.req('__clipboard-txn', { text: 'dictated text RB', holdMs: 300 })
+    const reply = await a.req('__clipboard-txn', { text: 'dictated text RB', holdMs: 300 })
+    a.open('EMPTIED')
+    const ended = await a.waitEvent((e) => e.event === 'clipboard' && e.phase === 'late-restore')
+    const live = { result: `${reply && reply.result} / late ${ended && ended.clipboard}` }
     await a.stop()
     const threw = a.logs.find((l) =>
       /the clipboard write threw .* after emptying the clipboard/.test(l)
@@ -2519,8 +2530,10 @@ async function main() {
     const back = observe()
     check(
       `the write's rollback throws ${where}: reported unrestored (never untouched), the record kept; ${where === 'before-set' ? "offered, and the user's Restore puts it back" : 'the saved content already whole there: deleted without writing'}`,
-      !!live &&
-        /^write-failed\/unrestored\|/.test(String(live.result)) &&
+      !!reply &&
+        /^late\|/.test(String(reply.result)) &&
+        !!ended &&
+        ended.clipboard === 'unrestored' &&
         !!threw &&
         files > 0 &&
         (where === 'before-set' ? !!done && done.result === 'restored' : !offer) &&
@@ -2536,7 +2549,9 @@ async function main() {
   // stage could not be journaled (kept), and the helper died with every retained format set back. Its offer says it is
   // incomplete; a Restore without acceptIncomplete empties nothing ("incomplete"); with it, "restored-partially"
   // names FileContents and the record is settled and deleted.
-  for (const path of ['journal failed', 'killed after the put-back']) {
+  // Round 33: only "killed after the put-back" (a failing restore-emptied journal no longer keeps a record: journals are
+  // diagnostics; case 45 shows a failing diagnostic changes nothing).
+  for (const path of ['killed after the put-back']) {
     await begin(`39 ${path}`)
     const words = 'incomplete record ' + identity
     const { h, ok } = await seededBy(
@@ -3242,7 +3257,6 @@ async function main() {
   // the late result: identical, so nothing was written over the change; after the user's Restore the user's own text and
   // bytes are read back.
   const holds = (snapHex, bytes) => !!snapHex && snapHex.startsWith(bytes.toString('hex'))
-  const theirCopy = 'a copy by another app'
   for (const [label, gates, change, expect] of [
     // Round 31 (Opus): a write the caller gave up on BEFORE it emptied no longer empties at all: "untouched".
     ['(a) before emptying', ['EMPTY'], null, 'untouched'],
@@ -3312,9 +3326,7 @@ async function main() {
     const userBack = after.text === user && after.extra === 'extra bytes for ' + user
     const where =
       gates[0] === 'EMPTY'
-        ? !!budgetLine &&
-          /journaled emptying at \d+ ms; now/.test(budgetLine) &&
-          !/emptied at/.test(budgetLine)
+        ? !!budgetLine && /opened at \d+ ms; now/.test(budgetLine) && !/emptied at/.test(budgetLine)
         : !!budgetLine && /closed at \d+ ms; now/.test(budgetLine)
     check(
       `the late path, forced ${label}: answered late (no paste), the log names where the write was, the late result "${expect}"${expect === 'untouched' ? ', nothing emptied: the user clipboard unchanged (bytes and sequence), the record settled' : expect === 'restored' ? ', the user clipboard back, the record settled' : ', kept as an offer, the change untouched'}`,
@@ -3515,6 +3527,242 @@ async function main() {
     )
   }
 
+  // 45. Round 33 (c): a diagnostic journal that fails changes NOTHING (written after the close, no flush, queued): the
+  // transaction is restored and settled exactly as without the failure; "settled" (durable) failing is logged and the
+  // record deleted anyway.
+  for (const stage of ['written', 'restore-emptied', 'settled']) {
+    await begin(`45 ${stage}`)
+    copyMulti(user)
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_FAIL_JOURNAL: stage
+    })
+    await a.ready
+    const live = await a.req('__clipboard-txn', { text: 'dictated text JF', holdMs: 300 })
+    await a.stop()
+    const failedLine = a.logs.find((l) =>
+      new RegExp(`stage could not be recorded: test \\(${stage}\\)`).test(l)
+    )
+    const back = observe()
+    check(
+      `a failing "${stage}" journal changes nothing: restored, the record settled and deleted, the user clipboard back`,
+      !!live &&
+        /^restored\|/.test(String(live.result)) &&
+        !!failedLine &&
+        prefixFiles().length === 0 &&
+        back.text === user &&
+        back.extra === 'extra bytes for ' + user,
+      `${JSON.stringify(live)}; ${failedLine}; ${listing()}; text ${back.text}`
+    )
+  }
+
+  // 46. Round 33 (a, h): the crash windows of the new journal. The first durable state, "emptying" ("may be emptied"),
+  // is on disk with the payload before any EmptyClipboard; no record is deleted by its stage (the old rule, a non-offer
+  // "saved" record deleted as "nothing had been emptied", is gone): recovery decides by CONTENT.
+  // (a) killed before its EmptyClipboard (the EMPTY gate): the saved content is still exactly there: deleted by that
+  // proof, nothing offered, the clipboard byte for byte and at its sequence as before; (b) the same, but the user copies
+  // something before the next helper starts: a spurious offer (nothing was emptied; Dismiss deletes it), their copy
+  // untouched; (c) killed right after its EmptyClipboard (before any further journal: the state on disk still says
+  // "emptying"): offered, and the user's Restore gives the clipboard back. The mutation check (the old rule put back,
+  // test build only) must turn (b) into a deletion and (c) into a LOST record.
+  const crash = async (label, env, gates, re) => {
+    copyMulti(user)
+    const before = contentSnapshot()
+    const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env }, { gates })
+    await a.ready
+    void a.req('__clipboard-txn', { text: `dictated text CW ${label}`, holdMs: 300 })
+    const at = await atLine(a, `the crash point (${label})`, re)
+    const st = recordFiles().find((f) => f.endsWith('.state'))
+    const stage = st ? stageOf(st.slice(recordPrefix.length, recordPrefix.length + 32)) : null
+    const bin = recordFiles().some((f) => f.endsWith('.bin'))
+    await a.kill()
+    return { before, at: !!at, stage, bin }
+  }
+  for (const mutant of [false, true]) {
+    const recoverer = () =>
+      mutant
+        ? start(testops, {
+            DICTATION_HELPER_TEST: '1',
+            DICTATION_HELPER_TEST_MUTANT_STAGE_RULE: '1'
+          })
+        : start(release)
+    const tag = mutant ? 'MUTANT (the old stage rule put back): ' : ''
+    {
+      await begin(`46a${mutant ? ' mutant' : ''}`)
+      const c = await crash('a', {}, ['EMPTY'], /test-trace: gate EMPTY#1 waiting/)
+      const h = recoverer()
+      await h.ready
+      const listed = await h.req('clipboard-offers')
+      const after = contentSnapshot()
+      await h.stop()
+      check(
+        `${tag}46(a) killed before its EmptyClipboard (the durable state "emptying" and the payload on disk): deleted by the content proof, nothing offered, the clipboard unchanged (bytes and sequence)`,
+        c.at &&
+          c.stage === 'emptying' &&
+          c.bin &&
+          !!listed &&
+          listed.offers.length === 0 &&
+          prefixFiles().length === 0 &&
+          JSON.stringify(after) === JSON.stringify(c.before),
+        `${JSON.stringify(c)}; ${JSON.stringify(listed)}; ${listing()}; ${JSON.stringify(after)}`
+      )
+    }
+    {
+      await begin(`46b${mutant ? ' mutant' : ''}`)
+      const c = await crash('b', {}, ['EMPTY'], /test-trace: gate EMPTY#1 waiting/)
+      copyMulti(theirCopy)
+      const theirs = contentSnapshot()
+      const h = recoverer()
+      await h.ready
+      const listed = await h.req('clipboard-offers')
+      const offer = listed && listed.offers[0]
+      const now = contentSnapshot()
+      const gone = offer ? await h.req('clipboard-dismiss', { record: offer.record }) : null
+      await h.stop()
+      const ok =
+        c.at &&
+        c.stage === 'emptying' &&
+        !!listed &&
+        listed.offers.length === 1 &&
+        JSON.stringify(now) === JSON.stringify(theirs) &&
+        !!gone &&
+        gone.dismissed === true
+      if (!mutant)
+        check(
+          '46(b) killed before its EmptyClipboard, then the user copies: a spurious offer (never a loss), their copy untouched (bytes and sequence); Dismiss deletes it',
+          ok,
+          `${JSON.stringify(c)}; ${JSON.stringify(listed)}; ${JSON.stringify(now)} vs ${JSON.stringify(theirs)}; ${JSON.stringify(gone)}`
+        )
+      else
+        check(
+          `${tag}46(b) is CAUGHT: the record is deleted by its stage instead of offered (the check above would fail)`,
+          c.at && !ok && !!listed && listed.offers.length === 0 && prefixFiles().length === 0,
+          `${JSON.stringify(listed)}; ${listing()}`
+        )
+      if (mutant) cleanup() // the mutant may have left nothing or something; the next case starts clean either way
+    }
+    {
+      await begin(`46c${mutant ? ' mutant' : ''}`)
+      const c = await crash(
+        'c',
+        { DICTATION_HELPER_TEST_STALL_AFTER_EMPTY_MS: '60000' },
+        [],
+        /test-trace: stall STALL_AFTER_EMPTY_MS/
+      )
+      const h = recoverer()
+      await h.ready
+      const listed = await h.req('clipboard-offers')
+      const offer = listed && listed.offers[0]
+      const restored = offer ? await restoreConfirming(h, offer) : null
+      const back = observe()
+      await h.stop()
+      const ok =
+        c.at &&
+        c.stage === 'emptying' &&
+        c.bin &&
+        !!offer &&
+        !!restored &&
+        restored.result === 'restored' &&
+        back.text === user &&
+        back.extra === 'extra bytes for ' + user
+      if (!mutant)
+        check(
+          '46(c) killed right after its EmptyClipboard (the state on disk still "emptying"): offered, and the user\'s Restore gives the clipboard back',
+          ok,
+          `${JSON.stringify(c)}; ${JSON.stringify(listed)}; ${JSON.stringify(restored)}; text ${back.text}`
+        )
+      else
+        check(
+          `${tag}46(c) is CAUGHT: the record of an EMPTIED clipboard is deleted by its stage (the user's content lost; the check above would fail)`,
+          c.at &&
+            !ok &&
+            !!listed &&
+            listed.offers.length === 0 &&
+            prefixFiles().length === 0 &&
+            back.text !== user,
+          `${JSON.stringify(listed)}; ${listing()}; text ${back.text}`
+        )
+    }
+  }
+
+  // 47. Round 33 (b, f): the payload not on disk in time: the write is NOT established (no record, no paste: "no-record")
+  // within the total bound (BeginDeadlineMs, 2 s), the clipboard untouched (bytes and sequence); the late payload
+  // writer publishes nothing.
+  {
+    await begin('47')
+    copyMulti(user)
+    const before = contentSnapshot()
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_PAYLOAD_DELAY_MS: '5000'
+    })
+    await a.ready
+    const t0 = Date.now()
+    const live = await a.req('__clipboard-txn', { text: 'dictated text PL', holdMs: 300 })
+    const took = Date.now() - t0
+    const after = contentSnapshot()
+    await a.waitLog(/not established; its files removed/, { ms: 15000 })
+    const unpublished = await a.waitLog(/was not published: its transaction was already settled/, {
+      ms: 15000
+    })
+    await a.stop()
+    const why = a.logs.find((l) => /not written down \(not on disk within 2000 ms\)/.test(l))
+    check(
+      'the payload not on disk within 2 s: not established ("no-record"), answered within the bound, nothing emptied (bytes and sequence unchanged), nothing published later',
+      !!live &&
+        live.result === 'no-record' &&
+        took < 6000 &&
+        !!why &&
+        !!unpublished &&
+        JSON.stringify(after) === JSON.stringify(before) &&
+        prefixFiles().length === 0,
+      `${JSON.stringify(live)} in ${took} ms; ${why}; ${unpublished}; ${listing()}`
+    )
+  }
+
+  // 48. Round 33 (f, g): a stalled journal never holds the clipboard or the delivery: every queued journal step stalls
+  // 20 s (test hook); the transaction still answers "restored" promptly and the clipboard can be opened at once. The
+  // helper then quits inside its usual wait with steps still queued: the record it leaves is judged by content at the
+  // next start (the user's content exactly there: deleted, nothing offered).
+  {
+    await begin('48')
+    copyMulti(user)
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_JOURNAL_STALL_MS: '20000'
+    })
+    await a.ready
+    const t0 = Date.now()
+    const live = await a.req('__clipboard-txn', { text: 'dictated text JS', holdMs: 300 })
+    const took = Date.now() - t0
+    const openable = open()
+    if (openable) CloseClipboard()
+    await a.stop()
+    const queuedLine = a.logs.find((l) =>
+      /leaving with clipboard journal steps still queued/.test(l)
+    )
+    const left = prefixFiles().length
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    await h.stop()
+    const back = observe()
+    check(
+      'a stalled journal (20 s per step) holds neither the clipboard nor the delivery: restored promptly, the clipboard free; left behind at the exit, the record is deleted at the next start by the content proof',
+      !!live &&
+        /^restored\|/.test(String(live.result)) &&
+        took < 5000 &&
+        openable &&
+        !!queuedLine &&
+        left > 0 &&
+        !!listed &&
+        listed.offers.length === 0 &&
+        prefixFiles().length === 0 &&
+        back.text === user,
+      `${JSON.stringify(live)} in ${took} ms; openable ${openable}; ${queuedLine}; ${left} files left; ${JSON.stringify(listed)}; ${listing()}`
+    )
+  }
+
   // 34. Round 21, the NULL-window open experiment (decides Opus's lead on the runner's Windows build): process A opens
   // the clipboard with NULL (then with its own message-only window) and holds it; process B calls OpenClipboard(NULL)
   // once, enumerates, and closes at once (or holds); A enumerates again while B acts. One table row per combination.
@@ -3686,6 +3934,27 @@ async function main() {
     `# user Restore timelines across the run: ${restores.length}; median ${rq(0.5)} ms, p90 ${rq(0.9)} ms, max ${rq(1)} ms`
   )
   for (const r of restores.slice(-3)) console.log(`# slowest Restore: ${r.line}`)
+  // Round 33 (h): no journal write ran inside a clipboard open, anywhere in the run (every state write says so), and the
+  // durable "settled" writes are among them.
+  const journals = []
+  const inOpen = []
+  for (const h of allHelpers)
+    for (const l of h.logs) {
+      if (/test-trace: journal /.test(l)) journals.push(l)
+      if (/in-open=True|a clipboard journal write ran inside a clipboard open/.test(l))
+        inOpen.push(l)
+    }
+  const settledDurable = journals.filter((l) =>
+    /journal settled \S+ durable=True in-open=False/.test(l)
+  ).length
+  console.log(
+    `# journal writes across the run: ${journals.length} (settled, durable: ${settledDurable}); inside a clipboard open: ${inOpen.length}`
+  )
+  check(
+    'no clipboard journal write ran inside a clipboard open in the whole run (and durable "settled" writes were seen)',
+    journals.length > 0 && inOpen.length === 0 && settledDurable > 0,
+    inOpen.slice(0, 5).join(' / ')
+  )
   check(
     'every ordinary write of the run within gross bounds (median under 500 ms, none over 5 s; at least 50 writes seen)',
     ws.length >= 50 && at(0.5) < 500 && at(1) < 5000,
