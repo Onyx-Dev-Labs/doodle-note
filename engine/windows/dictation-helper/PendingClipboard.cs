@@ -55,8 +55,13 @@ namespace DoodleNote.DictationHelper
         public Thread PayloadWriter;
         /// <summary>Round 33: the payload was moved into place (under Gate): the precondition of our EmptyClipboard.</summary>
         public volatile bool PayloadPublished;
-        /// <summary>Round 33: Begin's writer has finished (under Gate): whoever sees the other's flag removes the files.</summary>
-        public bool WriterDone;
+        /// <summary>
+        /// Round 34 (Astra P2): Begin's writer and Begin itself decide by ONE compare-and-swap, never by a lock (the writer
+        /// holds Gate across its renames, so a stalled rename must not hold Begin's give-up): 0 writing, 1 the writer
+        /// finished first, 2 Begin gave up first (then the writer publishes nothing more and removes what it published).
+        /// </summary>
+        public int BeginState;
+        public bool Abandoned { get { return Volatile.Read(ref BeginState) == 2; } }
         /// <summary>
         /// OFFER-ONLY (round 17): once set, never cleared (only the record's deletion removes it). The record can then only
         /// be offered (or deleted when the clipboard already holds exactly the saved content): no automatic restore, by
@@ -168,6 +173,35 @@ namespace DoodleNote.DictationHelper
         static string StatePath(string id) { return Path.Combine(Directory, Prefix + id + ".state"); }
         /// <summary>Exactly this identity's record files: the prefix, a 32-hex id, and nothing else (identity X never reads X-foo's).</summary>
         static Regex RecordName { get { return new Regex("^" + Regex.Escape(Prefix) + "([0-9a-f]{32})\\.(bin|state)(\\.tmp)?$"); } }
+        /// <summary>
+        /// Round 34 (Astra P2): a replace leftover is deleted only when nothing can still be replacing through it: its
+        /// content parses as a state of THIS session whose helper is proven not running, and the record's own state (if
+        /// present) names a helper proven not running too (or this one, which never uses File.Replace). Its age alone
+        /// proves nothing (the last write is the old state's, not when it was renamed aside). Anything unknown is kept.
+        /// </summary>
+        static bool ReplaceLeftoverIsDead(string path, string name)
+        {
+            try
+            {
+                Dictionary<string, object> copy = Wire.Parse(File.ReadAllText(path));
+                if (copy == null) return false;
+                double? copySession = Wire.Num(copy, "session"), copyPid = Wire.Num(copy, "pid"), copyStart = Wire.Num(copy, "pidStart");
+                if (!copySession.HasValue || (int)copySession.Value != session || !copyPid.HasValue) return false;
+                if ((int)copyPid.Value != Process.GetCurrentProcess().Id && HelperLiveness((int)copyPid.Value, (long)(copyStart ?? 0)) != Liveness.NotRunning) return false;
+                string id = name.Substring(Prefix.Length, 32);
+                if (Probe(StatePath(id)) == Presence.Unknown) return false;
+                if (Probe(StatePath(id)) == Presence.Present)
+                {
+                    Dictionary<string, object> state = Wire.Parse(File.ReadAllText(StatePath(id)));
+                    double? pid = state == null ? null : Wire.Num(state, "pid"), start = state == null ? null : Wire.Num(state, "pidStart");
+                    if (!pid.HasValue) return false;
+                    if ((int)pid.Value != Process.GetCurrentProcess().Id && HelperLiveness((int)pid.Value, (long)(start ?? 0)) != Liveness.NotRunning) return false;
+                }
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
         /// <summary>Round 33: File.Replace's temporary of an earlier build, for one of this identity's states.</summary>
         static Regex ReplaceLeftover { get { return new Regex("^" + Regex.Escape(Prefix) + "[0-9a-f]{32}\\.state~RF[0-9a-f]+\\.TMP$", RegexOptions.IgnoreCase); } }
 
@@ -238,7 +272,7 @@ namespace DoodleNote.DictationHelper
         /// own thread; Begin waits for both at most BeginDeadlineMs. Null when they are not on disk by then, or cannot be
         /// written at all: no paste, nothing emptied (LastBeginFailure says why).
         /// </summary>
-        public static PendingRecord Begin(SavedClipboard saved, string dictated)
+        public static PendingRecord Begin(SavedClipboard saved, string dictated, Func<bool> stillInTime = null)
         {
             LastBeginFailure = null;
             PendingRecord record = new PendingRecord();
@@ -252,9 +286,11 @@ namespace DoodleNote.DictationHelper
             }
             record.Persisted = true;
             // Round 33: the first state says "may be emptied" (there is no durable "saved" stage any more): a crash from
-            // here on leaves a record that recovery judges by CONTENT only (already there exactly: deleted; anything
-            // else: offered), never by its stage.
+            // here on leaves a record that recovery judges by CONTENT (already there exactly: deleted; anything else:
+            // offered), never by its stage. Round 34 (Opus): it carries the save's capture sequence, the proof (in the same
+            // logon and boot) that the clipboard is unchanged since the capture, used only to DELETE such a record.
             record.Stage = "emptying";
+            record.SequenceAtStage = saved.Sequence;
             string json = StateJson(record);
             Stopwatch watch = Stopwatch.StartNew();
             lock (gate) writing.Add(record.Id);
@@ -266,51 +302,57 @@ namespace DoodleNote.DictationHelper
                 try
                 {
                     stateOk = WriteStateDurable(record, json, "emptying");
-                    if (stateOk) WritePayload(record, saved, record.DictatedHash, watch);
+                    if (stateOk && !record.Abandoned) WritePayload(record, saved, record.DictatedHash, watch);
                     else lock (gate) writing.Remove(record.Id);
                 }
                 catch (Exception error)
                 {
-                    Wire.Log("ERROR: the clipboard transaction could not be written down: " + error.GetType().Name);
+                    try { Wire.Log("ERROR: the clipboard transaction could not be written down: " + error.GetType().Name); } catch (Exception) { }
                     lock (gate) writing.Remove(record.Id);
                 }
                 finally
                 {
-                    // Begin gave up meanwhile (it saw this writer still running): this writer removes what it published.
-                    bool givenUp;
-                    lock (record.Gate) { record.WriterDone = true; givenUp = record.Settled; }
-                    if (givenUp) RemoveNotEstablished(record);
+                    // Begin gave up first (state 2): this writer removes whatever it published; nobody waited on it.
+                    if (Interlocked.CompareExchange(ref record.BeginState, 1, 0) == 2) RemoveNotEstablished(record);
                 }
             });
             record.PayloadWriter.IsBackground = true;
             record.PayloadWriter.Name = "pending-clipboard";
             record.PayloadWriter.Start();
-            bool done = record.PayloadWriter.Join(BeginDeadlineMs);
+            // Round 34 (Astra P2): the wait is the only thing between Begin and its answer: a Join in slices, with the
+            // delivery's own deadline checked in each, and no lock taken on the way out.
+            string why = null;
+            bool done = false;
+            for (;;)
+            {
+                int left = BeginDeadlineMs - (int)watch.ElapsedMilliseconds;
+                if (left <= 0) { why = "not on disk within " + BeginDeadlineMs + " ms"; break; }
+                if (record.PayloadWriter.Join(Math.Min(left, 50))) { done = true; break; }
+                if (stillInTime != null && !stillInTime()) { why = "deadline"; break; }
+            }
+            if (!done && Interlocked.CompareExchange(ref record.BeginState, 2, 0) == 1) done = true; // finished just now
             if (done && stateOk && record.PayloadPublished)
             {
                 Wire.Log("the clipboard transaction was written down in " + watch.ElapsedMilliseconds + " ms (state and payload, flushed)");
                 return record;
             }
-            string why = !done ? "not on disk within " + BeginDeadlineMs + " ms" : !stateOk ? "its state could not be written" : "its payload could not be written";
+            if (done) why = !stateOk ? "its state could not be written" : "its payload could not be written";
             LastBeginFailure = why;
-            // Settled under the publication lock: a writer still running publishes nothing from now on; what it already
-            // published is removed, by Begin if the writer is done, else by the writer when it ends (exactly one of them
-            // sees the other's flag). A crash meanwhile leaves a record judged by content: nothing was emptied.
-            bool writerDone;
-            lock (record.Gate) { record.Settled = true; writerDone = record.WriterDone; }
             lock (gate) inFlight.Remove(record.Id);
             Wire.Log("not pasting: the clipboard transaction was not written down (" + why + "); nothing emptied");
-            if (writerDone) RemoveNotEstablished(record);
+            // The writer finished (failed): what it published is removed here; still running (gave up): it removes it.
+            if (done) RemoveNotEstablished(record);
             return null;
         }
 
         static void RemoveNotEstablished(PendingRecord record)
         {
+            // Round 34 (Opus): through DeleteId, so an offer a racing check made for it is withdrawn too.
+            lock (record.Gate) record.Settled = true;
             lock (gate)
             {
-                bool gone = DeleteFiles(record.Id);
-                if (!gone) NotDeleted(record.Id, "a transaction that was not established");
-                else Wire.Log("clipboard record " + record.Id.Substring(0, 8) + ": not established; its files removed");
+                if (DeleteId(record.Id, "a transaction that was not established"))
+                    Wire.Log("clipboard record " + record.Id.Substring(0, 8) + ": not established; its files removed");
             }
         }
 
@@ -341,7 +383,9 @@ namespace DoodleNote.DictationHelper
                 // Publication and settlement exclude each other: a settled record is never published.
                 lock (record.Gate)
                 {
-                    if (record.Settled)
+                    // Test build only (round 34): a rename that stalls (the lock held across it, as a slow disk would).
+                    TestMode.Gate("PUBLISH_PAYLOAD");
+                    if (record.Settled || record.Abandoned)
                     {
                         TryDelete(tmp);
                         Wire.Log("the written-down clipboard was not published: its transaction was already settled");
@@ -389,10 +433,13 @@ namespace DoodleNote.DictationHelper
             string stage = record.Stage;
             EnqueueJournal(delegate
             {
-                bool settled;
-                lock (record.Gate) settled = record.Settled;
-                if (!settled) WriteSnapshot(record.Id, json, stage, durable);
-                if (then != null) then();
+                try
+                {
+                    bool settled;
+                    lock (record.Gate) settled = record.Settled;
+                    if (!settled) WriteSnapshot(record.Id, json, stage, durable);
+                }
+                finally { if (then != null) then(); } // round 34 (Opus nit): the in-flight release runs whatever happened
             });
         }
 
@@ -443,7 +490,7 @@ namespace DoodleNote.DictationHelper
                 {
                     WriteStateJson(StatePath(record.Id), json, true, record);
                     JournalTrace(record.Id, stage, true, took);
-                    lock (record.Gate) return !record.Settled;
+                    lock (record.Gate) return !record.Settled && !record.Abandoned;
                 }
                 catch (Exception error)
                 {
@@ -496,7 +543,7 @@ namespace DoodleNote.DictationHelper
                     TestMode.Stall("JOURNAL_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_JOURNAL_STALL_MS", 0));
                     work();
                 }
-                catch (Exception error) { Wire.Log("ERROR: a clipboard journal step failed (" + error.GetType().Name + ")"); }
+                catch (Exception error) { try { Wire.Log("ERROR: a clipboard journal step failed (" + error.GetType().Name + ")"); } catch (Exception) { } }
                 finally { lock (journalGate) { journalPending--; Monitor.PulseAll(journalGate); } }
             }
         }
@@ -668,10 +715,12 @@ namespace DoodleNote.DictationHelper
             }
             // Test build only (round 30): killed with the state's .tmp written and not yet in place (CI run 42842819157).
             TestMode.Stall("STATE_TMP_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_STATE_TMP_STALL_MS", 0));
-            if (publish == null) { MoveIntoPlace(tmp, path, durable); return; }
+            // Test build only (round 34): held between the .tmp's write and its rename (a kill here, or a stalled rename).
+            if (publish == null) { TestMode.Gate("PUBLISH"); MoveIntoPlace(tmp, path, durable); return; }
             lock (publish.Gate)
             {
-                if (publish.Settled) { TryDelete(tmp); return; }
+                TestMode.Gate("PUBLISH");
+                if (publish.Settled || publish.Abandoned) { TryDelete(tmp); return; }
                 MoveIntoPlace(tmp, path, durable);
             }
         }
@@ -936,7 +985,7 @@ namespace DoodleNote.DictationHelper
                     {
                         // Round 33: a File.Replace leftover of an earlier build ("<state>~RF<hex>.TMP": a copy of an old state,
                         // no user content), older than 10 minutes: removed. Anything else that does not match is not ours.
-                        if (ReplaceLeftover.IsMatch(name) && OlderThanTenMinutes(path))
+                        if (ReplaceLeftover.IsMatch(name) && OlderThanTenMinutes(path) && ReplaceLeftoverIsDead(path, name))
                             Wire.Log("a stray replace leftover (" + name.Substring(Prefix.Length) + ") " + (TryDelete(path) ? "was deleted" : "could not be deleted now (tried again later)"));
                         continue; // another identity's file (X-foo for X), or not a record
                     }
@@ -1264,6 +1313,20 @@ namespace DoodleNote.DictationHelper
                 RecoveryVerdict verdict = Decide(facts, view, match);
                 string seen = view.Describe() + "; sequence " + view.Sequence + ", recorded " + facts.Stage + ", logon " + match.ToString().ToLowerInvariant();
                 if (verdict == RecoveryVerdict.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record (" + seen + "); left to it"; } // not retried here (S-A)
+                // Round 34 (Opus): UNCHANGED SINCE THE CAPTURE. The first durable state ("emptying") carries the save's capture
+                // sequence; the same logon and boot and that same sequence now prove nothing changed the clipboard since (our
+                // EmptyClipboard would have moved it), so nothing of ours was emptied: the record is harmless and deleted, also
+                // an INCOMPLETE one (whose content proof below cannot hold: the user's real clipboard is the whole of it). Used
+                // only to DELETE, never to write.
+                if (facts.Stage == "emptying" && facts.SequenceAtStage != 0 && view.Sequence == facts.SequenceAtStage
+                    && match == LogonMatch.Same && facts.BootId.Length > 0 && facts.BootId == bootId)
+                {
+                    closeNow();
+                    if (byUser) reply["result"] = "restored";
+                    bool unchangedGone = DeleteId(id, "the clipboard is unchanged since its capture (nothing was emptied)");
+                    if (facts.Unrestored) Wire.Send(Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", "restored"));
+                    return "unchanged since its capture (" + seen + "): nothing was emptied; " + (unchangedGone ? "deleted" : Deferred);
+                }
                 // Round 23 (B2): only a WHOLE save can be "already there" (AllPresent says so too; checked here again).
                 if (verdict == RecoveryVerdict.Untouched && !saved.Incomplete)
                 {

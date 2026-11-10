@@ -506,8 +506,8 @@ namespace DoodleNote.DictationHelper
             lateWrite = late;
             if (late != null)
             {
-                // Our write ran past its budget (WriteBounded logged where it was: emptying on a slow owner, a journal on a
-                // slow disk, ...). When it ends, the write puts the user's saved content back instead of ours (and
+                // Our write ran past its budget (WriteBounded logged where it was: emptying on a slow owner, ...; round 33:
+                // no journal inside the write any more). When it ends, the write puts the user's saved content back instead of ours (and
                 // finishes the record, and tells the app); until then nobody can say what the clipboard will hold, so the
                 // result says so (and nothing is pasted). Round 30: no cause is named here that was not measured.
                 Wire.Log("our clipboard write ran past its budget; not pasting (the saved content goes back when it ends)");
@@ -596,8 +596,13 @@ namespace DoodleNote.DictationHelper
             // (Begin waits for them at most PendingClipboard.BeginDeadlineMs, outside the 1 s write budget); otherwise no
             // paste. Then the delivery's own deadline is checked again (the TOTAL bound: a slow disk delays the paste at
             // most that long, and a paste that no longer fits never empties anything).
-            PendingRecord record = PendingClipboard.Begin(saved, text);
-            if (record == null) { deliveryNoSave = "no-record"; return "no-record"; }
+            // Round 34 (Astra P2): Begin checks the delivery's deadline while it waits, and never waits on a lock to give up.
+            PendingRecord record = PendingClipboard.Begin(saved, text, stillInTime);
+            if (record == null)
+            {
+                deliveryNoSave = PendingClipboard.LastBeginFailure == "deadline" ? "deadline" : "no-record";
+                return deliveryNoSave;
+            }
             if (stillInTime != null && !stillInTime())
             {
                 Wire.Log("the paste no longer fits the deadline after its record was written down; not pasting (nothing emptied)");
