@@ -4022,24 +4022,31 @@ test('Windows: paste last and a refused paste report the clipboard too', async (
   )
 })
 
-// Round 28: the PERMUTATION test of the notice model. Every ordering of a script of primitive events, for one record
-// and for two, runs through the PRODUCTION client (its request serialization, result parser and event dispatch; only
-// the transport is replaced, no helper process) and the service. After every step and at the end the invariants hold:
-// (1) never two notices for one completed Restore; (2) a dismissed or superseded notice never reappears; (3) a
-// completed Restore's notice is visible at the end unless something superseded it; (4) the notice shown is always the
-// one raised last (never an older record's over a newer one).
+// Rounds 28-29: the PERMUTATION test of the notice model. Every ordering of a script of primitive events, for one
+// record and for two, runs through the PRODUCTION client (its request serialization, result parser and event
+// dispatch, offers included; only the transport is replaced, no helper process) and the service, with mocked timers.
+// Round 29 (Astra P2): the oracle is INDEPENDENT of what the service raised. A model of the events computes which
+// notice must be current (the last notice-bearing completion, unless a Dismiss, an accepted new dictation or its
+// expiry came after it), and after EVERY step the shown title must equal it whenever no live session hides it. Also
+// after every step: never two notices for one completion.
 type PermStep =
   | 'click'
   | 'eventA'
   | 'eventB'
   | 'replyA'
   | 'replyB'
+  | 'restoredA'
+  | 'busyA'
+  | 'failedA'
   | 'timeoutA'
   | 'goneOther'
   | 'added'
   | 'dismiss'
   | 'refresh'
   | 'dictation'
+  | 'recStart'
+  | 'recEnd'
+  | 'expire'
 
 function permutations<T>(items: T[]): T[][] {
   if (items.length <= 1) return [items.slice()]
@@ -4059,106 +4066,129 @@ function permutations<T>(items: T[]): T[][] {
 }
 
 const permTitle = (missing: string): string => `Your clipboard was put back except: ${missing}.`
+const NOTICE_LIFE_MS = 6_000
 
 async function runPermutation(steps: PermStep[], twoRecords: boolean): Promise<string | null> {
   const { DictationHelperClient } = await import('./dictation-helper-client')
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
   const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
   const a = offer({ record: 'a'.repeat(32), delivery: '', incomplete: true, missing: ['X (y)'] })
   const b = offer({ record: 'b'.repeat(32), delivery: '', incomplete: true, missing: ['Z (z)'] })
   const other = offer({ record: 'c'.repeat(32) })
   h.helper.offers = twoRecords ? [a, b, other] : [a, other]
-  await h.service.start()
-  await tick()
   const client = new DictationHelperClient({ command: '/never-launched', platform: 'win32' })
   const raw = client as unknown as {
     request(op: string, fields?: Record<string, unknown>): Promise<unknown>
     handleLine(line: string): boolean
   }
-  // The helper: requests as the client sends them (serialized), each run at most once.
-  const sent: Array<{
+  // The helper: Restore requests as the client sends them (serialized); each one runs at most once.
+  type Sent = {
     record: string
     resolve: (x: unknown) => void
     executed: boolean
     answered: boolean
-  }> = []
+    dead: boolean
+  }
+  const sent: Sent[] = []
   raw.request = async (op: string, fields?: Record<string, unknown>) => {
     if (op === 'clipboard-offers') return { ok: true, offers: h.helper.offers }
     return new Promise((resolve) =>
-      sent.push({ record: String(fields?.record), resolve, executed: false, answered: false })
-    )
-  }
-  client.onClipboardLate(h.helper.clipboardLateListener!)
-  client.onClipboardOfferGone(h.helper.offerGoneListener!)
-  client.onClipboardOffer(h.helper.offerListener!)
-  r27Deps(h).helper.restoreClipboardOffer = client.restoreClipboardOffer.bind(client)
-  r27Deps(h).helper.clipboardOffers = client.clipboardOffers.bind(client)
-  const missingOf = (record: string): string => (record === a.record ? 'X (y)' : 'Z (z)')
-  const execute = (request: (typeof sent)[number]): void => {
-    request.executed = true
-    h.helper.offers = h.helper.offers.filter((o) => o.record !== request.record)
-    raw.handleLine(
-      JSON.stringify({ event: 'clipboard', phase: 'offer-gone', record: request.record })
-    )
-    raw.handleLine(
-      JSON.stringify({
-        event: 'clipboard',
-        phase: 'recovered',
-        record: request.record,
-        id: '',
-        clipboard: 'restored-partially',
-        missing: [missingOf(request.record)]
+      sent.push({
+        record: String(fields?.record),
+        resolve,
+        executed: false,
+        answered: false,
+        dead: false
       })
     )
   }
-  const completions = new Map<string, number>()
-  const raiseStep = new Map<string, number>()
-  let lastRaise: string | null = null
-  let lastRaiseAt = -1
-  let lastSupersede = -1
-  const raised = (): string[] => (h.service as unknown as { noticesRaised: string[] }).noticesRaised
-  const shownTitle = (): string => h.overlay.at(-1)?.title ?? ''
-  const isNotice = (title: string): boolean =>
-    title.startsWith('Your clipboard was put back except')
   try {
+    await h.service.start()
+    await tick()
+    client.onClipboardLate(h.helper.clipboardLateListener!)
+    client.onClipboardOfferGone(h.helper.offerGoneListener!)
+    client.onClipboardOffer(h.helper.offerListener!)
+    r27Deps(h).helper.restoreClipboardOffer = client.restoreClipboardOffer.bind(client)
+    r27Deps(h).helper.clipboardOffers = client.clipboardOffers.bind(client)
+    const missingOf = (record: string): string => (record === a.record ? 'X (y)' : 'Z (z)')
+    // THE MODEL (independent of the service): what notice must be current, and how many notices each record may
+    // have raised (one per notice-bearing completion).
+    let expected: string | null = null
+    let recording = false
+    const allowed = new Map<string, number>()
+    const completedRequests = new Set<Sent>()
+    const complete = (request: Sent, withNotice: boolean): void => {
+      if (completedRequests.has(request)) return
+      completedRequests.add(request)
+      if (!withNotice) return
+      const title = permTitle(missingOf(request.record))
+      allowed.set(title, (allowed.get(title) ?? 0) + 1)
+      expected = title
+    }
+    const execute = (request: Sent, clipboard: string): void => {
+      request.executed = true
+      h.helper.offers = h.helper.offers.filter((o) => o.record !== request.record)
+      raw.handleLine(
+        JSON.stringify({ event: 'clipboard', phase: 'offer-gone', record: request.record })
+      )
+      raw.handleLine(
+        JSON.stringify({
+          event: 'clipboard',
+          phase: 'recovered',
+          record: request.record,
+          id: '',
+          clipboard,
+          missing: clipboard === 'restored' ? [] : [missingOf(request.record)]
+        })
+      )
+      complete(request, clipboard !== 'restored')
+    }
+    const raised = (): string[] =>
+      (h.service as unknown as { noticesRaised: string[] }).noticesRaised
+    const isNotice = (title: string): boolean =>
+      title.startsWith('Your clipboard was put back except')
+    let addedCount = 0
     for (const [i, step] of steps.entries()) {
-      const before = raised().length
       const view = h.overlay.at(-1)
       const recordOf = (x: 'A' | 'B'): string => (x === 'A' ? a.record : b.record)
+      const open = (record: string): Sent | undefined =>
+        sent.find((r) => r.record === record && !r.answered && !r.dead)
       switch (step) {
         case 'click':
-          // A click on whatever is shown: a card's Restore (accepted, or ignored while pending), or nothing.
-          if (view?.offerRecord && view.controls.offerRestore && !view.restoring) lastSupersede = i
+          // A click on what is shown: a card's Restore (accepted, or a no-op while pending), or nothing.
           h.service.onOverlayAction('offer-restore', null, view?.offerRecord)
           break
         case 'eventA':
         case 'eventB': {
           const request = sent.find(
-            (r) => r.record === recordOf(step === 'eventA' ? 'A' : 'B') && !r.executed
+            (r) => r.record === recordOf(step === 'eventA' ? 'A' : 'B') && !r.executed && !r.dead
           )
-          if (request) {
-            execute(request)
-            completions.set(request.record, (completions.get(request.record) ?? 0) + 1)
-          }
+          if (request) execute(request, 'restored-partially')
           break
         }
         case 'replyA':
         case 'replyB':
+        case 'restoredA':
+        case 'busyA':
+        case 'failedA':
         case 'timeoutA': {
           const record = recordOf(step === 'replyB' ? 'B' : 'A')
-          const request = sent.find((r) => r.record === record && !r.answered)
+          const request = open(record)
           if (!request) break
           request.answered = true
           if (step === 'timeoutA') request.resolve(null)
-          else {
+          else if (step === 'failedA') request.resolve({ ok: true, result: 'failed' })
+          else if (step === 'busyA') {
+            if (!request.executed) request.dead = true // it did not run, and never will
+            request.resolve({ ok: true, result: 'busy' })
+          } else {
+            const result = step === 'restoredA' ? 'restored' : 'restored-partially'
             // The helper sends the event before its reply.
-            if (!request.executed) {
-              execute(request)
-              completions.set(record, (completions.get(record) ?? 0) + 1)
-            }
+            if (!request.executed) execute(request, result)
             request.resolve({
               ok: true,
-              result: 'restored-partially',
-              missing: [missingOf(record)]
+              result,
+              missing: result === 'restored' ? [] : [missingOf(record)]
             })
           }
           break
@@ -4170,13 +4200,22 @@ async function runPermutation(steps: PermStep[], twoRecords: boolean): Promise<s
           )
           break
         case 'added': {
-          const added = offer({ record: 'd'.repeat(32) })
+          // An offer arriving through the real dispatch (the helper's pending event).
+          const added = offer({ record: String(addedCount++).padStart(32, 'd') })
           h.helper.offers = [...h.helper.offers, added]
-          h.helper.offerListener!(added)
+          raw.handleLine(
+            JSON.stringify({
+              event: 'clipboard',
+              phase: 'pending',
+              id: '',
+              clipboard: 'unrestored',
+              ...added
+            })
+          )
           break
         }
         case 'dismiss':
-          lastSupersede = i
+          expected = null
           h.service.onOverlayAction('dismiss', null)
           break
         case 'refresh':
@@ -4186,43 +4225,60 @@ async function runPermutation(steps: PermStep[], twoRecords: boolean): Promise<s
           ).loadClipboardOffers()
           break
         case 'dictation':
-          lastSupersede = i
+          if (!recording) expected = null // an accepted start supersedes
           h.service.onOverlayAction('pill', null)
           await tick()
           h.service.onOverlayAction('cancel', null)
+          recording = false
+          break
+        case 'recStart':
+          if (!recording) {
+            expected = null
+            recording = true
+            h.service.toggle()
+            await ready(h)
+          }
+          break
+        case 'recEnd':
+          if (recording) {
+            recording = false
+            h.service.onOverlayAction('cancel', null)
+          }
+          break
+        case 'expire':
+          // The notice timer runs out (a hidden notice too: it expires while a recording hides it).
+          expected = null
+          mock.timers.tick(NOTICE_LIFE_MS + 1)
           break
       }
       await tick()
       await tick()
-      for (const title of raised().slice(before)) {
-        raiseStep.set(title, i)
-        lastRaise = title
-        lastRaiseAt = i
-      }
       // (1) never two notices for one completion
-      for (const record of [a.record, b.record]) {
-        const title = permTitle(missingOf(record))
+      for (const [title, max] of [permTitle('X (y)'), permTitle('Z (z)')].map(
+        (t) => [t, allowed.get(t) ?? 0] as const
+      )) {
         const count = raised().filter((t) => t === title).length
-        if (count > (completions.get(record) ?? 0))
-          return `step ${i} (${step}): ${count} notices for ${completions.get(record) ?? 0} completion(s) of ${title}`
+        if (count > max)
+          return `step ${i} (${step}): ${count} notices raised for ${max} completion(s): ${title}`
       }
-      const shown = shownTitle()
-      if (isNotice(shown)) {
-        // (2) never a superseded notice again; (4) only the one raised last
-        if ((raiseStep.get(shown) ?? -1) <= lastSupersede)
-          return `step ${i} (${step}): the superseded notice "${shown}" is shown again`
-        if (shown !== lastRaise)
-          return `step ${i} (${step}): "${shown}" shown, but "${lastRaise}" was raised last`
-      }
+      // (2)-(4) the shown title against the MODEL, after every step (a live session hides any notice)
+      const shown = h.overlay.at(-1)?.title ?? ''
+      if (recording) {
+        if (h.overlay.at(-1)?.mode !== 'session')
+          return `step ${i} (${step}): the recording is not live (${h.overlay.at(-1)?.mode})`
+        if (isNotice(shown)) return `step ${i} (${step}): a notice shows over the live session`
+      } else if (expected) {
+        if (shown !== expected)
+          return `step ${i} (${step}): expected "${expected}", shown "${shown}"`
+      } else if (isNotice(shown))
+        return `step ${i} (${step}): "${shown}" shown, but no notice should be`
     }
-    // (3) a completion's notice, not superseded since, is visible at the end
-    if (lastRaise && lastRaiseAt > lastSupersede && shownTitle() !== lastRaise)
-      return `end: "${lastRaise}" was raised after the last supersede but "${shownTitle()}" is shown`
     return null
   } finally {
     for (const request of sent) if (!request.answered) request.resolve(null)
     await tick()
     await h.service.dispose()
+    mock.timers.reset()
   }
 }
 
@@ -4251,10 +4307,35 @@ const PERMUTATION_SCRIPTS: Array<{ name: string; two: boolean; steps: PermStep[]
     name: 'two records: two clicks, both events, a timeout, the other reply, Dismiss',
     two: true,
     steps: ['click', 'click', 'eventA', 'eventB', 'timeoutA', 'replyB', 'dismiss']
+  },
+  {
+    name: 'one record: click, its event, its reply, the notice expiring, an offer added, a refresh',
+    two: false,
+    steps: ['click', 'eventA', 'replyA', 'expire', 'added', 'refresh']
+  },
+  {
+    name: 'one record: a recording that hides the notice while it expires',
+    two: false,
+    steps: ['click', 'recStart', 'eventA', 'expire', 'recEnd', 'replyA']
+  },
+  {
+    name: 'one record: busy, a second click, its event and reply, Dismiss',
+    two: false,
+    steps: ['click', 'busyA', 'click', 'eventA', 'replyA', 'dismiss']
+  },
+  {
+    name: 'one record: a failed reply, a retry, a restored reply with nothing to say, expiry',
+    two: false,
+    steps: ['click', 'failedA', 'click', 'restoredA', 'expire', 'added']
+  },
+  {
+    name: 'two records: a recording across both completions',
+    two: true,
+    steps: ['click', 'eventA', 'recStart', 'click', 'eventB', 'recEnd', 'replyB']
   }
 ]
 
-test('Windows (round 28): every interleaving of the primitive events keeps the notice invariants (production client and service)', async () => {
+test('Windows (rounds 28-29): every interleaving of the primitive events matches the independent notice model after every step (production client and service)', async () => {
   let runs = 0
   let failed = 0
   const failures: string[] = []
