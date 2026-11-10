@@ -170,6 +170,20 @@ namespace DoodleNote.DictationHelper
             public int Count { get { return ids.Count; } }
         }
         static readonly IdSet inFlight = new IdSet();
+        /// <summary>Round 37: held by an automatic recovery look from just before its open to its close (never across file work).</summary>
+        static readonly object lookGate = new object();
+
+        /// <summary>
+        /// Round 37 (Opus): a delivery whose record is in flight (so no new look starts) waits, at most ms, for a look that
+        /// was already inside the clipboard; false when it is still there (then the paste is refused, nothing emptied).
+        /// </summary>
+        public static bool AwaitRecoveryLooks(int ms)
+        {
+            if (!Monitor.TryEnter(lookGate, ms)) return false;
+            Monitor.Exit(lookGate);
+            return true;
+        }
+
         /// <summary>Test only: a record taken out of flight (the logic tests judge it as a leftover).</summary>
         internal static void ForgetInFlight(string id) { inFlight.Remove(id); }
         /// <summary>Payload writers still running in this process (their record must not be judged "no payload").</summary>
@@ -1013,11 +1027,18 @@ namespace DoodleNote.DictationHelper
         /// app asks for the offers, and per record on its retry timer. Orphaned payloads (no state file, no
         /// running writer) and round-8 records are deleted. Only this identity's files are touched.
         /// </summary>
-        public static void RecoverLeftover(string why)
+        public static void RecoverLeftover(string why) { RecoverLeftover(why, null); }
+
+        /// <summary>
+        /// Round 37 (Opus): `cancelled` is read right after the lock is taken and before each record: a delivery check every
+        /// delivery gave up on (RecoverLeftoverBounded) does nothing more once it gets the lock (a later delivery may be writing).
+        /// </summary>
+        public static void RecoverLeftover(string why, Func<bool> cancelled)
         {
             StartExpiryTimer();
             lock (gate)
             {
+                if (cancelled != null && cancelled()) { Wire.Log("a kept-records check every delivery gave up on got the lock late: skipped"); return; }
                 string[] files;
                 try { files = System.IO.Directory.GetFiles(Directory, "DoodleNote-Bark-clipboard-" + HelperIdentity.Sanitized + "*"); }
                 catch (Exception) { return; }
@@ -1058,6 +1079,8 @@ namespace DoodleNote.DictationHelper
                 foreach (string id in states)
                 {
                     if (inFlight.Contains(id)) continue;
+                    // Round 37: a delivery check no delivery waits for any more stops between records.
+                    if (cancelled != null && cancelled()) { Wire.Log("a kept-records check no delivery waits for any more: stopped before record " + id.Substring(0, 8)); return; }
                     try
                     {
                         RecoverResult result;
@@ -1340,7 +1363,27 @@ namespace DoodleNote.DictationHelper
             catch (OverflowException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
             if (corrupt != null) { return "ERROR: payload corrupt (" + corrupt + "); " + (DeleteId(id, "payload corrupt") ? "deleted" : Deferred); }
             PutBackTrace trace = byUser ? new PutBackTrace("user-restore") : null; // log only
-            if (!ClipboardText.Open()) { result = RecoverResult.Busy; reply["result"] = "busy"; return "the clipboard is busy; kept for a retry"; }
+            // Round 37 (Opus): a recovery look (a delivery's check, a retry, the 30-minute sweep: every automatic one; the
+            // user's Restore runs on the same queue as deliveries) never opens the clipboard while a delivery is in flight:
+            // it opens with the SAME window, which would take a running write's open over. The look holds lookGate from
+            // here to its close; a delivery, once its record is in flight, waits for a look already inside (bounded).
+            bool looking = false;
+            if (!byUser)
+            {
+                if (!Monitor.TryEnter(lookGate)) { result = RecoverResult.Busy; reply["result"] = "busy"; return "another clipboard look is running; kept for a retry"; }
+                looking = true;
+                if (inFlight.Count > 0)
+                {
+                    Monitor.Exit(lookGate);
+                    result = RecoverResult.Busy; reply["result"] = "busy";
+                    return "a delivery is in flight: no clipboard look now; kept, checked again later";
+                }
+            }
+            if (!ClipboardText.Open())
+            {
+                if (looking) Monitor.Exit(lookGate);
+                result = RecoverResult.Busy; reply["result"] = "busy"; return "the clipboard is busy; kept for a retry";
+            }
             RestoreStep("opened");
             string outcome;
             // Round 33 (e): the clipboard is open only for the look and, for the user's Restore, the empty and the put-back:
@@ -1355,6 +1398,7 @@ namespace DoodleNote.DictationHelper
                 int closeError = closed ? 0 : Marshal.GetLastWin32Error();
                 RestoreStep(closed ? "closed" : "close failed");
                 if (trace != null) trace.Closed(closed, closeError);
+                if (looking) { looking = false; Monitor.Exit(lookGate); }
             };
             try
             {
@@ -1821,21 +1865,103 @@ namespace DoodleNote.DictationHelper
         /// Round 36 (Astra P3): the delivery's own kept-records check, BOUNDED. It runs on its own thread (it takes the
         /// recovery lock and does file and clipboard work, neither of which can be bounded in place); the delivery waits for
         /// it while `stillInTime` holds and at most capMs. Not done by then: false, and the paste is refused (nothing
-        /// emptied); the check finishes on its own (it never writes the clipboard: round 18).
+        /// emptied). Round 37 (Astra P2, Opus): there is at most ONE such check at a time, shared by the deliveries: a
+        /// delivery joins the outstanding check while it still waits for the lock, and waits (within its own allowance)
+        /// for a running one to finish before it starts the next, so checks never accumulate behind a held lock. A check
+        /// every delivery gave up on does nothing when it gets the lock, and stops between records once no delivery waits
+        /// for it (a later delivery may be writing).
         /// </summary>
         public static bool RecoverLeftoverBounded(string why, Func<bool> stillInTime, int capMs)
         {
-            Thread check = new Thread(delegate () { try { RecoverLeftover(why); } catch (Exception) { } });
-            check.IsBackground = true;
-            check.Name = "kept-records-check";
-            check.Start();
             Stopwatch waited = Stopwatch.StartNew();
+            KeptCheck mine = null;
             for (;;)
             {
-                if (check.Join(50)) return true;
+                KeptCheck running = null;
+                bool start = false;
+                lock (checkSlot)
+                {
+                    if (outstandingCheck == null)
+                    {
+                        mine = outstandingCheck = new KeptCheck();
+                        mine.Waiters = 1;
+                        start = true;
+                    }
+                    else if (!outstandingCheck.Decided)
+                    {
+                        mine = outstandingCheck;
+                        mine.Waiters++;
+                        Wire.Log("the kept-records check before the paste: joining the one still waiting for the recovery lock");
+                    }
+                    else running = outstandingCheck;
+                }
+                if (start) StartCheck(mine, why);
+                if (mine != null) break;
+                // A check already running (or stopping): this delivery waits for it to finish, then starts (or joins) the next.
+                if (!AwaitCheck(running, stillInTime, capMs, waited)) return false;
+            }
+            if (AwaitCheck(mine, stillInTime, capMs, waited)) return mine.Ran;
+            lock (checkSlot) mine.Waiters--; // round 37: no delivery waits any more: it skips (or stops) on its own
+            return false;
+        }
+
+        /// <summary>Wait for a check while the delivery still fits and its cap holds.</summary>
+        static bool AwaitCheck(KeptCheck check, Func<bool> stillInTime, int capMs, Stopwatch waited)
+        {
+            for (;;)
+            {
+                if (check.Done.Wait(50)) return true;
                 if ((stillInTime != null && !stillInTime()) || waited.ElapsedMilliseconds >= capMs) return false;
             }
         }
+
+        static void StartCheck(KeptCheck check, string why)
+        {
+            int alive = Interlocked.Increment(ref checksAlive);
+            TestMode.Trace("kept-records checks alive: " + alive);
+            Thread thread = new Thread(delegate ()
+            {
+                try { RecoverLeftover(why, check.ShouldStop); check.Ran = !check.Stopped; }
+                catch (Exception) { }
+                finally
+                {
+                    Interlocked.Decrement(ref checksAlive); // before the slot frees: the next check's count never includes this one
+                    lock (checkSlot) { if (outstandingCheck == check) outstandingCheck = null; }
+                    check.Done.Set();
+                }
+            });
+            thread.IsBackground = true;
+            thread.Name = "kept-records-check";
+            thread.Start();
+        }
+
+        /// <summary>Round 37: the one outstanding delivery check (checkSlot guards it and its counts).</summary>
+        sealed class KeptCheck
+        {
+            public readonly ManualResetEventSlim Done = new ManualResetEventSlim(false);
+            public int Waiters;
+            /// <summary>It got the lock with a delivery waiting: it runs (no one joins it any more).</summary>
+            public bool Decided;
+            /// <summary>No delivery waited when it looked: it did (or does) nothing more.</summary>
+            public bool Stopped;
+            public volatile bool Ran;
+
+            /// <summary>Read right after the lock is taken and before each record: whether to stop now.</summary>
+            public bool ShouldStop()
+            {
+                lock (checkSlot)
+                {
+                    if (Stopped) return true;
+                    if (Waiters <= 0) { Stopped = true; Decided = true; return true; }
+                    Decided = true;
+                    return false;
+                }
+            }
+        }
+
+        static readonly object checkSlot = new object();
+        static KeptCheck outstandingCheck;
+        static int checksAlive;
 
         /// <summary>This boot's id (the logic tests).</summary>
         internal static string CurrentBootId { get { return bootId; } }

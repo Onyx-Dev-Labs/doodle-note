@@ -561,6 +561,13 @@ namespace DoodleNote.DictationHelper
                     }
 #endif
                     break;
+                case "__retention-sweep":
+                    // Test build only (round 37): the 30-minute retention check, run now (the timer's own function).
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+#if DICTATION_TEST
+                    work.Async(id, delegate { PendingClipboard.ExpireSweep(); Wire.Reply(id, true, Wire.Fields("result", "swept")); });
+#endif
+                    break;
                 case "__text-forms":
                     // Test build only: the text forms this helper expects Windows to synthesize for a text under a locale
                     // (compared in CI with Windows' own synthesis), and what the last write's read-back inside its open found.

@@ -623,6 +623,15 @@ namespace DoodleNote.DictationHelper
                 deliveryNoSave = "deadline";
                 return "deadline";
             }
+            // Round 37 (Opus): no automatic recovery look may hold the clipboard while our write runs (it would open with the
+            // same window and take the write's open over): one already inside is waited for, at most 1 s, else no paste.
+            if (!PendingClipboard.AwaitRecoveryLooks(1000))
+            {
+                Wire.Log("a recovery look still holds the clipboard; not pasting (nothing emptied)");
+                PendingClipboard.Finish(record, "untouched");
+                deliveryNoSave = "clipboard-busy";
+                return "clipboard-busy";
+            }
             saved.Record = record;
             // Test build only (round 30): a case that is not about the budget sets a generous one, so its outcome is the path it
             // tests (the late path has its own cases, forced by gates; see the offers end-to-end check).
