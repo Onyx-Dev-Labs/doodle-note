@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { GitHubStars } from "./github-stars";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -53,7 +54,7 @@ export function MarketingHeader() {
         <Link href="/help">Docs</Link>
       </nav>
       <div className="header-actions">
-        <GitHubLink />
+        <GitHubStars />
         <Link className="button button-small button-outline" href="/login">
           Sign in
         </Link>
