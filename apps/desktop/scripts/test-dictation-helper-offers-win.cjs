@@ -3893,6 +3893,122 @@ async function main() {
     )
   }
 
+  // 46e. Round 35 (Astra P2): the unchanged-since-capture proof needs a COMPLETE observation: the same crash as 46(d),
+  // recovered by a helper whose view enumeration is incomplete (test hook): never deleted on the sequence alone; offered.
+  {
+    await begin('46e')
+    const short = 'short ' + identity.slice(-4)
+    seed('an incomplete save', [
+      [13, Buffer.from(short + '\0', 'utf16le')],
+      [RegisterClipboardFormatW(EXTRA), Buffer.alloc(200, 0x7a)]
+    ])
+    const before = contentSnapshot()
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_CLIP_MAXBYTES: '64' },
+      { gates: ['EMPTY'] }
+    )
+    await a.ready
+    void a.req('__clipboard-txn', { text: 'dictated text IE2', holdMs: 300 })
+    const at = await atLine(a, 'held before its EmptyClipboard', /test-trace: gate EMPTY#1 waiting/)
+    await a.kill()
+    const h = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_ENUM_INCOMPLETE: 'view'
+    })
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const now = contentSnapshot()
+    const gone = offer ? await h.req('clipboard-dismiss', { record: offer.record }) : null
+    await h.stop()
+    check(
+      '46(e) the same crash, an incomplete enumeration at the recovery look: no deletion on the sequence (no proof), offered; the clipboard unchanged; Dismiss deletes it',
+      !!at &&
+        !h.logs.some((l) => /unchanged since its capture/.test(l)) &&
+        !!offer &&
+        JSON.stringify(now) === JSON.stringify(before) &&
+        !!gone &&
+        gone.dismissed === true,
+      `${JSON.stringify(listed)}; ${JSON.stringify(gone)}; ${JSON.stringify(now)} vs ${JSON.stringify(before)}`
+    )
+  }
+
+  // 52. Round 35 (Astra P2, Opus): Begin never waits on the recovery lock. A kept record's retry (held at its RETRY gate
+  // until Begin is writing) takes the recovery lock and stalls INSIDE it (SWEEP_RETRY); meanwhile Begin's payload is late
+  // (6 s): Begin still answers "no-record" within the bound, nothing emptied.
+  {
+    await begin('52')
+    copyMulti(user)
+    await keptRecord('dictated text SW0')
+    // Another copy (the kept record's saved content is not on the clipboard, so it stays an offer with a retry).
+    copyMulti('the copy for case 52 ' + identity)
+    const before = contentSnapshot()
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_PAYLOAD_DELAY_MS: '6000' },
+      { gates: ['RETRY', 'SWEEP_RETRY'] }
+    )
+    await a.ready
+    // Its start-up check offered the kept record and scheduled its retry (3 s): held at RETRY#1, before the lock.
+    await atLine(a, 'the retry held before the lock', /test-trace: gate RETRY#1 waiting/)
+    const t0 = Date.now()
+    const reply = a.req('__clipboard-txn', { text: 'dictated text SW', holdMs: 300 })
+    await atLine(a, 'Begin writing', /test-trace: begin writing/)
+    a.open('RETRY')
+    const inside = await atLine(
+      a,
+      'the retry stalled inside the lock',
+      /test-trace: gate SWEEP_RETRY#1 waiting/
+    )
+    const live = await reply
+    const took = Date.now() - t0
+    const after = contentSnapshot()
+    a.open('SWEEP_RETRY')
+    await a.waitLog(/not established; its files removed/, { ms: 15000 })
+    await a.stop()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+    check(
+      'Begin answers within its bound while a recovery retry is stalled inside the recovery lock: "no-record", nothing emptied (bytes and sequence)',
+      !!inside &&
+        !!live &&
+        live.result === 'no-record' &&
+        took < 4500 &&
+        JSON.stringify(after) === JSON.stringify(before),
+      `${JSON.stringify(live)} in ${took} ms; inside ${!!inside}`
+    )
+  }
+
+  // 53. Round 35, a NATIVE OBSERVATION (Astra's open question; reported, not asserted): when a delayed-render owner exits
+  // with formats it never rendered, does the clipboard sequence move? If it does not, the unchanged-since-capture proof
+  // could delete a record while that unrendered content is gone; those bytes were never in our payload (a save reads
+  // only what renders), so the deletion loses nothing we held.
+  {
+    await begin('53')
+    const words = 'delayed render ' + identity
+    const { h, ok } = await seededBy({}, [
+      `#13|${Buffer.from(words + '\0', 'utf16le').toString('base64')}`,
+      'FileContents|-'
+    ])
+    const before = { sequence: GetClipboardSequenceNumber(), names: names() }
+    await h.stop()
+    await until(() => !names().includes('FileContents'), 3000)
+    const after = { sequence: GetClipboardSequenceNumber(), names: names() }
+    console.log(
+      `# 53 a delayed-render owner's exit: sequence ${before.sequence} -> ${after.sequence} (${after.sequence === before.sequence ? 'UNCHANGED' : 'moved'}); formats ${before.names} -> ${after.names}`
+    )
+    check(
+      'the delayed-render owner observation ran (reported above)',
+      ok && before.sequence !== 0,
+      JSON.stringify({ before, after })
+    )
+  }
+
   // 47. Round 33 (b, f): the payload not on disk in time: the write is NOT established (no record, no paste: "no-record")
   // within the total bound (BeginDeadlineMs, 2 s), the clipboard untouched (bytes and sequence); the late payload
   // writer publishes nothing.
@@ -4016,19 +4132,28 @@ async function main() {
       JSON.stringify({ session, pid: live.child.pid, pidStart: 0 }),
       false
     )
+    // Round 35 (Astra P2): phase 1, another helper RUNNING (any identity: here `live`, as a live recovery writer could be on a
+    // dead helper's state): nothing is swept at all, not even the dead one.
     const h = start(release)
     await h.ready
     await h.req('clipboard-offers')
     await h.stop()
+    const phase1 = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, fs.existsSync(f)]))
+    // Phase 2: no other helper runs: only the old ones of this session naming helpers proven not running go.
     await live.stop()
-    const exists = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, fs.existsSync(f)]))
+    const h2 = start(release)
+    await h2.ready
+    await h2.req('clipboard-offers')
+    await h2.stop()
+    const phase2 = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, fs.existsSync(f)]))
     for (const f of [...Object.values(files), liveState]) fs.rmSync(f, { force: true })
+    const gone2 = ['deleted', 'running', 'liveRecord']
     check(
-      "earlier builds' replace leftovers: deleted only when old, of this session and naming no running helper; kept otherwise; another identity's, a payload's and a foreign ~RF file untouched",
-      !exists.deleted &&
-        Object.entries(exists).every(([k, there]) => k === 'deleted' || there) &&
-        h.logs.some((l) => /a stray replace leftover .* was deleted/.test(l)),
-      JSON.stringify(exists)
+      "earlier builds' replace leftovers: none swept while any other helper runs; then only the old ones of this session naming no running helper; fresh, other-session and unreadable ones kept; another identity's, a payload's and a foreign ~RF file untouched",
+      Object.values(phase1).every(Boolean) &&
+        Object.entries(phase2).every(([k, there]) => (gone2.includes(k) ? !there : there)) &&
+        h2.logs.some((l) => /a stray replace leftover .* was deleted/.test(l)),
+      `phase 1 ${JSON.stringify(phase1)}; phase 2 ${JSON.stringify(phase2)}`
     )
   }
 
