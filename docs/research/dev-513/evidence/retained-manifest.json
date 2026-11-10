@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "next": 4,
+  "originals": {
+    "ac4c8c0df9180f5b4a6f285bc78834d250c0ab992f5354094e86edfed9bd1e6f": "original-synthetic-slide.png"
+  },
+  "occurrences": [
+    {
+      "id": 1,
+      "meeting": "fixture-meeting",
+      "meetingMs": 42000,
+      "actionUTC": "2026-10-17T23:40:46.692Z",
+      "source": "fixture-slide-v1",
+      "imageHash": "ac4c8c0df9180f5b4a6f285bc78834d250c0ab992f5354094e86edfed9bd1e6f",
+      "provenance": "synthetic-render-v1",
+      "derivedOCR": null
+    },
+    {
+      "id": 2,
+      "meeting": "fixture-meeting",
+      "meetingMs": 60000,
+      "actionUTC": "2026-10-17T23:41:09.428Z",
+      "source": "fixture-slide-v1",
+      "imageHash": "ac4c8c0df9180f5b4a6f285bc78834d250c0ab992f5354094e86edfed9bd1e6f",
+      "provenance": "synthetic-render-v1",
+      "derivedOCR": null
+    }
+  ],
+  "evidenceKind": "generated synthetic PNG, not a captured native window",
+  "browser": "T3 collaborative preview Chrome/154.0.0.0",
+  "host": "macOS 26.6.2 arm64",
+  "nativePreflight": false
+}
