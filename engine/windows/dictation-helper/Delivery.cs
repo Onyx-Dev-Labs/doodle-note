@@ -387,14 +387,19 @@ namespace DoodleNote.DictationHelper
         /// (save, record, bounded write, hold, restore), without a target or Ctrl+V, so recovery can be
         /// exercised natively without any window in front.
         /// </summary>
-        public static string TestTransaction(string text, int holdMs)
+        public static string TestTransaction(string text, int holdMs, int deadlineMs = 0)
         {
             SavedClipboard saved;
             ClipboardOwnership ours;
             ClipboardText.LateWrite late;
             bool written;
+            // Round 38: a delivery deadline (deadlineMs, counted from the end of the save and its AFTER_SAVE gate).
+            Stopwatch clock = Stopwatch.StartNew();
+            Func<bool> stillInTime = null;
+            if (deadlineMs > 0) stillInTime = delegate { return clock.ElapsedMilliseconds <= deadlineMs; };
             string notStarted = BeginClipboardWrite(text, out saved, out ours, out written, out late,
-                delegate (SavedClipboard s) { Wire.Log("test: saved formats [" + s.DescribeFormats() + "]"); });
+                delegate (SavedClipboard s) { Wire.Log("test: saved formats [" + s.DescribeFormats() + "]"); TestMode.Gate("AFTER_SAVE"); clock.Restart(); },
+                stillInTime);
             if (notStarted != null) return notStarted;
             string savedFormats = saved.DescribeFormats();
             if (late != null) return "late|" + savedFormats;
@@ -625,12 +630,23 @@ namespace DoodleNote.DictationHelper
             }
             // Round 37 (Opus): no automatic recovery look may hold the clipboard while our write runs (it would open with the
             // same window and take the write's open over): one already inside is waited for, at most 1 s, else no paste.
-            if (!PendingClipboard.AwaitRecoveryLooks(1000))
+            // Round 38 (Astra P2, Opus): that wait never runs past the delivery's remaining allowance.
+            if (!PendingClipboard.AwaitRecoveryLooks(1000, stillInTime))
             {
-                Wire.Log("a recovery look still holds the clipboard; not pasting (nothing emptied)");
+                bool lookDeadline = stillInTime != null && !stillInTime();
+                Wire.Log(lookDeadline ? "the paste no longer fits the deadline while a recovery look holds the clipboard; not pasting (nothing emptied)" : "a recovery look still holds the clipboard; not pasting (nothing emptied)");
                 PendingClipboard.Finish(record, "untouched");
-                deliveryNoSave = "clipboard-busy";
-                return "clipboard-busy";
+                deliveryNoSave = lookDeadline ? "deadline" : "clipboard-busy";
+                return deliveryNoSave;
+            }
+            // Round 38 (Opus, Astra P2): and the deadline is checked again right before the write (the look may have been
+            // released after the allowance ran out). Test build only: DICTATION_HELPER_TEST_EXPIRE_AFTER_LOOK_WAIT.
+            if ((stillInTime != null && !stillInTime()) || TestMode.Env("DICTATION_HELPER_TEST_EXPIRE_AFTER_LOOK_WAIT") == "1")
+            {
+                Wire.Log("the paste no longer fits the deadline after waiting for a recovery look; not pasting (nothing emptied)");
+                PendingClipboard.Finish(record, "untouched");
+                deliveryNoSave = "deadline";
+                return "deadline";
             }
             saved.Record = record;
             // Test build only (round 30): a case that is not about the budget sets a generous one, so its outcome is the path it

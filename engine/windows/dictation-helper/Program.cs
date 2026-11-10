@@ -547,6 +547,7 @@ namespace DoodleNote.DictationHelper
                     {
                         string txnText = Wire.Str(request, "text") ?? "dictated";
                         int holdMs = (int)(Wire.Num(request, "holdMs") ?? 0);
+                        int txnDeadlineMs = (int)(Wire.Num(request, "deadlineMs") ?? 0);
                         work.Async(id, delegate
                         {
                             // Counted like a delivery: an exit waits for it, and none starts once the helper is leaving.
@@ -554,7 +555,7 @@ namespace DoodleNote.DictationHelper
                             try
                             {
                                 Delivery.CurrentRequestId = id;
-                                Wire.Reply(id, true, Wire.Fields("result", Delivery.TestTransaction(txnText, holdMs)));
+                                Wire.Reply(id, true, Wire.Fields("result", Delivery.TestTransaction(txnText, holdMs, txnDeadlineMs)));
                             }
                             finally { DeliveriesInFlight.End(); }
                         });

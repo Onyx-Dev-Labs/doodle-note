@@ -177,11 +177,18 @@ namespace DoodleNote.DictationHelper
         /// Round 37 (Opus): a delivery whose record is in flight (so no new look starts) waits, at most ms, for a look that
         /// was already inside the clipboard; false when it is still there (then the paste is refused, nothing emptied).
         /// </summary>
-        public static bool AwaitRecoveryLooks(int ms)
+        public static bool AwaitRecoveryLooks(int ms, Func<bool> stillInTime = null)
         {
-            if (!Monitor.TryEnter(lookGate, ms)) return false;
-            Monitor.Exit(lookGate);
-            return true;
+            if (Monitor.TryEnter(lookGate)) { Monitor.Exit(lookGate); return true; }
+            TestMode.Trace("waiting for a recovery look");
+            // Round 38 (Astra P2, Opus): never past the delivery's remaining allowance (in 50 ms slices).
+            Stopwatch waited = Stopwatch.StartNew();
+            for (;;)
+            {
+                long left = ms - waited.ElapsedMilliseconds;
+                if (left <= 0 || (stillInTime != null && !stillInTime())) return false;
+                if (Monitor.TryEnter(lookGate, (int)Math.Min(left, 50))) { Monitor.Exit(lookGate); return true; }
+            }
         }
 
         /// <summary>Test only: a record taken out of flight (the logic tests judge it as a leftover).</summary>
@@ -1378,6 +1385,8 @@ namespace DoodleNote.DictationHelper
                     result = RecoverResult.Busy; reply["result"] = "busy";
                     return "a delivery is in flight: no clipboard look now; kept, checked again later";
                 }
+                // Test build only (round 38): a look held inside the look lock (a delivery waits for it).
+                TestMode.Gate("LOOK");
             }
             if (!ClipboardText.Open())
             {
