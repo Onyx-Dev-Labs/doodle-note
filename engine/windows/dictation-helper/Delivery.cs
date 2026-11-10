@@ -1355,7 +1355,8 @@ namespace DoodleNote.DictationHelper
                 // abandoned DURING EmptyClipboard (an owner stalling in WM_DESTROYCLIPBOARD) still rolls back below.
                 if (job != null && job.Abandoned)
                 {
-                    ownership.NotStarted = "late";
+                    // No NotStarted reason: the caller already answered for this write (the late path); the late result
+                    // ("untouched") reaches the app by its event.
                     job.Mark("abandoned before emptying");
                     Wire.Log("the clipboard write ran past its budget before emptying: nothing emptied, the clipboard left as it is");
                     return false;
