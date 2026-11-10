@@ -352,7 +352,7 @@ const until = async (predicate, ms = 15000, step = 25) => {
 const gateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-ci-gates-'))
 let gateFolders = 0
 let helperCount = 0
-let frame = { label: '(before the first case)', helpers: [], dumped: false }
+let frame = { label: '(before the first case)', helpers: [] }
 const dirtyAfter = []
 let casesBegun = 0
 /** Every file of this run's identity in %TEMP% (any suffix: .bin, .state and their .tmp). */
@@ -375,28 +375,54 @@ const listing = () =>
       return `${f.slice(recordPrefix.length)} [${facts}]`
     })
     .join('; ') || '(none)'
+/**
+ * What a failed check prints. Round 31: incremental, on EVERY failure: the record files, and for each helper of the case
+ * what was not printed before (new log lines and events; a helper started since the last dump in full), so a later
+ * product failure is never hidden behind an earlier precondition's dump.
+ */
 function diagnose(name) {
   console.log(`# --- diagnostics for "${name}" (case ${frame.label}) ---`)
   console.log(`# record files now: ${listing()}`)
-  if (frame.dumped) {
-    console.log('# (the helper logs of this case are printed above)')
-    return
-  }
-  frame.dumped = true
   for (const h of frame.helpers) {
     const state = alive(h.child)
       ? 'running'
       : `exited (code ${h.child.exitCode}, signal ${h.child.signalCode})`
+    const fresh = h.logs.slice(h.shownLogs)
+    const freshEvents = h.events.slice(h.shownEvents)
     console.log(
-      `# helper ${h.n} ${h.kind}${h.hooks ? ` [${h.hooks}]` : ''} pid ${h.child.pid}, ${state}: ${h.logs.length} log line(s), ${h.events.length} event(s)`
+      `# helper ${h.n} ${h.kind}${h.hooks ? ` [${h.hooks}]` : ''} pid ${h.child.pid}, ${state}: ${h.logs.length} log line(s), ${fresh.length} not printed before; ${h.events.length} event(s), ${freshEvents.length} new`
     )
     const lines =
-      h.logs.length > 90
-        ? [...h.logs.slice(0, 30), `(${h.logs.length - 90} lines omitted)`, ...h.logs.slice(-60)]
-        : h.logs
+      fresh.length > 90
+        ? [...fresh.slice(0, 30), `(${fresh.length - 90} lines omitted)`, ...fresh.slice(-60)]
+        : fresh
     for (const l of lines) console.log(`#   | ${l}`)
-    for (const e of h.events.slice(-12)) console.log(`#   event ${JSON.stringify(e)}`)
+    for (const e of freshEvents.slice(-12)) console.log(`#   event ${JSON.stringify(e)}`)
+    h.shownLogs = h.logs.length
+    h.shownEvents = h.events.length
   }
+}
+/** Every tracked child terminated and its exit OBSERVED (round 31: also on the exception path). */
+async function terminateAll(ms = 15000) {
+  for (const s of running()) s.child.kill()
+  return until(() => running().length === 0, ms, 50)
+}
+/** Every file of the identity removed, then verified gone (a file another process still holds may need a moment). */
+async function removeAll(ms = 10000) {
+  return until(
+    () => {
+      for (const f of prefixFiles()) {
+        try {
+          fs.rmSync(path.join(os.tmpdir(), f), { force: true })
+        } catch {
+          // retried until the deadline
+        }
+      }
+      return prefixFiles().length === 0
+    },
+    ms,
+    100
+  )
 }
 /**
  * A case begins: everything the cases before it started has exited (within 20 s), and no file of this identity is
@@ -415,12 +441,21 @@ async function begin(label) {
       false,
       `still running: ${still.map((s) => `${s.label} pid ${s.child.pid}`).join(', ') || 'none'}; files: ${listing()}`
     )
-    for (const s of still) s.child.kill()
-    await until(() => running().length === 0, 10000, 50)
-    for (const f of left) fs.rmSync(path.join(os.tmpdir(), f), { force: true })
+    // Round 31: termination OBSERVED, then the files enumerated AFTER it (a process ended just now may have written
+    // one), removed, and both postconditions verified; if they cannot be established the run stops here.
+    const ended = await terminateAll()
+    const removed = ended && (await removeAll())
+    if (!ended || !removed || running().length || prefixFiles().length)
+      throw new Error(
+        `a clean state could not be established before "${label}": still running ${
+          running()
+            .map((s) => `${s.label} pid ${s.child.pid}`)
+            .join(', ') || 'none'
+        }; files ${listing()}`
+      )
   }
   casesBegun++
-  frame = { label, helpers: [], dumped: false }
+  frame = { label, helpers: [] }
 }
 /** A precondition the case needs: reached within its deadline, or a failed check that says which (with diagnostics). */
 async function reach(what, predicate, ms = 15000) {
@@ -640,6 +675,8 @@ function start(exe, env = {}, { gates = [], realBudget = false } = {}) {
   const h = {
     n: ++helperCount,
     kind,
+    shownLogs: 0,
+    shownEvents: 0,
     hooks: [
       ...Object.entries(env)
         .filter(([k]) => k !== 'DICTATION_HELPER_TEST')
@@ -3359,9 +3396,21 @@ async function main() {
 main()
   .catch((error) => {
     console.error(error)
-    results.push(false)
+    // Round 31: an exception is a failed check with its diagnostics, like any other failure.
+    check(
+      `the run ended without an exception (in case ${frame.label})`,
+      false,
+      String((error && error.stack) || error)
+    )
   })
-  .finally(() => {
+  .finally(async () => {
+    // Round 31: as on the normal path, every tracked child is terminated and its exit awaited before the files go.
+    if (!(await terminateAll()))
+      console.log(
+        `# still running at the end: ${running()
+          .map((s) => `${s.label} pid ${s.child.pid}`)
+          .join(', ')}`
+      )
     cleanup()
     fs.rmSync(gateRoot, { recursive: true, force: true })
     console.log(`# seeds: ${seeds.ok} held, ${seeds.failed} failed`)
