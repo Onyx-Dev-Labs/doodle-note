@@ -3809,6 +3809,31 @@ async function main() {
     )
   }
 
+  // 49. Round 33: earlier builds' File.Replace leftovers ("<state>~RF<hex>.TMP": a copy of an old state, no user content)
+  // are deleted once older than 10 minutes; a fresh one is left alone (it may be another helper's replace in progress).
+  {
+    await begin('49')
+    const id = crypto.randomBytes(16).toString('hex')
+    const stale = path.join(os.tmpdir(), `${recordPrefix}${id}.state~RF1a2b3.TMP`)
+    const fresh = path.join(os.tmpdir(), `${recordPrefix}${id}.state~RF4c5d6.TMP`)
+    fs.writeFileSync(stale, '{}')
+    fs.writeFileSync(fresh, '{}')
+    const old = new Date(Date.now() - 11 * 60 * 1000)
+    fs.utimesSync(stale, old, old)
+    const h = start(release)
+    await h.ready
+    await h.req('clipboard-offers')
+    const swept = !fs.existsSync(stale)
+    const kept = fs.existsSync(fresh)
+    await h.stop()
+    fs.rmSync(fresh, { force: true })
+    check(
+      "an earlier build's replace leftover older than 10 minutes is deleted; a fresh one is left alone",
+      swept && kept && h.logs.some((l) => /a stray replace leftover .* was deleted/.test(l)),
+      `swept ${swept}; fresh kept ${kept}; ${listing()}`
+    )
+  }
+
   // 34. Round 21, the NULL-window open experiment (decides Opus's lead on the runner's Windows build): process A opens
   // the clipboard with NULL (then with its own message-only window) and holds it; process B calls OpenClipboard(NULL)
   // once, enumerates, and closes at once (or holds); A enumerates again while B acts. One table row per combination.
