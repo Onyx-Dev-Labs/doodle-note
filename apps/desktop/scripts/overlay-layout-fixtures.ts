@@ -206,6 +206,88 @@ async function main(): Promise<void> {
     transcript: true
   })
 
+  // Round 29 (Astra P1): SAME-PAGE transitions, rendered one after another in one page (as the overlay does).
+  const offerA = offer({ record: 'a'.repeat(32) })
+  const offerB = offer({ record: 'b'.repeat(32), incomplete: true, missing: names })
+  const card = (o: ClipboardOffer, extra: Record<string, unknown> = {}): OverlayView =>
+    panelView({ kind: 'clipboard-offer', offer: o, ...extra }, base)
+  const notice = (missing: string[]): OverlayView =>
+    panelView({ kind: 'clipboard', problem: 'partial', missing }, base)
+  const sequences: Array<{
+    name: string
+    steps: Array<{ name: string; view: OverlayView; transcript: boolean }>
+  }> = [
+    {
+      name: 'pending, then the reply succeeds',
+      steps: [
+        { name: 'offer', view: card(offerA), transcript: false },
+        { name: 'Restoring…', view: card(offerA, { pending: true }), transcript: false },
+        { name: 'the completion notice', view: notice(['X (y)']), transcript: false },
+        { name: 'the next offer', view: card(offerB), transcript: false }
+      ]
+    },
+    {
+      name: 'pending, a timeout, then a retry',
+      steps: [
+        { name: 'offer', view: card(offerA), transcript: false },
+        { name: 'Restoring…', view: card(offerA, { pending: true }), transcript: false },
+        { name: 'no answer in time: Restore is back', view: card(offerA), transcript: false },
+        { name: 'the retry: Restoring…', view: card(offerA, { pending: true }), transcript: false },
+        { name: 'its reply: Restore is back', view: card(offerA), transcript: false }
+      ]
+    },
+    {
+      name: 'pending, then Dismiss and its confirmation',
+      steps: [
+        { name: 'Restoring…', view: card(offerA, { pending: true }), transcript: false },
+        {
+          name: 'Dismiss: Delete saved copy or Keep it',
+          view: card(offerA, { pending: true, confirmDelete: true }),
+          transcript: false
+        },
+        {
+          name: 'Keep it: Restoring… again',
+          view: card(offerA, { pending: true }),
+          transcript: false
+        },
+        {
+          name: 'the delete failed',
+          view: card(offerA, { confirmDelete: true, deleteFailed: true }),
+          transcript: false
+        },
+        { name: 'Keep it: the offer', view: card(offerA), transcript: false }
+      ]
+    },
+    {
+      name: 'repeated pending renders',
+      steps: [
+        { name: 'Restoring… 1', view: card(offerA, { pending: true }), transcript: false },
+        { name: 'Restoring… 2', view: card(offerA, { pending: true }), transcript: false },
+        { name: 'Restoring… 3', view: card(offerB, { pending: true }), transcript: false },
+        { name: 'the offer', view: card(offerB), transcript: false }
+      ]
+    },
+    {
+      name: 'a notice, its expiry, then the waiting incomplete offer',
+      steps: [
+        { name: 'the completion notice', view: notice(['X (y)']), transcript: false },
+        { name: 'expired: the waiting incomplete offer', view: card(offerB), transcript: false },
+        {
+          name: 'its Restore: Restoring…',
+          view: card(offerB, { pending: true }),
+          transcript: false
+        },
+        { name: 'its completion notice', view: notice(names), transcript: false },
+        {
+          name: 'the recovery card after a dictation',
+          view: recovery('insertion-uncertain', notSaved('too-large', false)),
+          transcript: true
+        },
+        { name: 'the offer again', view: card(offerA), transcript: false }
+      ]
+    }
+  ]
+
   const html = overlayHtml()
   if (!html.includes('@font-face{font-family:"Doodle Figtree"'))
     throw new Error('the page was built without the bundled Figtree')
@@ -216,10 +298,16 @@ async function main(): Promise<void> {
       actionPattern: OVERLAY_ACTION_URL.source,
       font: 'Doodle Figtree',
       // Windows sizes: the growth rule is Windows-only (round 25).
-      cases: cases.map((c) => ({ ...c, size: overlaySize(c.view, 'win32') }))
+      cases: cases.map((c) => ({ ...c, size: overlaySize(c.view, 'win32') })),
+      sequences: sequences.map((q) => ({
+        name: q.name,
+        steps: q.steps.map((step) => ({ ...step, size: overlaySize(step.view, 'win32') }))
+      }))
     })
   )
-  console.log(`wrote ${cases.length} overlay cards to ${out}`)
+  console.log(
+    `wrote ${cases.length} overlay cards and ${sequences.length} same-page sequences (${sequences.reduce((n, q) => n + q.steps.length, 0)} steps) to ${out}`
+  )
 }
 
 if (require.main === module)
