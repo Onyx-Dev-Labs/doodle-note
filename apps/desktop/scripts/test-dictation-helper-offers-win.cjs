@@ -2527,8 +2527,12 @@ async function main() {
         })
       : null
     const after = observe()
-    await z.stop()
     const left = recordFiles().length
+    // The record stays for Dismiss (round 30: and this case ends clean through it, as the user would, in the same
+    // helper: another helper without the read-back hook finds the saved content already whole on the clipboard and
+    // deletes the record at its start, correctly, so it would never be offered there).
+    const gone = offer ? await z.req('clipboard-dismiss', { record: offer.record }) : null
+    await z.stop()
     check(
       "a record with no user content left (its only content lost on read-back): offered with content 0; the user's Restore is refused before emptying (nothing-to-restore), the clipboard unchanged, the record kept",
       seeded &&
@@ -2543,17 +2547,10 @@ async function main() {
         left === files,
       `${JSON.stringify(offer)}; ${JSON.stringify(answer)}; sequence ${before.sequence} -> ${after.sequence}; ${files} -> ${left} files`
     )
-    // The record stays for Dismiss (round 30: and this case ends clean through it, as the user would).
-    const r = start(release)
-    await r.ready
-    const again = await r.req('clipboard-offers')
-    const kept = again && again.offers.find((o) => offer && o.record === offer.record)
-    const gone = kept ? await r.req('clipboard-dismiss', { record: kept.record }) : null
-    await r.stop()
     check(
       "and the user's Dismiss of that record deletes every file",
       !!gone && gone.dismissed === true && prefixFiles().length === 0,
-      `${JSON.stringify(again)}; ${JSON.stringify(gone)}; ${listing()}`
+      `${JSON.stringify(gone)}; ${listing()}`
     )
   }
 
