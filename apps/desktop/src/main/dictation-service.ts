@@ -428,7 +428,15 @@ export class DictationService {
    * COMPLETED EXACTLY ONCE, by whichever of its recovered event or its reply comes first (the helper sends the
    * event before the reply; a request that timed out completes by its event alone); the other is consumed silently.
    */
-  private readonly restoreRequests = new Map<string, { completed: boolean }>()
+  private readonly restoreRequests = new Map<
+    string,
+    { completed: boolean; notice?: OverlayPanel }
+  >()
+  /**
+   * Round 27 (Astra): records whose Restore is outstanding (sent, no reply yet). A further click for one of them is
+   * ignored (the client would only queue it behind the first); a click after the reply (a retry) works.
+   */
+  private readonly restoreInFlight = new Set<string>()
   /**
    * Round 25: offers the helper refused as nothing-to-restore. A list reload (an older helper sends no content count)
    * never brings their Restore back.
@@ -584,10 +592,26 @@ export class DictationService {
   private async restoreOffer(): Promise<void> {
     const offer = this.currentOffer()
     if (!offer || !this.deps.helper.restoreClipboardOffer) return
+    if (this.restoreInFlight.has(offer.record)) {
+      this.deps.log(
+        'clipboard offer: a Restore of this record is still outstanding; the click is ignored'
+      )
+      return
+    }
+    this.restoreInFlight.add(offer.record)
+    try {
+      await this.restoreOfferOnce(offer)
+    } finally {
+      this.restoreInFlight.delete(offer.record)
+    }
+  }
+
+  private async restoreOfferOnce(offer: ClipboardOffer): Promise<void> {
+    if (!this.deps.helper.restoreClipboardOffer) return
     const changed = this.offerChanged?.record === offer.record ? this.offerChanged : null
     const sequence = changed?.sequence ?? offer.sequence
     // A new request for this record (a retry replaces a timed-out one): completed once, by its event or its reply.
-    const request = { completed: false }
+    const request: { completed: boolean; notice?: OverlayPanel } = { completed: false }
     this.restoreRequests.delete(offer.record)
     this.restoreRequests.set(offer.record, request)
     while (this.restoreRequests.size > 20)
@@ -651,15 +675,21 @@ export class DictationService {
       done.result === 'restored-partially'
     ) {
       const problem = clipboardProblem(done.result, undefined)
-      // Completed by its recovered event already: this reply is consumed silently (exactly one notice).
+      // Completed by its recovered event already: this reply raises no second notice (exactly one).
       const already = request.completed
       request.completed = true
       await this.offerResolved(offer.record)
-      if (problem && !already)
-        this.setPanel(
-          { kind: 'clipboard', problem, ...(done.missing ? { missing: done.missing } : {}) },
-          NOTICE_MS
-        )
+      // Round 27 (Astra): the offer list's refresh above cleared the panel; the notice stays visible. One the event
+      // already raised is shown again, NOT counted as another notice.
+      const notice: OverlayPanel | undefined = already
+        ? request.notice
+        : problem
+          ? { kind: 'clipboard', problem, ...(done.missing ? { missing: done.missing } : {}) }
+          : undefined
+      if (notice) {
+        request.notice = notice
+        this.setPanel(notice, NOTICE_MS, !already)
+      }
       return
     }
     if (done.result === 'gone') await this.offerResolved(offer.record)
@@ -1894,8 +1924,8 @@ export class DictationService {
   /** The last clipboard notices raised (their sentences; the newest 20), for the log and the tests (round 25). */
   private readonly noticesRaised: string[] = []
 
-  private setPanel(panel: OverlayPanel | null, ms = 0): void {
-    if (panel?.kind === 'clipboard') {
+  private setPanel(panel: OverlayPanel | null, ms = 0, count = true): void {
+    if (panel?.kind === 'clipboard' && count) {
       this.noticesRaised.push(
         clipboardProblemMessage(panel.problem, panel.missing, panel.reason, panel.delivered)
       )
@@ -2171,11 +2201,10 @@ export class DictationService {
       request.completed = true
       const late = clipboardProblem(clipboard, undefined)
       this.deps.log(`clipboard: a Restore result by its event: ${clipboard}`)
-      if (late)
-        this.setPanel(
-          { kind: 'clipboard', problem: late, ...(missing ? { missing } : {}) },
-          NOTICE_MS
-        )
+      if (late) {
+        request.notice = { kind: 'clipboard', problem: late, ...(missing ? { missing } : {}) }
+        this.setPanel(request.notice, NOTICE_MS)
+      }
       return
     }
     // Round 26 (Astra): an event that names neither a record nor a delivery (an older helper) never changes a
