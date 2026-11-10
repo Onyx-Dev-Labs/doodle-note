@@ -471,12 +471,18 @@ is about 31.6 MiB, over the 16 MiB cap) now refuses to dictate by paste instead 
 the cap is the alternative. The user is told why: "Your clipboard holds something too large to save (such as a large
 screenshot), so DoodleNote did not paste with it and left your clipboard as it was." When the text was NOT inserted,
 it adds "Copy something smaller first, or copy the dictated text from DoodleNote and paste it yourself."; after a
-typing fallback that put the text in it does not (round 24: no double paste). Every path that does not paste with
-the clipboard gives the app a reason, and each has its own sentence (round 24): too-large, unrendered,
+typing fallback that put the text in it does not (round 24: no double paste). Scope, stated exactly (round 26): every
+REFUSAL BEFORE OUR EMPTYCLIPBOARD, in the save and in the write up to its empty, gives the app a reason, and each has
+its own sentence (round 24): too-large, unrendered,
 nothing-savable, owner-unresponsive, zero-sequence, clipboard-changed (it changed during the save), clipboard-busy
 (another app held it when the write went to open it; round 25), empty-failed (EmptyClipboard failed; round 25), no-record (the
 transaction, or the write's own first journal, could not be written down), deadline, no-window, unreadable; an
-unknown reason falls back to the plain sentence. The one rule applies at the user's Restore too (round 24): an
+unknown reason falls back to the plain sentence. Other paths that do not paste report through their own channels,
+not this notice: a target that fails validation, a delivery past its deadline and the guards after our write
+(focus, password, modifiers, the clipboard changing before Ctrl+V) keep the text on the recovery card with their
+own message; a failed input injection is its own failure; an abandoned write and its rollback report the late
+clipboard result; and a foreign clipboard found right before Ctrl+V goes to typing with the clipboard reported
+user-changed. The one rule applies at the user's Restore too (round 24): an
 incomplete record with no user content (an all-skipped record of an earlier build, or one whose only content format
 was lost on read-back) is never restored: the helper answers "nothing-to-restore" before emptying anything, the offer
 counts the user content it holds (`content`, not `formats`, which also counts flags and CF_LOCALE), and its card
@@ -491,7 +497,10 @@ gives it, checks that exactly the buttons the view asked for are shown and in vi
 clicks each button through the overlay window's own URL pattern. An offer card's buttons name the record the page
 shows, and the app acts only on that record (a click never reaches an offer that became current since). A Restore
 that got no answer in time is matched to its later result by its record (round 25: a rebuilt record has no
-delivery); an event that names neither a delivery nor a record never changes the current notice.
+delivery). Round 26: each user's Restore request completes EXACTLY ONCE, by whichever of its recovered event or its
+reply comes first (the helper sends the event first; a request that timed out completes by its event); the other,
+and any repeated event, is consumed silently. An event that names neither a delivery nor a record never changes a
+notice, whether or not a delivery has happened yet.
 
 | Class | What | The save | The put-back | What the user is told |
 | --- | --- | --- | --- | --- |
