@@ -1189,16 +1189,9 @@ namespace DoodleNote.DictationHelper
 
             // Round 30: each step of the write and when it was reached, so a write that runs past its budget is
             // logged with where it was (CI run 42842819157 could only infer it).
-            readonly Stopwatch clock = Stopwatch.StartNew();
-            readonly System.Text.StringBuilder steps = new System.Text.StringBuilder();
-            public void Mark(string step)
-            {
-                lock (steps) steps.Append(steps.Length == 0 ? "" : ", ").Append(step).Append(" at ").Append(clock.ElapsedMilliseconds).Append(" ms");
-            }
-            public string Timeline()
-            {
-                lock (steps) return (steps.Length == 0 ? "not opened yet" : steps.ToString()) + "; now " + clock.ElapsedMilliseconds + " ms";
-            }
+            readonly StepTimeline steps = new StepTimeline();
+            public void Mark(string step) { steps.Mark(step); }
+            public string Timeline() { return steps.Describe("not opened yet"); }
         }
 
         /// <summary>
@@ -1357,6 +1350,16 @@ namespace DoodleNote.DictationHelper
                 // its EmptyClipboard), without needing one. Round 30: or held at a gate (the late path, forced).
                 TestMode.Gate("EMPTY");
                 TestMode.Stall("EMPTY_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_EMPTY_STALL_MS", 0));
+                // Round 31 (Opus): a write the caller already gave up on (its budget ran out before this point) does not
+                // empty the clipboard at all: nothing of the user's is taken off it, so nothing has to be put back. A write
+                // abandoned DURING EmptyClipboard (an owner stalling in WM_DESTROYCLIPBOARD) still rolls back below.
+                if (job != null && job.Abandoned)
+                {
+                    ownership.NotStarted = "late";
+                    job.Mark("abandoned before emptying");
+                    Wire.Log("the clipboard write ran past its budget before emptying: nothing emptied, the clipboard left as it is");
+                    return false;
+                }
                 if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_EMPTY") != "1" && Native.EmptyClipboard())
                 {
                     // Round 23 (B1): the irreversible fact FIRST, on the very next statement: whatever throws from here
@@ -1770,6 +1773,24 @@ namespace DoodleNote.DictationHelper
                 + "+" + ((long)Native.GetTickCount64() - started) + " ms; sequence " + sequenceBefore + " -> " + after + "; EmptyClipboard " + empty
                 + "; SetClipboardData [" + sets + "]; CloseClipboard " + (ok ? "ok" : "FAILED") + " (error " + error + "); formats after close "
                 + count + (count == 0 ? " (error " + countError + ")" : ""));
+        }
+    }
+
+    /// <summary>
+    /// Round 30/31: the steps of one clipboard operation and when each was reached (ms since it began), for the log:
+    /// a write past its budget, the user's Restore. Steps and times only, never content. Thread-safe.
+    /// </summary>
+    internal sealed class StepTimeline
+    {
+        readonly Stopwatch clock = Stopwatch.StartNew();
+        readonly System.Text.StringBuilder steps = new System.Text.StringBuilder();
+        public void Mark(string step)
+        {
+            lock (steps) steps.Append(steps.Length == 0 ? "" : ", ").Append(step).Append(" at ").Append(clock.ElapsedMilliseconds).Append(" ms");
+        }
+        public string Describe(string none = "no step yet")
+        {
+            lock (steps) return (steps.Length == 0 ? none : steps.ToString()) + "; now " + clock.ElapsedMilliseconds + " ms";
         }
     }
 
