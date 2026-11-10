@@ -1452,7 +1452,7 @@ namespace DoodleNote.DictationHelper.Tests
         }
 
         /// <summary>Round 34-35: the unchanged-since-capture deletion proof and every guard it needs.</summary>
-        public static void TheUnchangedSinceCaptureProofNeedsACompleteObservationInTheSameWindowStation() // round 36: every guard isolated
+        public static void TheUnchangedSinceCaptureProofNeedsACompleteObservationInTheSameWindowStation() // round 36-37: the guards isolated (see below)
         {
             Func<RecordFacts> facts = () => new RecordFacts { Stage = "emptying", SequenceAtStage = 40, BootId = PendingClipboard.CurrentBootId, WindowStation = PendingClipboard.windowStation };
             Func<ClipboardView> view = () => new ClipboardView { Sequence = 40 };
@@ -1471,7 +1471,9 @@ namespace DoodleNote.DictationHelper.Tests
             RecordFacts boot = facts(); boot.BootId = "another-boot";
             Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(boot, view(), LogonMatch.Same), "another boot");
             Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(facts(), new ClipboardView { Sequence = 0 }, LogonMatch.Same), "a zero is no evidence");
-            // Round 36 (Astra P3, Opus): each guard isolated, so that removing any one of them fails here.
+            // Round 36 (Astra P3, Opus): the guards isolated. Round 37 (Opus nit), stated exactly: the two non-zero guards
+            // (capture != 0, now != 0) are redundant with each other given the equality: removing EITHER alone fails nothing
+            // by design; removing BOTH fails "both zero". Every other guard fails a case of its own when removed.
             RecordFacts zero = facts(); zero.SequenceAtStage = 0;
             Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(zero, new ClipboardView { Sequence = 0 }, LogonMatch.Same), "both zero (capture and now): no evidence, though they are equal");
             Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(facts(), null, LogonMatch.Same), "no view at all");
