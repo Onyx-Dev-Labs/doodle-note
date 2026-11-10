@@ -377,15 +377,20 @@ Clipboard: the helper writes to the clipboard only over a save that is POSITIVEL
 below); otherwise it does not touch the clipboard at all, and the text is typed (classic text boxes) or kept for
 copying. A copy the user makes while we save is never overwritten. How long the save takes is bounded by a slow
 owner's render, not by us. Our own write (open, empty, set,
-close, and the journal of its stages, written under the same open) runs on its own thread for at most 1 s; past
-that (an owner that answered the WM_NULL probe and then stalls in WM_DESTROYCLIPBOARD, or a journal on a slow disk)
-the paste gives up (typing may still run), and when the write ends the late path puts the user's content back,
-never ours (and tells the app, which updates the warning it showed). Round 30: the log says where the write was
-when its budget ran out and when it ended (opened, journaled emptying, emptied, journaled emptied, set, closed,
+close, and the journal of its stages, written under the same open) runs on its own thread; the paste waits for it at
+most 1 s. Past that (an owner that answered the WM_NULL probe and then stalls in WM_DESTROYCLIPBOARD, or a journal on
+a slow disk) the paste gives up (typing may still run), while the write thread itself goes on for as long as its
+step takes: when it ends, the late path puts the user's content back, never ours, and tells the app, which updates the
+warning it showed. If another app changed the clipboard before that late confirmation (added a format, replaced a text
+form, copied its own content), the late path deliberately writes nothing: the record is kept as an offer and the
+changed clipboard is left exactly as that app left it, until the user's Restore. Round 30: the log says where the write
+was when the 1 s ran out and when it ended (opened, journaled emptying, emptied, journaled emptied, set, closed,
 journaled written, each with its time), never a guessed cause. In CI the late path has its own end-to-end cases,
-forced by test-build gates under the real 1 s budget (before emptying; after our write closed; and a change before
-the late confirmation: an addition, CF_TEXT replaced, another app's copy); every other case runs with a 60 s
-budget, so its outcome is the path it tests, whatever the runner's speed.
+forced by test-build gates under the real 1 s budget (before emptying; after our write closed; and a change before the
+late confirmation, checked byte for byte and by sequence); every other case runs with a 60 s budget so its outcome is
+the path it tests, whatever the runner's speed. That longer budget would hide an ordinary write getting slower, so a
+performance canary runs ten ordinary writes under the real budget: their outcome is checked, their times are reported
+(a write over budget or over 500 ms raises a CI warning, not a failure, because a slow runner window can do that).
 
 Each paste is a clipboard transaction with a record: the saved clipboard (DPAPI-encrypted for the
 user, with whether the save was complete, the transaction's random nonce and the dictated text's
