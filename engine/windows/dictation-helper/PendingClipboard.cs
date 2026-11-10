@@ -427,7 +427,6 @@ namespace DoodleNote.DictationHelper
         static void JournalTrace(string id, string stage, bool durable, Stopwatch took)
         {
             bool inOpen = ClipboardText.OpenOnThisThread;
-            if (inOpen) Wire.Log("ERROR: a clipboard journal write ran inside a clipboard open (" + stage + ")");
             TestMode.Trace("journal " + stage + " " + id.Substring(0, Math.Min(8, id.Length)) + " durable=" + durable + " in-open=" + inOpen + " took " + took.ElapsedMilliseconds + " ms");
         }
 
@@ -655,6 +654,9 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         static void WriteStateJson(string path, string json, bool durable, PendingRecord publish = null)
         {
+            // Round 33: EVERY state write (also a recovery's offer facts and offer-only marks) is checked: never inside a
+            // clipboard open (the CI run fails on this line).
+            if (ClipboardText.OpenOnThisThread) Wire.Log("ERROR: a clipboard journal write ran inside a clipboard open (" + Path.GetFileName(path) + ")");
             string tmp = path + ".tmp";
             byte[] bytes = Encoding.UTF8.GetBytes(json);
             using (FileStream stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, durable ? FileOptions.WriteThrough : FileOptions.None))
