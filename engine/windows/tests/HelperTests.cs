@@ -618,6 +618,7 @@ namespace DoodleNote.DictationHelper.Tests
             }
             finally
             {
+                PendingClipboard.DrainJournal(10000); // round 33: queued steps run before the directory changes back
                 PendingClipboard.Directory = old;
                 try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
             }
@@ -1170,16 +1171,18 @@ namespace DoodleNote.DictationHelper.Tests
             }
             finally
             {
+                PendingClipboard.DrainJournal(10000); // round 33: queued steps run before the directory changes back
                 PendingClipboard.Directory = old;
                 try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
             }
         }
 
-        public static void ASavedStageRecordIsDeletedEvenFromAnotherBoot()
+        public static void ARecordIsNeverDeletedByItsStageAlone()
         {
-            // Pins the CURRENT behaviour (Opus round 18): a record whose journal says "saved" (nothing was emptied: our
-            // journal precedes any EmptyClipboard of ours) is deleted on sight, also from another boot; nothing is
-            // written. Test only: whether a reboot should change that is an owner question, not changed here.
+            // Round 33 (a), a directed change (until round 32 this test pinned: a "saved" record is deleted on sight, also
+            // from another boot). Begin's first durable state is "emptying" ("may be emptied"); no stage, neither that nor
+            // an earlier build's "saved", deletes a record: recovery decides by CONTENT, and here (no clipboard window) the
+            // clipboard cannot be looked at, so the record is kept.
             string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dn-pending-saved-" + Guid.NewGuid().ToString("N"));
             System.IO.Directory.CreateDirectory(dir);
             string old = PendingClipboard.Directory;
@@ -1192,15 +1195,20 @@ namespace DoodleNote.DictationHelper.Tests
                 ((HashSet<string>)typeof(PendingClipboard).GetField("inFlight", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null)).Remove(record.Id);
                 string state = System.IO.Directory.GetFiles(dir, "*.state").Single();
                 var parsed = Wire.Parse(System.IO.File.ReadAllText(state));
-                Assert.Equal("saved", Wire.Str(parsed, "stage"), "Begin journals \"saved\"");
+                Assert.Equal("emptying", Wire.Str(parsed, "stage"), "Begin's first durable state is \"emptying\"");
                 parsed["bootId"] = "an-earlier-boot";
                 System.IO.File.WriteAllText(state, Wire.Serialize(parsed));
                 Assert.Equal(null, RecordFacts.Validate(Wire.Parse(System.IO.File.ReadAllText(state)), record.Id), "still a valid state");
                 PendingClipboard.RecoverLeftover("test");
-                Assert.Equal(false, PendingClipboard.OnDisk(record.Id), "a \"saved\" record of another boot: deleted on sight (current behaviour)");
+                Assert.Equal(true, PendingClipboard.OnDisk(record.Id), "an \"emptying\" record of another boot: kept (never deleted by its stage)");
+                parsed["stage"] = "saved";
+                System.IO.File.WriteAllText(state, Wire.Serialize(parsed));
+                PendingClipboard.RecoverLeftover("test");
+                Assert.Equal(true, PendingClipboard.OnDisk(record.Id), "an earlier build's \"saved\" record: kept too (the old stage rule is gone)");
             }
             finally
             {
+                PendingClipboard.DrainJournal(10000); // round 33: queued steps run before the directory changes back
                 PendingClipboard.Directory = old;
                 try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
             }
@@ -1223,6 +1231,7 @@ namespace DoodleNote.DictationHelper.Tests
                 using (new System.IO.FileStream(payload, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read))
                 {
                     PendingClipboard.Finish(record, "restored");
+                    Assert.Equal(true, PendingClipboard.DrainJournal(10000), "the journal writer ran its queue (round 33: settlement is queued)");
                     Assert.Equal(true, PendingClipboard.OnDisk(record.Id), "the deletion waited (the payload was held): intact");
                     Assert.Equal("settled", Wire.Str(Wire.Parse(System.IO.File.ReadAllText(state)), "stage"), "but journaled settled before it left in-flight");
                 }
@@ -1232,6 +1241,7 @@ namespace DoodleNote.DictationHelper.Tests
             }
             finally
             {
+                PendingClipboard.DrainJournal(10000); // round 33: queued steps run before the directory changes back
                 PendingClipboard.Directory = old;
                 try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
             }
@@ -1391,6 +1401,7 @@ namespace DoodleNote.DictationHelper.Tests
             }
             finally
             {
+                PendingClipboard.DrainJournal(10000); // round 33: queued steps run before the directory changes back
                 PendingClipboard.Directory = old;
                 PendingClipboard.TestPayloadDelayMs = oldDelay;
                 PendingClipboard.BeginDeadlineMs = oldDeadline;
