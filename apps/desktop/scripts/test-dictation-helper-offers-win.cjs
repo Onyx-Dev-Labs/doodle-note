@@ -3109,6 +3109,27 @@ async function main() {
   // clipboard, the user's content goes back, the record is settled; (b) past it after our write closed (a slow journal):
   // the late thread confirms and restores; (c)-(e) a change before that late confirmation (an addition, CF_TEXT replaced,
   // another app's copy): kept as an offer, the change untouched, and the user's Restore gives the clipboard back.
+  // Round 31 (Astra): the change is proven by CONTENT, not format names: the changed bytes (the added format, the
+  // replaced CF_TEXT, the other app's Unicode text and custom bytes) and the clipboard sequence are read at the
+  // confirmation's gate (Windows' synthesized forms materialized first, so a later read moves nothing) and again after
+  // the late result: identical, so nothing was written over the change; after the user's Restore the user's own text and
+  // bytes are read back.
+  const contentSnapshot = () => {
+    for (const f of [1, 7, 16]) readFormat(f)
+    if (!open()) return null
+    const hex = (b) => (b ? b.toString('hex') : 'absent')
+    const snap = {
+      sequence: GetClipboardSequenceNumber(),
+      unicode: hex(readBytes(13)),
+      ansi: hex(readBytes(1)),
+      extra: hex(readBytes(RegisterClipboardFormatW(EXTRA))),
+      added: hex(readBytes(RegisterClipboardFormatW('DoodleNote.CI.Added')))
+    }
+    CloseClipboard()
+    return snap
+  }
+  const holds = (snapHex, bytes) => !!snapHex && snapHex.startsWith(bytes.toString('hex'))
+  const theirCopy = 'a copy by another app'
   for (const [label, gates, change, expect] of [
     ['(a) before emptying', ['EMPTY'], null, 'restored'],
     ['(b) after our write closed', ['WRITTEN'], null, 'restored'],
@@ -3133,22 +3154,40 @@ async function main() {
     const dictated = `dictated text LT ${label.slice(1, 2)}`
     // The write waits at its gate: the transaction answers once the budget is over (the late path).
     const result = await a.req('__clipboard-txn', { text: dictated, holdMs: 300 })
-    const budgetLine =
-      a.logs.find((l) => /the clipboard write ran past its 1000 ms budget/.test(l)) || null
+    // Round 31: awaited (stderr and the stdout reply are independent streams).
+    const budgetLine = await a.waitLog(/the clipboard write ran past its 1000 ms budget/, {
+      ms: 10000
+    })
     // Before emptying the stalled write holds the clipboard open (nothing to read); after its close our text is there.
     const during = gates[0] === 'WRITTEN' ? text() : null
     a.open(gates[0])
     let theirs = null
+    let changed = null
+    let changeThere = true
     if (change) {
       await atLine(a, 'the late confirmation at its gate', /test-trace: gate CONFIRM#1 waiting/)
       if (change === 'add') addFormat()
       if (change === 'replace') replaceFormat(1, Buffer.from('replaced ANSI\0', 'latin1'))
-      if (change === 'copy') copyMulti('a copy by another app')
+      if (change === 'copy') copyMulti(theirCopy)
       theirs = names()
+      changed = contentSnapshot()
+      changeThere =
+        !!changed &&
+        (change === 'add'
+          ? holds(changed.added, Buffer.from('added later')) &&
+            holds(changed.unicode, Buffer.from(dictated + '\0', 'utf16le'))
+          : change === 'replace'
+            ? holds(changed.ansi, Buffer.from('replaced ANSI\0', 'latin1')) &&
+              holds(changed.unicode, Buffer.from(dictated + '\0', 'utf16le'))
+            : holds(changed.unicode, Buffer.from(theirCopy + '\0', 'utf16le')) &&
+              holds(changed.extra, Buffer.from('extra bytes for ' + theirCopy)))
       a.open('CONFIRM')
     }
     const ended = await a.waitEvent((e) => e.event === 'clipboard' && e.phase === 'late-restore')
     const endLine = await a.waitLog(/the late clipboard write ended \(/)
+    // The change, byte for byte and at the same sequence, once the late result is out (the event is sent after the late
+    // write's last step), before the helper exits: nothing was written over it.
+    const unchanged = change ? JSON.stringify(contentSnapshot()) === JSON.stringify(changed) : true
     await a.stop()
     const after = observe()
     const files = recordFiles().length
@@ -3171,8 +3210,8 @@ async function main() {
         !!endLine &&
         endLine.endsWith(': ' + expect) &&
         (expect === 'restored' ? userBack && files === 0 : files === 2) &&
-        (change === null || names() === theirs),
-      `${JSON.stringify(result)}; ${budgetLine}; during ${during}; ${JSON.stringify(ended)}; ${endLine}; ${files} files; ${names()}`
+        (change === null || (names() === theirs && changeThere && unchanged)),
+      `${JSON.stringify(result)}; ${budgetLine}; during ${during}; ${JSON.stringify(ended)}; ${endLine}; ${files} files; ${names()}; the change there ${changeThere}, unchanged after ${unchanged}; at the gate ${JSON.stringify(changed)}`
     )
     if (expect !== 'restored') {
       const h = start(release)
@@ -3180,15 +3219,18 @@ async function main() {
       const listed = await h.req('clipboard-offers')
       const offer = listed && listed.offers[0]
       const restored = offer ? await restoreConfirming(h, offer) : null
+      const back = observe()
       check(
-        `the late path ${label}: offered by the release helper; the user's Restore gives back the user clipboard`,
+        `the late path ${label}: offered by the release helper; the user's Restore gives back the user clipboard (its text and bytes read back)`,
         !!offer &&
           listed.offers.length === 1 &&
           !!restored &&
           restored.result === 'restored' &&
+          back.text === user &&
+          back.extra === 'extra bytes for ' + user &&
           names() === userFormats &&
           recordFiles().length === 0,
-        `${JSON.stringify(listed)}; ${JSON.stringify(restored)}; ${names()}`
+        `${JSON.stringify(listed)}; ${JSON.stringify(restored)}; text ${back.text}; extra ${back.extra}; ${names()}`
       )
       await h.stop()
     }
