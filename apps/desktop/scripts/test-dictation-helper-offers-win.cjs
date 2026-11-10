@@ -309,6 +309,25 @@ function observe() {
   CloseClipboard()
   return seen
 }
+/**
+ * The clipboard's content as bytes, and its sequence (round 31; module-level since round 32): Windows' synthesized
+ * forms are materialized first, so a later read moves nothing; then, under one open, the sequence and the bytes of the
+ * Unicode text, CF_TEXT, the custom bytes and the added format.
+ */
+function contentSnapshot() {
+  for (const f of [1, 7, 16]) readFormat(f)
+  if (!open()) return null
+  const hex = (b) => (b ? b.toString('hex') : 'absent')
+  const snap = {
+    sequence: GetClipboardSequenceNumber(),
+    unicode: hex(readBytes(13)),
+    ansi: hex(readBytes(1)),
+    extra: hex(readBytes(RegisterClipboardFormatW(EXTRA))),
+    added: hex(readBytes(RegisterClipboardFormatW('DoodleNote.CI.Added')))
+  }
+  CloseClipboard()
+  return snap
+}
 function text() {
   if (!open()) return null
   const b = readBytes(13)
@@ -442,11 +461,11 @@ function helperProcesses() {
   try {
     text = execFileSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true })
   } catch (error) {
-    // Not a finding about the helper: said once per occurrence, and the direct-child and file checks still stand.
-    console.log(
-      `# tasklist failed (${String(error.message || error)}); orphan helper processes not checked here`
+    // Round 32 (Astra): an orphan check that could not run is UNKNOWN, never "none": the run stops (no clean state
+    // is claimed without being verified).
+    throw new Error(
+      `the orphan helper-process check could not run (tasklist: ${String(error.message || error)})`
     )
-    return []
   }
   const out = []
   for (const line of text.split(/\r?\n/)) {
@@ -742,13 +761,15 @@ function start(exe, env = {}, { gates = [], realBudget = false } = {}) {
      * The first log line from index `since` on that matches, within the deadline (null if none: the helper never got
      * there, or exited first). Test-ops lines "test-trace: ..." mark where it is (TestMode.Trace, Stall, Gate).
      */
+    // Round 32 (Astra): both stop early only once the helper's OUTPUT has closed (not at its exit, when lines can
+    // still be in the pipe).
     waitLog: async (re, { since = 0, ms = 20000 } = {}) => {
       const find = () => logs.slice(since).find((l) => re.test(l))
-      await until(() => !!find() || !alive(child), ms)
+      await until(() => !!find() || closed, ms)
       return find() || null
     },
     waitEvent: async (predicate, ms = 20000) => {
-      await until(() => events.some(predicate) || !alive(child), ms)
+      await until(() => events.some(predicate) || closed, ms)
       return events.find(predicate) || null
     },
     // Killed and its exit OBSERVED (round 19): a restarted helper never runs beside it.
@@ -757,9 +778,13 @@ function start(exe, env = {}, { gates = [], realBudget = false } = {}) {
       child.kill()
       const exited = await until(() => !alive(child), 10000)
       if (!exited) console.log(`# helper ${h.n} did not exit within 10 s of its kill`)
+      // Round 32 (Astra): incomplete output is a failed precondition, never a silent success.
       if (exited && !(await until(() => closed, 3000)))
-        console.log(`# helper ${h.n}: its output did not close within 3 s of its exit`)
-      return exited
+        check(
+          `${frame.label}: helper ${h.n}'s output closed within 3 s of its exit (its log is complete)`,
+          false
+        )
+      return exited && closed
     },
     stop: async () => {
       openAll()
@@ -767,8 +792,11 @@ function start(exe, env = {}, { gates = [], realBudget = false } = {}) {
       const exited = await until(() => !alive(child), 20000)
       if (!exited) console.log(`# helper ${h.n} did not exit within 20 s of its input closing`)
       if (exited && !(await until(() => closed, 3000)))
-        console.log(`# helper ${h.n}: its output did not close within 3 s of its exit`)
-      return exited
+        check(
+          `${frame.label}: helper ${h.n}'s output closed within 3 s of its exit (its log is complete)`,
+          false
+        )
+      return exited && closed
     }
   }
   frame.helpers.push(h)
@@ -3202,8 +3230,10 @@ async function main() {
   // 41. Round 30, the late path made deterministic: our write runs past its budget (WriteBounded, the real 1 s: no
   // override here), forced by a gate. Attempt 1 of CI run 42842819157 took this path by chance in case 11 (and round
   // 29's attempt 1 in case 15): the product was right both times; the cases did not account for it. Each outcome:
-  // (a) past the budget before emptying (an owner stalling in WM_DESTROYCLIPBOARD): nothing of ours is ever on the
-  // clipboard, the user's content goes back, the record is settled; (b) past it after our write closed (a slow journal):
+  // (a) past the budget before emptying (the gate holds the write before its EmptyClipboard; it does not simulate an
+  // owner stalling INSIDE WM_DESTROYCLIPBOARD): since round 31 the abandonment is observed at the pre-empty check, so
+  // nothing is emptied and the user's clipboard is left untouched (bytes and sequence), the record settled; (b) past it
+  // after our write closed (a slow journal):
   // the late thread confirms and restores; (c)-(e) a change before that late confirmation (an addition, CF_TEXT replaced,
   // another app's copy): kept as an offer, the change untouched, and the user's Restore gives the clipboard back.
   // Round 31 (Astra): the change is proven by CONTENT, not format names: the changed bytes (the added format, the
@@ -3211,20 +3241,6 @@ async function main() {
   // confirmation's gate (Windows' synthesized forms materialized first, so a later read moves nothing) and again after
   // the late result: identical, so nothing was written over the change; after the user's Restore the user's own text and
   // bytes are read back.
-  const contentSnapshot = () => {
-    for (const f of [1, 7, 16]) readFormat(f)
-    if (!open()) return null
-    const hex = (b) => (b ? b.toString('hex') : 'absent')
-    const snap = {
-      sequence: GetClipboardSequenceNumber(),
-      unicode: hex(readBytes(13)),
-      ansi: hex(readBytes(1)),
-      extra: hex(readBytes(RegisterClipboardFormatW(EXTRA))),
-      added: hex(readBytes(RegisterClipboardFormatW('DoodleNote.CI.Added')))
-    }
-    CloseClipboard()
-    return snap
-  }
   const holds = (snapHex, bytes) => !!snapHex && snapHex.startsWith(bytes.toString('hex'))
   const theirCopy = 'a copy by another app'
   for (const [label, gates, change, expect] of [
@@ -3404,9 +3420,10 @@ async function main() {
   // 43. Round 31 (Astra): a performance canary. Every other case runs with a 60 s write budget, which would hide an
   // ordinary write getting slower; case 41 covers the late BRANCH, not normal performance. Here 10 ordinary writes run
   // under the real 1 s budget. Their OUTCOME is a check (fatal): each restored, or, if one ran late, its late result
-  // "restored" and the user's own text and bytes back. Their TIME is reported, not fatal: attempt 1 of run 42842819157
-  // showed this runner can take an ordinary write past 1 s in a slow window, so a fatal timing check would bring the
-  // flake back; a write over budget, or one over 500 ms, raises a GitHub warning annotation instead.
+  // "restored" with the user's own text and bytes back, or (round 32, Astra: the round-31 behaviour when the budget ran
+  // out before emptying) "untouched" with the clipboard's bytes AND sequence as before the write. Round 32 (Opus): their
+  // MEDIAN is fatal over 300 ms; a single write over budget or over 500 ms stays a GitHub warning (attempt 1 of run
+  // 42842819157 showed a slow runner window can take one write past 1 s).
   {
     await begin('43')
     const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { realBudget: true })
@@ -3416,6 +3433,7 @@ async function main() {
     let late = 0
     for (let n = 0; n < 10; n++) {
       copyMulti(user)
+      const beforeWrite = contentSnapshot()
       const mark = a.logs.length
       const r = await a.req('__clipboard-txn', { text: `dictated text canary ${n}`, holdMs: 100 })
       const isLate = !!r && /^late\|/.test(String(r.result))
@@ -3424,7 +3442,13 @@ async function main() {
         const ended = await a.waitEvent(
           (e) => e.event === 'clipboard' && e.phase === 'late-restore' && e.id === r.id
         )
-        if (!ended || ended.clipboard !== 'restored')
+        if (ended && ended.clipboard === 'untouched') {
+          const now = contentSnapshot()
+          if (JSON.stringify(now) !== JSON.stringify(beforeWrite))
+            wrong.push(
+              `#${n} late and "untouched", but the clipboard changed: ${JSON.stringify(beforeWrite)} -> ${JSON.stringify(now)}`
+            )
+        } else if (!ended || ended.clipboard !== 'restored')
           wrong.push(`#${n} late, then ${JSON.stringify(ended)}`)
       } else if (!r || !/^restored\|/.test(String(r.result)))
         wrong.push(`#${n} ${JSON.stringify(r)}`)
@@ -3447,13 +3471,20 @@ async function main() {
     const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : -1
     const max = sorted.length ? sorted[sorted.length - 1] : -1
     const summary = `10 ordinary writes under the real 1 s budget: median ${median} ms, max ${max} ms, ${late} over the budget (late path); times ${times.join(', ')}`
-    console.log(`# 43 performance canary (reported, not fatal): ${summary}`)
+    console.log(
+      `# 43 performance canary (median fatal over 300 ms; single writes reported): ${summary}`
+    )
     if (late > 0 || max > 500)
       console.log(`::warning title=Clipboard write performance canary::${summary}`)
     check(
-      'performance canary: 10 ordinary writes under the real 1 s budget each end correctly (restored, or late with the user clipboard back); their times are reported above',
+      'performance canary: 10 ordinary writes under the real 1 s budget each end correctly (restored; or late with the user clipboard back, or untouched with its bytes and sequence unchanged)',
       wrong.length === 0 && times.length === 10,
       wrong.join('; ')
+    )
+    check(
+      'performance canary: the median of the 10 ordinary writes is at most 300 ms',
+      times.length === 10 && median <= 300,
+      summary
     )
   }
 
@@ -3678,15 +3709,40 @@ main()
     )
   })
   .finally(async () => {
-    // Round 31: as on the normal path, every tracked child is terminated and its exit awaited before the files go.
-    if (!(await terminateAll()))
-      console.log(
-        `# still running at the end: ${running()
-          .map((s) => `${s.label} pid ${s.child.pid}`)
-          .join(', ')}`
+    // Round 32 (Astra): every tracked child terminated (exit observed) AND no helper-image process left (the orphan
+    // sweep, as in begin()) before anything is removed; otherwise a failed check names the survivors, and the record
+    // files and gates are PRESERVED for inspection.
+    const ended = await terminateAll()
+    let orphans = []
+    let orphanError = null
+    try {
+      for (const o of helperProcesses())
+        try {
+          execFileSync('taskkill', ['/F', '/PID', String(o.pid)], {
+            stdio: 'ignore',
+            windowsHide: true
+          })
+        } catch {
+          // verified below
+        }
+      await until(() => helperProcesses().length === 0, 10000, 250)
+      orphans = helperProcesses()
+    } catch (error) {
+      orphanError = String((error && error.message) || error)
+    }
+    if (ended && orphans.length === 0 && !orphanError) {
+      cleanup()
+      fs.rmSync(gateRoot, { recursive: true, force: true })
+    } else
+      check(
+        'the run ended with every process it started terminated and no helper process left (files preserved otherwise)',
+        false,
+        `still running: ${
+          running()
+            .map((s) => `${s.label} pid ${s.child.pid}`)
+            .join(', ') || 'none'
+        }; helper-image processes: ${orphans.map((o) => `${o.image} pid ${o.pid}`).join(', ') || (orphanError ? `unknown (${orphanError})` : 'none')}; files kept: ${listing()}; gates kept: ${gateRoot}`
       )
-    cleanup()
-    fs.rmSync(gateRoot, { recursive: true, force: true })
     console.log(`# seeds: ${seeds.ok} held, ${seeds.failed} failed`)
     for (const [group, t] of Object.entries(saveTally)) {
       console.log(
