@@ -817,6 +817,9 @@ async function atLine(h, what, re, opts = {}) {
 }
 const HOLDING = /test-trace: txn holding \S+ confirmed=True rejected=False/
 const PAYLOAD = /the saved clipboard was written down \(/
+// Round 33: the diagnostic journal is written asynchronously; a crash case kills only once its "written" step is done
+// (CI run 42883988202: kills during a journal write left File.Replace's ~RF temporaries; that write is atomic now).
+const JOURNALED_WRITTEN = /test-trace: journal written \S+ durable=False/
 /**
  * A kept, not provably ours record: the test-ops transaction is killed inside its put-back (after the first format
  * set back). Round 30: it waits for THIS helper's own stall line and its payload being on disk, and returns the id of
@@ -835,6 +838,7 @@ async function keptRecord(dictated) {
   await h.ready
   const reply = h.req('__clipboard-txn', { text: dictated, holdMs: 200 })
   const stalled = await h.waitLog(/test-trace: stall PUTBACK_STALL_MS/)
+  await h.waitLog(JOURNALED_WRITTEN)
   const payload = await h.waitLog(
     /the saved clipboard was written down|could not be written down|was not published/
   )
@@ -1079,6 +1083,11 @@ async function main() {
     void a.req('__clipboard-txn', { text: 'dictated text E' })
     await atLine(a, 'our write confirmed and held', HOLDING)
     await atLine(a, 'the payload on disk', PAYLOAD)
+    await atLine(
+      a,
+      'its "written" journal step done (no journal write in flight at the kill)',
+      JOURNALED_WRITTEN
+    )
     await a.kill()
     const replayed = replayAll()
     const h = start(release)
@@ -1117,6 +1126,11 @@ async function main() {
       'the restore stalled before its empty',
       /test-trace: stall RESTORE_STALL_BEFORE_EMPTY_MS/
     ))
+    await atLine(
+      a,
+      'its "written" journal step done (no journal write in flight at the kill)',
+      JOURNALED_WRITTEN
+    )
     await a.kill()
     const replayed = replayAll()
     const h = start(release)
@@ -1700,6 +1714,12 @@ async function main() {
         )
       else await atLine(a, 'our write confirmed and held', HOLDING)
       await atLine(a, 'the payload on disk', PAYLOAD)
+      if (stage === 'written')
+        await atLine(
+          a,
+          'its "written" journal step done (no journal write in flight at the kill)',
+          JOURNALED_WRITTEN
+        )
       await a.kill()
       const bin = recordFiles().find((f) => f.endsWith('.bin'))
       if (rename && bin)
@@ -1962,6 +1982,11 @@ async function main() {
     void a.req('__clipboard-txn', { text: 'dictated text F', holdMs: 300 })
     await atLine(a, label.startsWith('(a)') ? 'our write confirmed and held' : 'its stall', wait)
     await atLine(a, 'the payload on disk', PAYLOAD)
+    await atLine(
+      a,
+      'its "written" journal step done (no journal write in flight at the kill)',
+      JOURNALED_WRITTEN
+    )
     const exited = await a.kill()
     const before = names()
     const sequence = GetClipboardSequenceNumber()
@@ -2568,6 +2593,11 @@ async function main() {
         'the end of its put-back',
         /test-trace: stall PUTBACK_STALL_END_MS/
       )
+      await atLine(
+        h,
+        'its "written" journal step done (no journal write in flight at the kill)',
+        JOURNALED_WRITTEN
+      )
       await h.kill()
       live = { result: reached ? 'killed in its put-back' : 'did not reach its put-back' }
     }
@@ -2640,6 +2670,11 @@ async function main() {
       'the end of its put-back',
       /test-trace: stall PUTBACK_STALL_END_MS/
     ))
+    await atLine(
+      k,
+      'its "written" journal step done (no journal write in flight at the kill)',
+      JOURNALED_WRITTEN
+    )
     await k.kill()
     const files = recordFiles().length
     const z = start(testops, {
@@ -2705,6 +2740,11 @@ async function main() {
       'the end of its put-back',
       /test-trace: stall PUTBACK_STALL_END_MS/
     ))
+    await atLine(
+      k,
+      'its "written" journal step done (no journal write in flight at the kill)',
+      JOURNALED_WRITTEN
+    )
     await k.kill()
     const files = recordFiles().length
     const before = observe()
@@ -2889,6 +2929,11 @@ async function main() {
     if (killed) {
       await atLine(a, 'our write confirmed and held', HOLDING)
       await atLine(a, 'the payload on disk', PAYLOAD)
+      await atLine(
+        a,
+        'its "written" journal step done (no journal write in flight at the kill)',
+        JOURNALED_WRITTEN
+      )
       await a.kill()
     } else {
       live = await reply
@@ -3036,6 +3081,11 @@ async function main() {
     void a.req('__clipboard-txn', { text: 'dictated text W' })
     await atLine(a, 'our write confirmed and held', HOLDING)
     await atLine(a, 'the payload on disk', PAYLOAD)
+    await atLine(
+      a,
+      'its "written" journal step done (no journal write in flight at the kill)',
+      JOURNALED_WRITTEN
+    )
     await a.kill()
     const bin = recordFiles().find((f) => f.endsWith('.bin'))
     if (bin) fs.renameSync(path.join(os.tmpdir(), bin), path.join(os.tmpdir(), bin + '.tmp'))
