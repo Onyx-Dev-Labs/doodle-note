@@ -4105,6 +4105,146 @@ async function main() {
     )
   }
 
+  // 56. Round 37 (Astra P2, Opus): ONE kept-records check at a time, shared by the deliveries, and a check every delivery
+  // gave up on does nothing. A retry holds the recovery lock, stalled inside it; three deliveries in a row during that
+  // stall each refuse ("clipboard-busy") within their own allowance with nothing emptied, and all three wait on the SAME
+  // check (one check thread in all: the second and third join it). Once the lock is free that check, which no delivery
+  // waits for any more, skips. A fourth dictation then writes and holds its "paste": the clipboard holds our text, then
+  // the restore gives the user's copy back; no offer for it (only the earlier kept record, dismissed at the end).
+  {
+    await begin('56')
+    copyMulti(user)
+    await keptRecord('dictated text LK0')
+    const theirs = 'the copy for case 56 ' + identity
+    copyMulti(theirs)
+    const before = contentSnapshot()
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1' },
+      { gates: ['RETRY', 'SWEEP_RETRY', 'HOLD'] }
+    )
+    await a.ready
+    await atLine(a, 'the retry held before the lock', /test-trace: gate RETRY#1 waiting/)
+    a.open('RETRY')
+    const inside = await atLine(
+      a,
+      'the retry stalled inside the lock',
+      /test-trace: gate SWEEP_RETRY#1 waiting/
+    )
+    const refused = []
+    for (const n of [1, 2, 3]) {
+      const t0 = Date.now()
+      const r = await a.req('__clipboard-txn', { text: `dictated text LK${n}`, holdMs: 300 })
+      refused.push({ result: r && r.result, took: Date.now() - t0 })
+    }
+    const during = contentSnapshot()
+    const alive = () =>
+      a.logs
+        .map((l) => /test-trace: kept-records checks alive: (\d+)/.exec(l))
+        .filter(Boolean)
+        .map((m) => Number(m[1]))
+    const aliveStalled = alive()
+    const joined = a.logs.filter((l) =>
+      /joining the one still waiting for the recovery lock/.test(l)
+    ).length
+    a.open('SWEEP_RETRY') // the retry finishes; the shared check gets the lock after it, with no delivery waiting
+    const skipped = await atLine(
+      a,
+      'the abandoned check skipping',
+      /a kept-records check every delivery gave up on got the lock late: skipped/
+    )
+    const reply = a.req('__clipboard-txn', { text: 'dictated text LK4' })
+    await atLine(a, 'our write confirmed and held', HOLDING)
+    const written = text()
+    a.open('HOLD')
+    const fourth = await reply
+    await a.stop()
+    const back = observe()
+    const aliveAll = alive()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    for (const o of (listed && listed.offers) || [])
+      await h.req('clipboard-dismiss', { record: o.record })
+    await h.stop()
+    check(
+      'one kept-records check at a time: three deliveries during one stall each refuse within their own allowance ("clipboard-busy", nothing emptied) and share ONE check thread; that check, abandoned by all, skips once it gets the lock',
+      !!inside &&
+        refused.every((r) => r.result === 'clipboard-busy' && r.took >= 4500 && r.took < 8000) &&
+        JSON.stringify(during) === JSON.stringify(before) &&
+        aliveStalled.length === 1 &&
+        aliveStalled[0] === 1 &&
+        joined === 2 &&
+        !!skipped,
+      `${JSON.stringify(refused)}; alive ${JSON.stringify(aliveStalled)}; joined ${joined}; skipped ${!!skipped}`
+    )
+    check(
+      "a later dictation after the abandoned check: its write completes (our text on the clipboard), the restore gives the user's copy back, no offer for it; never more than one check thread",
+      written === 'dictated text LK4' &&
+        !!fourth &&
+        /^restored\|/.test(String(fourth.result)) &&
+        back.text === theirs &&
+        !!listed &&
+        listed.offers.length === 1 &&
+        aliveAll.length === 2 &&
+        aliveAll.every((n) => n === 1),
+      `written ${written}; ${JSON.stringify(fourth)}; text ${back.text}; alive ${JSON.stringify(aliveAll)}; ${JSON.stringify(listed)}`
+    )
+  }
+
+  // 57. Round 37 (Opus, the sweep-during-write variant): the 30-minute retention check runs while a delivery holds its
+  // "paste", stalled mid-way (the recovery lock held, the records listed); released, it reaches the kept record and does
+  // NOT open the clipboard ("a delivery is in flight"). The write completes (our text stays on the clipboard), the
+  // restore gives the user's copy back, no offer for it.
+  {
+    await begin('57')
+    copyMulti(user)
+    await keptRecord('dictated text LS0')
+    const theirs = 'the copy for case 57 ' + identity
+    copyMulti(theirs)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['SWEEP', 'HOLD'] })
+    await a.ready
+    await atLine(a, 'the start check at its gate', /test-trace: gate SWEEP#1 waiting/)
+    a.open('SWEEP')
+    await atLine(a, 'the start check done', /test-trace: gate SWEEP#1 opened/)
+    const reply = a.req('__clipboard-txn', { text: 'dictated text LS1' })
+    await atLine(a, "the delivery's check at its gate", /test-trace: gate SWEEP#2 waiting/)
+    a.open('SWEEP')
+    await atLine(a, 'our write confirmed and held', HOLDING)
+    const sweep = a.req('__retention-sweep')
+    await atLine(a, 'the retention check stalled mid-way', /test-trace: gate SWEEP#3 waiting/)
+    const mark = a.logs.length
+    a.open('SWEEP')
+    const swept = await sweep
+    const noLook = a.logs
+      .slice(mark)
+      .some((l) => /\(retention check\): a delivery is in flight: no clipboard look now/.test(l))
+    const during = text()
+    a.open('HOLD')
+    const done = await reply
+    await a.stop()
+    const back = observe()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    for (const o of (listed && listed.offers) || [])
+      await h.req('clipboard-dismiss', { record: o.record })
+    await h.stop()
+    check(
+      'the 30-minute retention check during a held write never opens the clipboard ("a delivery is in flight"): the write completes (our text still there), the restore gives the user\'s copy back, no offer for it',
+      !!swept &&
+        swept.result === 'swept' &&
+        noLook &&
+        during === 'dictated text LS1' &&
+        !!done &&
+        /^restored\|/.test(String(done.result)) &&
+        back.text === theirs &&
+        !!listed &&
+        listed.offers.length === 1,
+      `${JSON.stringify(swept)}; noLook ${noLook}; during ${during}; ${JSON.stringify(done)}; text ${back.text}; ${JSON.stringify(listed)}`
+    )
+  }
+
   // 47. Round 33 (b, f): the payload not on disk in time: the write is NOT established (no record, no paste: "no-record")
   // within the total bound (BeginDeadlineMs, 2 s), the clipboard untouched (bytes and sequence); the late payload
   // writer publishes nothing.
