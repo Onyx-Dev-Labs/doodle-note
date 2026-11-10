@@ -168,6 +168,8 @@ namespace DoodleNote.DictationHelper
         static string StatePath(string id) { return Path.Combine(Directory, Prefix + id + ".state"); }
         /// <summary>Exactly this identity's record files: the prefix, a 32-hex id, and nothing else (identity X never reads X-foo's).</summary>
         static Regex RecordName { get { return new Regex("^" + Regex.Escape(Prefix) + "([0-9a-f]{32})\\.(bin|state)(\\.tmp)?$"); } }
+        /// <summary>Round 33: File.Replace's temporary of an earlier build, for one of this identity's states.</summary>
+        static Regex ReplaceLeftover { get { return new Regex("^" + Regex.Escape(Prefix) + "[0-9a-f]{32}\\.state~RF[0-9a-f]+\\.TMP$", RegexOptions.IgnoreCase); } }
 
         static readonly string logon = Native.LogonId();
         static readonly int session = Process.GetCurrentProcess().SessionId;
@@ -666,18 +668,24 @@ namespace DoodleNote.DictationHelper
             }
             // Test build only (round 30): killed with the state's .tmp written and not yet in place (CI run 42842819157).
             TestMode.Stall("STATE_TMP_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_STATE_TMP_STALL_MS", 0));
-            if (publish == null) { MoveIntoPlace(tmp, path); return; }
+            if (publish == null) { MoveIntoPlace(tmp, path, durable); return; }
             lock (publish.Gate)
             {
                 if (publish.Settled) { TryDelete(tmp); return; }
-                MoveIntoPlace(tmp, path);
+                MoveIntoPlace(tmp, path, durable);
             }
         }
 
-        static void MoveIntoPlace(string tmp, string path)
+        /// <summary>
+        /// Round 33: the .tmp renamed over the state in ONE step (MoveFileEx, replace-existing; write-through for a durable
+        /// write). Until round 32 File.Replace, which moves the old state aside to a "~RF....TMP" file first: CI run
+        /// 42883988202 found such files left by a helper killed during a (then newly asynchronous) journal write, and a
+        /// kill between its steps could leave the state missing (its payload then swept as an orphan).
+        /// </summary>
+        static void MoveIntoPlace(string tmp, string path, bool durable)
         {
-            if (Probe(path) != Presence.Absent) File.Replace(tmp, path, null); // atomic replacement (throws if it is not there after all)
-            else File.Move(tmp, path);
+            uint flags = Native.MOVEFILE_REPLACE_EXISTING | (durable ? Native.MOVEFILE_WRITE_THROUGH : 0u);
+            if (!Native.MoveFileExW(tmp, path, flags)) throw new IOException("the state could not be moved into place (error " + Marshal.GetLastWin32Error() + ")");
         }
 
         static bool TryDelete(string path)
@@ -924,7 +932,14 @@ namespace DoodleNote.DictationHelper
                     // Round 8 wrote one record per identity with no id: never restored from, just removed.
                     if (name == "DoodleNote-Bark-clipboard-" + HelperIdentity.Sanitized + ".bin") { Wire.Log(TryDelete(path) ? "a round-8 clipboard record was removed (never restored from)" : "a round-8 clipboard record could not be removed now (never restored from; tried again later)"); continue; }
                     Match match = names.Match(name);
-                    if (!match.Success) continue; // another identity's file (X-foo for X), or not a record
+                    if (!match.Success)
+                    {
+                        // Round 33: a File.Replace leftover of an earlier build ("<state>~RF<hex>.TMP": a copy of an old state,
+                        // no user content), older than 10 minutes: removed. Anything else that does not match is not ours.
+                        if (ReplaceLeftover.IsMatch(name) && OlderThanTenMinutes(path))
+                            Wire.Log("a stray replace leftover (" + name.Substring(Prefix.Length) + ") " + (TryDelete(path) ? "was deleted" : "could not be deleted now (tried again later)"));
+                        continue; // another identity's file (X-foo for X), or not a record
+                    }
                     string id = match.Groups[1].Value;
                     bool isState = match.Groups[2].Value == "state";
                     if (isState && !match.Groups[3].Success) { states.Add(id); continue; }

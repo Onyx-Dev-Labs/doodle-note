@@ -28,6 +28,12 @@ namespace DoodleNote.DictationHelper
         public struct FILE_DISPOSITION_INFO { public byte DeleteFile; }
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateFileW")]
         public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileForDelete(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+        /// <summary>Round 33: an atomic rename over an existing file (one metadata operation on NTFS; no ~RF temporary).</summary>
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool MoveFileExW(string existing, string replacement, uint flags);
+        public const uint MOVEFILE_REPLACE_EXISTING = 0x1, MOVEFILE_WRITE_THROUGH = 0x8;
+
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool SetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle file, int infoClass, ref FILE_DISPOSITION_INFO info, uint size);
