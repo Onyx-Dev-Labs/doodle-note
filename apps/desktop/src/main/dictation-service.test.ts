@@ -3015,7 +3015,7 @@ test('Windows (round 22): an incomplete offer says what is missing before Restor
   const card = h.overlay.at(-1)!
   assert.equal(
     card.warning,
-    'Part of this clipboard could not be saved: FileContents (not provided by the app that copied it). Restore puts back the rest.'
+    'Part of this clipboard could not be saved: FileContents (not provided by the app that copied it). Restore puts back the rest. If you have copied nothing since, your clipboard may still hold all of it: Dismiss keeps it as it is.'
   )
   h.helper.offers = []
   clickOffer(h, 'offer-restore')

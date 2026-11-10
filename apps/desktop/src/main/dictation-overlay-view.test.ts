@@ -348,7 +348,7 @@ test('Windows (round 23): an incomplete card shows at most three names (+N more)
   const some = panelView({ kind: 'clipboard-offer', offer }, base)
   assert.equal(
     some.warning,
-    'Part of this clipboard could not be saved: A (x); B (x); C (x) +2 more. Restore puts back the rest.'
+    'Part of this clipboard could not be saved: A (x); B (x); C (x) +2 more. Restore puts back the rest. If you have copied nothing since, your clipboard may still hold all of it: Dismiss keeps it as it is.'
   )
   const none = panelView(
     { kind: 'clipboard-offer', offer: { ...offer, formats: 0, content: 0, missing: ['A (x)'] } },

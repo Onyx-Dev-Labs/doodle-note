@@ -559,10 +559,12 @@ export const CLIPBOARD_OFFER_COPY = {
   confirmDetail: (saved: string): string =>
     `Delete saved copy removes what you had copied before the dictation (${saved}) for good; your clipboard stays as it is. Keep it brings the offer back.`,
   deleteFailed: 'The saved copy could not be deleted. Try again.',
-  // Round 23: at most three names (+N more) so the buttons stay in view; truthful when nothing goes back.
+  // Round 23: at most three names (+N more) so the buttons stay in view; truthful when nothing goes back. Round 34
+  // (Opus): a helper that ended before it emptied anything can leave an incomplete record while the user's clipboard is
+  // still whole (when it changed since, so that the unchanged-since-capture proof could not delete it): say so.
   incomplete: (missing: string[], formats = 1, total = missing.length): string =>
     formats > 0
-      ? `Part of this clipboard could not be saved${missing.length > 0 ? `: ${listMissing(missing, total)}` : ''}. Restore puts back the rest.`
+      ? `Part of this clipboard could not be saved${missing.length > 0 ? `: ${listMissing(missing, total)}` : ''}. Restore puts back the rest. If you have copied nothing since, your clipboard may still hold all of it: Dismiss keeps it as it is.`
       : `None of this clipboard could be saved${missing.length > 0 ? ` (${listMissing(missing, total)})` : ''}. There is nothing to put back; Dismiss deletes the saved record.`,
   nothingTitle: 'DoodleNote kept a record of your clipboard, but nothing of it can be put back.',
   nothingDetail: 'Dismiss deletes that record. Your clipboard stays as it is.'
