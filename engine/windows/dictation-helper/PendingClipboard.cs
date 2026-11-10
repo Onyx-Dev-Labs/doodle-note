@@ -1136,9 +1136,11 @@ namespace DoodleNote.DictationHelper
         /// and size only) and the new sequence, so the app can ask again.
         /// </summary>
         /// Round 22 (F5), an abandoned late write: its own record stays in flight here until its rollback is done ("busy",
-        /// never judged meanwhile), and while it waits inside EmptyClipboard it holds the clipboard open, so neither this
-        /// Restore nor a leftover check can open the clipboard ("busy", retried) until it returns and has put its saved
-        /// content back. They are serialized by the clipboard lock, so nothing here waits for it.
+        /// never judged meanwhile). Round 38 (Astra P2) CORRECTS what this said until round 37 (that the clipboard's own
+        /// open serialized this Restore with the late write): the late write opens with the SAME window, so another
+        /// open of ours does not fail but takes its open over (and between its opens our late text is on the clipboard).
+        /// So no Restore runs while a write thread of ours still runs (the one opener off the request queue): "busy", nothing
+        /// touched, the card kept for the user to retry.
         /// Round 22 (S3): an INCOMPLETE record is put back only when the app showed the user what is missing
         /// (acceptIncomplete); otherwise "incomplete" with the missing names, nothing emptied. Its put-back answers
         /// "restored-partially" with what it could not include.
@@ -1147,6 +1149,18 @@ namespace DoodleNote.DictationHelper
             // Round 31 (Opus): the user's Restore says where its time went (CI run 42842819157 saw Restores of 1.1-1.2 s,
             // about 1 s over their usual 0.05-0.07 s, that nothing in the log explained). Steps and times only, no content.
             StepTimeline steps = new StepTimeline();
+            // Round 38 (Opus, option b): an earlier dictation's late write still running its rollback opens the clipboard with
+            // the SAME window and does not take this lock: no Restore until it is done ("busy", nothing touched; asked again).
+            // Round 38 (Astra P2): the Restore is serialized with deliveries on the request queue, and with every recovery look
+            // by `gate`; the one transaction that still opens the clipboard OFF that queue is a write thread whose delivery
+            // returned (a late write and its rollback). Every write thread is counted until its rollback is done, so this
+            // covers every transaction of ours that can still open the clipboard (a settled record waiting for its journal
+            // deletion opens nothing).
+            if (DeliveriesInFlight.LateWriteOutstanding)
+            {
+                Wire.Log("the user's restore: another clipboard transaction of ours is in flight (an earlier dictation's late write or its rollback); nothing touched, asked again later");
+                return Wire.Fields("result", "busy");
+            }
             lock (gate)
             {
                 steps.Mark("lock taken");

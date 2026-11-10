@@ -544,6 +544,9 @@ namespace DoodleNote.DictationHelper
         /// down, and our bounded write runs. Null when the write ran (see `written` and `late`); otherwise
         /// why it did not start (nothing of the user's was touched).
         /// </summary>
+        /// <summary>Round 38: how long a delivery waits for an earlier dictation's late write to finish its rollback.</summary>
+        public const int LateWriteWaitMs = 1000;
+
         static string BeginClipboardWrite(string text, out SavedClipboard saved, out ClipboardOwnership ours, out bool written, out ClipboardText.LateWrite late, Action<SavedClipboard> afterSave = null, Func<bool> stillInTime = null)
         {
             ours = new ClipboardOwnership();
@@ -552,6 +555,18 @@ namespace DoodleNote.DictationHelper
             saved = null;
             // Round 22: without the helper's own window nothing is opened at all (no save, no write): not pasting.
             if (Ui.ClipboardWindow == IntPtr.Zero) { Wire.Log("the helper has no clipboard window; not pasting (nothing opened)"); deliveryNoSave = "no-window"; return "no-save"; }
+            // Round 38 (Opus, option b): an earlier dictation's write abandoned past its budget (a late write) still runs its
+            // rollback on its own thread: its confirmation and put-back open the clipboard with the SAME window, and between
+            // them our own late text is on the clipboard. No delivery starts until it is done (waited for at most 1 s while
+            // the deadline allows): a save in that window would take our text for the user's, and an open would take its
+            // open over. Nothing is touched.
+            if (!DeliveriesInFlight.AwaitLateWrites(LateWriteWaitMs, stillInTime))
+            {
+                bool lateDeadline = stillInTime != null && !stillInTime();
+                Wire.Log("an earlier dictation's late clipboard write is still running (its put-back not done); not pasting (nothing touched)");
+                deliveryNoSave = lateDeadline ? "deadline" : "clipboard-busy";
+                return deliveryNoSave;
+            }
             // An earlier transaction that could not be put back gets its chance first (before our write). Round 36 (Astra
             // P3): bounded (the recovery lock and its file work cannot be bounded in place): not done while the delivery
             // still fits (and at most 5 s), the paste is refused with nothing emptied.
@@ -1328,7 +1343,7 @@ namespace DoodleNote.DictationHelper
                             }
                             Wire.Send(lateEvent);
                         }
-                        finally { DeliveriesInFlight.LateEnd(); }
+                        finally { DeliveriesInFlight.LateEnd(); TestMode.Trace("late write finished"); }
                     }
                 }
             });
@@ -3047,6 +3062,29 @@ namespace DoodleNote.DictationHelper
         static int count;
         /// <summary>Clipboard writes running on their own thread (an abandoned one is an in-flight transaction).</summary>
         static int writes;
+
+        /// <summary>
+        /// Round 38: whether a clipboard write still runs. Deliveries and the user's Restore are serialized on the request
+        /// queue, so at their start a running write is an ABANDONED (late) one, still doing its rollback.
+        /// </summary>
+        public static bool LateWriteOutstanding { get { lock (gate) return writes > 0; } }
+
+        /// <summary>Round 38: wait for every late write's rollback, at most ms and while stillInTime holds. True when none is left.</summary>
+        public static bool AwaitLateWrites(int ms, Func<bool> stillInTime)
+        {
+            long until = Now + ms;
+            lock (gate)
+            {
+                if (writes > 0) TestMode.Trace("waiting for a late clipboard write");
+                while (writes > 0)
+                {
+                    long left = until - Now;
+                    if (left <= 0 || (stillInTime != null && !stillInTime())) return false;
+                    Monitor.Wait(gate, (int)Math.Min(left, 50));
+                }
+                return true;
+            }
+        }
         static bool closed;
         static long deadlineTicks = long.MaxValue;
 
