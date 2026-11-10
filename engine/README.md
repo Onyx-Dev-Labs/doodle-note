@@ -63,6 +63,34 @@ engine live [--source mic|system|both] [--seconds N] [--aec off] [--input-device
     {"cmd":"stop"} ends the session. The serve mode accepts the same
     "inputDevice" on start and the same "set-input" command.
 
+    --voiceprint <path> turns on dictation's "Only my voice" for the mic
+    channel: speech that is not the enrolled voice (see enroll-voice) is
+    replaced by silence before it reaches the recognizer, and the `final`
+    event gains a `voiceGate` report. A voiceprint or model that cannot be
+    loaded never blocks the session: it runs unfiltered and emits the status
+    `voice_gate_unavailable`. Serve mode accepts "voiceprint" on start, and
+    {"cmd":"warm-voice"} preloads the speaker models.
+
+engine enroll-voice --out <voiceprint.json> [--seconds N] [--input-device <uid>]
+    Records one person reading aloud (20s by default) and writes their
+    voiceprint: a 256-number voice embedding, their speech level and the
+    microphone used. No audio is written anywhere. Emits `level` events
+    while recording, then {"event":"voiceprint","ok":true,…} or
+    {"event":"voiceprint","ok":false,"reason":"not_enough_speech"|"microphone"|"failed"}
+    and `done`. A failed run leaves an existing voiceprint untouched.
+    With --exit-on-stdin-close, {"cmd":"finish"} on stdin ends the recording
+    early and keeps it; stdin closing cancels and keeps nothing.
+    --file <audio> builds the voiceprint from a recording instead.
+
+engine voice-check --file <audio> --voiceprint <json> [--out <gated.wav>] [--same-microphone]
+    Tuning tool: replays a recording through the "Only my voice" gate as live
+    dictation would. Each rejected voice is logged to stderr with its distance
+    and level; one `voice_check` event carries the totals; --out writes the
+    audio the recognizer would have heard. --same-microphone lets the
+    enrolled level count, as it does when dictating on the enrollment mic.
+    `engine stream --file <audio> --voiceprint <json>` runs the whole live
+    pipeline (gate + recognizer) on a file and prints the transcript.
+
 engine devices
     Lists audio input devices as one NDJSON event and exits immediately:
     {"event":"devices","inputs":[{"uid":"…","name":"MacBook Pro Microphone","default":true},…]}
@@ -85,6 +113,30 @@ engine merge-audio --dir <path>
 engine info
     Reports model cache locations and download state.
 ```
+
+## Only my voice (the voice gate)
+
+`VoiceGate.swift` sits between the microphone and the recognizer when a live
+session is given a voiceprint. About twice a second it looks at the last ten
+seconds of audio with FluidAudio's speaker models (pyannote segmentation +
+WeSpeaker embeddings, ~13MB, downloaded on first use): who talks when, and how
+far each voice is from the enrolled one (cosine distance, 0 = identical).
+
+- distance <= 0.60: the user. Kept, and its loudness becomes the reference.
+- distance >= 0.75: someone else. Replaced by silence (not cut, so pauses
+  and token timings are unchanged).
+- in between, or under ~0.75s of speech (too short to tell voices apart):
+  loudness decides — more than 10dB under the user's own level is someone
+  across the room. With no level to compare against, the audio is kept.
+
+Each voice is embedded from its own speech only (joined end to end); leaving
+silence or other voices in the model's ten-second input skews its
+normalization and makes a short utterance look like a stranger. Audio waits
+for its verdict, so partial text trails speech by roughly half a second.
+A model failure passes audio through; three in a row switch the gate off for
+the session. Thresholds live in `VoiceGate.Config`.
+
+Logic tests (no models): see the header of `tests/VoiceGateTests.swift`.
 
 ## First-run permissions (live)
 
@@ -123,7 +175,8 @@ try/parse each line and skip failures.
 | `channel_start` | `channel`, `epochMs` | live: wall-clock anchor for the channel's token timeline (first audio buffer) |
 | `partial` | `text`, `channel` (live only) | growing transcript for one channel |
 | `timings` | `tokens` [{`token`,`startSec`,`endSec`,`confidence`}], `channel` (live) | incremental per-token timestamps (stream/live) — the raw material for timestamped transcript segments |
-| `final` | `text`, `channel` (live), `confidence`/`audioSeconds`/`processingSeconds`/`speedup` (file modes), `sessionSeconds` (live) | end-of-run transcript per channel |
+| `final` | `text`, `channel` (live), `confidence`/`audioSeconds`/`processingSeconds`/`speedup` (file modes), `sessionSeconds` (live), `voiceGate` {`keptMs`,`droppedMs`,`failures`,`minDistance`,`maxDistance`} (live with --voiceprint) | end-of-run transcript per channel |
+| `voiceprint` | `ok`, `speechSeconds`, `levelDb`, `deviceName`, or `reason` | enroll-voice verdict |
 | `error` | `message`, optional `channel` | non-fatal errors carry on; fatal ones precede exit |
 | `audio` | `path`, `durationMs`, `startEpochMs` | merged session audio saved (live with --audio-dir, and merge-audio); `startEpochMs` = wall-clock of the file's first frame, for transcript↔audio seek mapping |
 | `done` | — | live session fully finished |

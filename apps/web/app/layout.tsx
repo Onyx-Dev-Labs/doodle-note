@@ -1,16 +1,16 @@
 import type { Metadata } from "next";
+import { Caveat, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { siteMetadata } from "@/lib/site-metadata";
-import {
-  Bricolage_Grotesque,
-  Caveat,
-  Geist,
-  Geist_Mono,
-} from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+// Same variable font files as the desktop app and approved brand preview.
+const figtree = localFont({
+  src: "./fonts/figtree.woff2",
+  variable: "--font-figtree",
+  weight: "300 900",
+  style: "normal",
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
@@ -18,9 +18,13 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const bricolage = Bricolage_Grotesque({
-  variable: "--font-bricolage",
-  subsets: ["latin"],
+const fraunces = localFont({
+  src: "./fonts/fraunces.woff2",
+  variable: "--font-fraunces",
+  weight: "100 900",
+  style: "normal",
+  display: "swap",
+  adjustFontFallback: "Times New Roman",
 });
 
 const caveat = Caveat({
@@ -38,7 +42,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${bricolage.variable} ${caveat.variable} h-full antialiased`}
+      className={`${figtree.variable} ${geistMono.variable} ${fraunces.variable} ${caveat.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">{children}</body>
     </html>

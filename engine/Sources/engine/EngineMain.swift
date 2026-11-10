@@ -55,6 +55,10 @@ struct EngineMain {
                 }
             case "devices":
                 DevicesCommand.run()
+            case "enroll-voice":
+                try await EnrollVoiceCommand.run(options)
+            case "voice-check":
+                try await VoiceCheckCommand.run(options)
             case "info":
                 Commands.info()
             default:

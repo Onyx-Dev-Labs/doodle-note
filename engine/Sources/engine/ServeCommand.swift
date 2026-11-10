@@ -6,6 +6,7 @@ import Foundation
 /// model warm-up. NDJSON commands on stdin:
 ///   {"cmd":"start","source":"both","aec":"off"}
 ///   {"cmd":"stop"}
+///   {"cmd":"warm-voice"}   (preload the "Only my voice" speaker models)
 /// Session events on stdout are identical to the `live` command's, ending in
 /// "done"; between sessions the managers reset (models stay loaded). stdin
 /// EOF or SIGTERM stops any active session and exits.
@@ -45,7 +46,11 @@ enum ServeCommand {
                 let inputDevice = (object["inputDevice"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 let audioDir = (object["audioDir"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 let systemBackend = (object["systemBackend"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                let voiceprint = (object["voiceprint"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                let wantsLevels = (object["levels"] as? Bool) == true
                 let started = box.begin(stopper) {
+                    LevelReporter.shared.setEnabled(wantsLevels)
+                    defer { LevelReporter.shared.setEnabled(false) }
                     do {
                         try await LiveSession.run(
                             source: source,
@@ -54,6 +59,7 @@ enum ServeCommand {
                             inputDevice: inputDevice,
                             audioDir: audioDir,
                             systemBackend: systemBackend,
+                            voiceprint: voiceprint,
                             micManager: micManager,
                             systemManager: systemManager,
                             stopper: stopper
@@ -78,6 +84,16 @@ enum ServeCommand {
             case "set-input":
                 // Mid-session mic switch; ignored (with a log) when idle.
                 MicController.shared.switchInput(toUID: object["uid"] as? String)
+            case "warm-voice":
+                // "Only my voice" is on: load its models now so the first
+                // dictation does not wait for them.
+                Task {
+                    do {
+                        _ = try await VoiceModels.shared.load()
+                    } catch {
+                        Events.log("voice models did not load: \(error)")
+                    }
+                }
             default:
                 Events.log("serve: unknown command \(cmd)")
             }

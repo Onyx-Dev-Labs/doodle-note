@@ -1,3 +1,4 @@
+import { overlayFontCss } from './brand-assets'
 import { calendarJoinUrl, type CalendarStartMeetingEvent } from '../shared/calendar-api'
 
 export const PANEL_WIDTH = 340
@@ -41,9 +42,9 @@ export function legacyPanelDataUrl(prompt: CalendarStartMeetingEvent, dark: bool
         goHover: '#5f7a4e',
         goText: '#fff'
       }
-  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>${overlayFontCss}
   * { margin: 0; box-sizing: border-box; -webkit-user-select: none; cursor: default; }
-  body { font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; background: transparent; padding: 2px; }
+  body { font: 13px/1.4 "Doodle Figtree", -apple-system, BlinkMacSystemFont, sans-serif; background: transparent; padding: 2px; }
   .card { background: ${c.card}; border: 1px solid ${c.border}; border-radius: 14px;
     box-shadow: 0 10px 30px rgba(0,0,0,${dark ? '.5' : '.22'}); padding: 12px 14px; height: ${PANEL_HEIGHT - 4}px;
     display: flex; flex-direction: column; gap: 9px; -webkit-app-region: drag; }
@@ -114,11 +115,11 @@ export function panelDataUrl(
   const heading = prompt.adHoc ? 'Meeting detected' : prompt.subject.trim() || 'Untitled meeting'
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
-  <title>DoodleNote — meeting detected</title><style>
+  <title>DoodleNote — meeting detected</title><style>${overlayFontCss}
   * { box-sizing: border-box; }
   :root { color-scheme: ${dark ? 'dark' : 'light'}; }
   body { margin: 0; padding: 16px; background: transparent;
-    font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif;
+    font: 13px/1.4 "Doodle Figtree", -apple-system, BlinkMacSystemFont, sans-serif;
     color: ${dark ? '#f0eee2' : '#26281f'}; -webkit-user-select: none; }
   .card { position: relative; height: 88px; padding: 12px 14px;
     background: ${dark ? '#262922' : '#fdfcf8'}; border: 1px solid ${dark ? '#4c5144' : '#dfdccf'};

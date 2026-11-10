@@ -10,6 +10,8 @@ test("existing desktop callback stays loopback-only and native callback binds on
   assert.equal(old.searchParams.get("workspace"), content.workspaceName);
   assert.equal(old.searchParams.has("state"), false);
   const state = "a".repeat(43);
+  assert.equal(new URL(deviceLinkCallback({ ...content, port: 54321, state })).searchParams.get("state"), state);
+  assert.equal(new URL(deviceLinkCallback({ ...content, port: 54321, state: "short" })).searchParams.has("state"), false);
   const native = new URL(deviceLinkCallback({ ...content, port: null, scheme: "doodlenote", state }));
   assert.equal(native.protocol, "doodlenote:");
   assert.equal(native.host, "link");

@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { safeNextPath } from "@/lib/safe-next-path";
 import {
   billingEnabled,
   blockingSubscriptionForCustomer,
@@ -50,9 +51,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { next?: unknown };
     // Path-only, same-site: never an open redirect.
-    if (typeof body.next === "string" && body.next.startsWith("/") && !body.next.startsWith("//")) {
-      next = body.next;
-    }
+    next = safeNextPath(typeof body.next === "string" ? body.next : undefined);
   } catch {
     // no body — default landing
   }

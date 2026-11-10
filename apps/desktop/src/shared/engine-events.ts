@@ -92,6 +92,13 @@ export interface EngineStartOptions {
   audioDir?: string
   /** live only (macOS): system-audio capture backend; default 'sck'. */
   systemBackend?: 'sck' | 'tap'
+  /** live only: stream throttled microphone `level` events (dictation's meter). */
+  levels?: boolean
+  /**
+   * live only (macOS): the enrolled voice's file. The mic channel then passes
+   * only that voice to the recognizer (dictation's "Only my voice").
+   */
+  voiceprint?: string
 }
 
 export interface EngineStartRequest {
@@ -159,7 +166,23 @@ export interface EngineFinalEvent {
   speedup?: number
   /** live mode: wall-clock length of the capture session */
   sessionSeconds?: number
+  /** live mode: audio still queued for the recognizer when capture stopped, ms. */
+  drainMs?: number
+  /** The recognizer's final flush, ms. */
+  finishMs?: number
   tokens?: EngineTokenTiming[]
+  /** Present when the session filtered by voice: speech kept and silenced, never text. */
+  voiceGate?: EngineVoiceGateReport
+}
+
+export interface EngineVoiceGateReport {
+  keptMs: number
+  droppedMs: number
+  /** Looks the speaker models failed on; that audio passed through unfiltered. */
+  failures: number
+  /** Closest and farthest judged voices (cosine distance to the enrolled one). */
+  minDistance?: number
+  maxDistance?: number
 }
 
 /** Windows: high-accuracy local text for each channel after live capture stops. */
@@ -189,6 +212,13 @@ export interface EngineAudioEvent {
   startEpochMs?: number
 }
 
+/** Live, opt-in (`levels`): microphone peak 0..1 for a level meter. */
+export interface EngineLevelEvent {
+  event: 'level'
+  channel: EngineChannel
+  peak: number
+}
+
 /** Live: wall-clock anchor for a channel's token timeline (first audio buffer). */
 export interface EngineChannelStartEvent {
   event: 'channel_start'
@@ -208,6 +238,7 @@ export type EngineSidecarEvent =
   | EngineDoneEvent
   | EngineChannelStartEvent
   | EngineAudioEvent
+  | EngineLevelEvent
 
 /* ---- Lifecycle events synthesized by the main process ---- */
 

@@ -196,6 +196,15 @@ export function LockIcon({ size }: { size?: number }): React.JSX.Element {
   )
 }
 
+export function CommunityIcon({ size }: { size?: number }): React.JSX.Element {
+  return (
+    <Icon {...(size !== undefined ? { size } : {})}>
+      <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.6-.8L3 21l1.9-5.1A8.4 8.4 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5z" />
+      <path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" />
+    </Icon>
+  )
+}
+
 export function CheckSquareIcon({ size }: { size?: number }): React.JSX.Element {
   return (
     <Icon {...(size !== undefined ? { size } : {})}>

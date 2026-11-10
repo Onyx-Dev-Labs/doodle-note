@@ -5,8 +5,7 @@ import {
 } from '../../shared/batch-transcription'
 import { StorageSettings } from './StorageSettings'
 import CloudModelPicker from './CloudModelPicker'
-import { GoogleCalendarPending } from './GoogleCalendarPending'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
   SYSTEM_BACKEND_STORAGE_KEY,
@@ -17,7 +16,10 @@ import type { DetectState } from '../../shared/detect-api'
 import { useSyncConnection } from './lib/use-sync-connection'
 import type { AgentAccessStatus, McpClientId, McpServerSpec } from '../../shared/integrations-api'
 import type { UpdateState } from '../../shared/update-api'
-import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon, UsersIcon } from './icons'
+import { SettingsIcon, type SettingsIconName } from './SettingsIcon'
+import { SettingsCloudAccess } from './SettingsCloudAccess'
+import { Fragment } from 'react'
+import './assets/settings-redesign.css'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
 import {
   CLOUD_PROVIDERS,
@@ -29,7 +31,11 @@ import {
   type NotesSettingsView
 } from '../../shared/notes-api'
 import { PaidRemoteMcpSetup } from './PaidRemoteMcpSetup'
-import mascotUrl from './assets/mascot-square.png'
+import { FEATURE_NAME } from '../../shared/dictation-brand'
+import { DictationSettings } from './DictationSettings'
+import { BarkMark } from './BarkMark'
+import { SettingsFold } from './SettingsFold'
+import { COMMUNITY_LABEL, openCommunity } from './lib/community'
 
 function lastSyncLabel(iso: string): string {
   const ms = Date.now() - Date.parse(iso)
@@ -137,7 +143,7 @@ function PeopleIcon(): React.JSX.Element {
 }
 
 /** Light-theme switch (sage when on), used by the calendar display prefs. */
-function Toggle({
+export function Toggle({
   checked,
   onChange,
   disabled = false,
@@ -167,15 +173,63 @@ function Toggle({
   )
 }
 
-export type SettingsSection = 'general' | 'calendar' | 'sync' | 'model' | 'integrations'
+export type SettingsSection =
+  | 'general'
+  | 'calendar'
+  | 'sync'
+  | 'model'
+  | 'dictation'
+  | 'integrations'
+  | 'appearance'
+  | 'recording'
+  | 'storage'
+  | 'more'
 
 const SETTINGS_NAV: Array<{ key: SettingsSection; icon: React.JSX.Element; label: string }> = [
-  { key: 'general', icon: <GearIcon size={15} />, label: 'General' },
-  { key: 'calendar', icon: <CalendarIcon size={15} />, label: 'Calendar' },
-  { key: 'sync', icon: <CloudIcon size={15} />, label: 'Cloud sync' },
-  { key: 'model', icon: <SparkleIcon size={15} />, label: 'Notes model' },
-  { key: 'integrations', icon: <UsersIcon size={15} />, label: 'Integrations' }
+  { key: 'general', icon: <SettingsIcon name="general" />, label: 'General' },
+  { key: 'calendar', icon: <SettingsIcon name="calendar" />, label: 'Calendar' },
+  { key: 'dictation', icon: <BarkMark size={26} />, label: FEATURE_NAME },
+  { key: 'appearance', icon: <SettingsIcon name="appearance" />, label: 'Appearance' },
+  { key: 'recording', icon: <SettingsIcon name="recording" />, label: 'Recording' },
+  { key: 'storage', icon: <SettingsIcon name="storage" />, label: 'Storage' },
+  { key: 'model', icon: <SettingsIcon name="sparkle" />, label: 'Notes model' },
+  { key: 'more', icon: <SettingsIcon name="cloud" />, label: 'Get more' }
 ]
+
+const SECTION_COPY: Record<string, { title: string; description: string }> = {
+  general: {
+    title: 'A little more you.',
+    description: 'Your preferences, with a little more breathing room.'
+  },
+  calendar: {
+    title: 'Room for what’s next.',
+    description: 'Your day, with a little more breathing room.'
+  },
+  dictation: {
+    title: 'Think out loud.',
+    description: 'Your dictation, shortcuts, and writing preferences.'
+  },
+  appearance: {
+    title: 'Make yourself at home.',
+    description: 'A calmer canvas for your thoughts.'
+  },
+  recording: {
+    title: 'Stay in the moment.',
+    description: 'Capture, transcription, and meeting detection, just the way you like them.'
+  },
+  storage: {
+    title: 'A place for everything.',
+    description: 'Your library, saved recordings, and recovery copies.'
+  },
+  model: {
+    title: 'Turn words into clarity.',
+    description: 'Your existing models, keys, and note-generation preferences.'
+  },
+  more: {
+    title: 'Get more from DoodleNote.',
+    description: 'Take your notes further with Cloud Sync and connected tools.'
+  }
+}
 
 export default function ModelsView({
   active,
@@ -190,13 +244,18 @@ export default function ModelsView({
   onOpenDevConsole?: () => void
 }): React.JSX.Element {
   const [section, setSection] = useState<SettingsSection>('general')
+  const settingsScroller = useRef<HTMLDivElement>(null)
+  // A new destination starts at the same position, before the browser paints.
+  useLayoutEffect(() => {
+    if (active && settingsScroller.current) settingsScroller.current.scrollTop = 0
+  }, [active, section])
 
   // Deep-link consumption: derived state during render (no effect) so an
   // external jump wins exactly once, then normal nav takes over.
   const [consumedJump, setConsumedJump] = useState(0)
   if (jump && jump.n !== consumedJump) {
     setConsumedJump(jump.n)
-    setSection(jump.section)
+    setSection(jump.section === 'sync' || jump.section === 'integrations' ? 'more' : jump.section)
   }
   const [data, setData] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
@@ -633,32 +692,68 @@ export default function ModelsView({
   const engineChoice: EngineChoice = settings?.engineChoice ?? 'local'
 
   return (
-    <div className="models">
-      <header className="models-header">
-        <img className="settings-mascot" src={mascotUrl} alt="" />
-        <div>
-          <h2>Settings</h2>
-          <p className="models-sub">
-            Local-first by default — nothing leaves this computer unless you turn it on.
-          </p>
-        </div>
-      </header>
-
+    <div ref={settingsScroller} className="models settings-redesign">
       <div className="settings-shell">
         <nav className="settings-nav" aria-label="Settings sections">
+          <span className="settings-nav-label">Your preferences</span>
           {SETTINGS_NAV.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={section === item.key ? 'settings-nav-btn on' : 'settings-nav-btn'}
-              onClick={() => setSection(item.key)}
-            >
-              <span className="settings-nav-icon" aria-hidden="true">
-                {item.icon}
-              </span>
-              {item.label}
-            </button>
+            <Fragment key={item.key}>
+              {item.key === 'recording' && (
+                <span className="settings-nav-label settings-nav-divider">Your workflow</span>
+              )}
+              {item.key === 'more' && (
+                <span className="settings-nav-label settings-nav-divider">More</span>
+              )}
+              <button
+                type="button"
+                aria-current={section === item.key ? 'page' : undefined}
+                className={section === item.key ? 'settings-nav-btn on' : 'settings-nav-btn'}
+                onClick={() => setSection(item.key)}
+              >
+                <span className="settings-nav-icon" aria-hidden="true">
+                  {item.icon}
+                </span>
+                {item.label}
+              </button>
+            </Fragment>
           ))}
+          <button
+            type="button"
+            className="settings-nav-btn"
+            title="Help, updates and early testing on Discord"
+            onClick={openCommunity}
+          >
+            <span className="settings-nav-icon" aria-hidden="true">
+              <SettingsIcon name="community" />
+            </span>
+            {COMMUNITY_LABEL}
+          </button>
+          <div className="settings-sidebar-bottom">
+            <p className="settings-margin-note">
+              A little space
+              <br />
+              to make your own.
+            </p>
+            <div className="settings-profile-mini">
+              <span className="settings-profile-avatar" aria-hidden="true">
+                {settings?.profileName
+                  ?.trim()
+                  .split(/\s+/)
+                  .slice(0, 2)
+                  .map((word) => word[0])
+                  .join('')
+                  .toUpperCase() || <SettingsIcon name="general" />}
+              </span>
+              <span>
+                <b>{settings?.profileName?.trim() || 'Your workspace'}</b>
+                <small>
+                  {syncStatus?.connected && syncStatus.workspaceName
+                    ? syncStatus.workspaceName
+                    : 'On this computer'}
+                </small>
+              </span>
+            </div>
+          </div>
           {detect !== null && (
             <button
               type="button"
@@ -672,117 +767,105 @@ export default function ModelsView({
         </nav>
 
         <div className="settings-content">
+          <div className="settings-context-row">
+            <div className="settings-breadcrumb">
+              Settings <span>/</span>{' '}
+              <b>{SETTINGS_NAV.find((item) => item.key === section)?.label}</b>
+            </div>
+            <span className="settings-privacy-label">
+              <SettingsIcon name="shield" size={16} /> Local-first by default
+            </span>
+          </div>
+          <header className="settings-page-heading">
+            <h1>{SECTION_COPY[section]?.title}</h1>
+            <p>{SECTION_COPY[section]?.description}</p>
+          </header>
+          {section === 'dictation' && <DictationSettings />}
           {section === 'model' && (
-            <section className="keys-section">
-              <h3>Active notes model</h3>
-              <p className="models-sub" role="status">
-                {engineChoice === 'cloud'
-                  ? settings?.cloud?.hasKey &&
-                    (settings.cloud.provider === 'ollama' || settings.cloud.dataPolicyConfirmed)
-                    ? `Active: ${CLOUD_PROVIDERS.find((p) => p.id === settings.cloud?.provider)?.label ?? settings.cloud.provider} · ${settings.cloud.model || MODEL_PLACEHOLDERS[settings.cloud.provider]}`
-                    : 'Cloud selected. Complete the provider setup below before generating notes.'
-                  : `Active: ${data?.models.find((m) => m.active)?.label ?? 'On-device model'} · On-device`}
-              </p>
-              {engineChoice === 'cloud' && (
-                <p className="models-sub">On-device models are not selected for note generation.</p>
-              )}
-              <h3>On-device models</h3>
-              <p className="models-sub">
-                DoodleNote polishes your meeting notes with a model that runs entirely on this
-                computer
-                {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
-                machine.
-              </p>
-
-              {error && (
-                <div className="models-error" role="alert">
-                  {error}
-                </div>
-              )}
-
-              <div className="model-cards">
-                {data === null && (
-                  <span className="placeholder" role="status">
-                    Checking local models…
-                  </span>
+            <>
+              <section className="keys-section">
+                <h3>Active notes model</h3>
+                <p className="models-sub" role="status">
+                  {engineChoice === 'cloud'
+                    ? settings?.cloud?.hasKey &&
+                      (settings.cloud.provider === 'ollama' || settings.cloud.dataPolicyConfirmed)
+                      ? `Active: ${CLOUD_PROVIDERS.find((p) => p.id === settings.cloud?.provider)?.label ?? settings.cloud.provider} · ${settings.cloud.model || MODEL_PLACEHOLDERS[settings.cloud.provider]}`
+                      : 'Cloud selected. Complete the provider setup below before generating notes.'
+                    : `Active: ${data?.models.find((m) => m.active)?.label ?? 'On-device model'} · On-device`}
+                </p>
+                {engineChoice === 'cloud' && (
+                  <p className="models-sub">
+                    On-device models are not selected for note generation.
+                  </p>
                 )}
-                {data?.models.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`model-card${m.available ? '' : ' unavailable'}${m.active && engineChoice === 'local' ? ' is-active' : ''}`}
-                  >
-                    <div className="model-head">
-                      <span className="model-label">{m.label}</span>
-                      {m.downloaded && !m.active && <span className="badge">Downloaded</span>}
-                    </div>
-                    <div className="model-desc">{m.description}</div>
-                    <div className="model-meta">
-                      {m.sizeGB.toFixed(1)} GB download · needs {m.minRamGB} GB RAM
-                    </div>
-                    <div className="model-action">{renderAction(m)}</div>
+              </section>
+              <section className="keys-section">
+                <h3>On-device models</h3>
+                <p className="models-sub">
+                  DoodleNote polishes your meeting notes with a model that runs entirely on this
+                  computer
+                  {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
+                  machine.
+                </p>
+
+                {error && (
+                  <div className="models-error" role="alert">
+                    {error}
                   </div>
-                ))}
-              </div>
-            </section>
+                )}
+
+                <div className="model-cards">
+                  {data === null && (
+                    <span className="placeholder" role="status">
+                      Checking local models…
+                    </span>
+                  )}
+                  {data?.models.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`model-card${m.available ? '' : ' unavailable'}${m.active && engineChoice === 'local' ? ' is-active' : ''}`}
+                    >
+                      <div className="model-head">
+                        <span className="model-label">{m.label}</span>
+                        {m.downloaded && !m.active && <span className="badge">Downloaded</span>}
+                      </div>
+                      <div className="model-desc">{m.description}</div>
+                      <div className="model-meta">
+                        {m.sizeGB.toFixed(1)} GB download · needs {m.minRamGB} GB RAM
+                      </div>
+                      <div className="model-action">{renderAction(m)}</div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </>
           )}
 
           {section === 'calendar' && (
-            <section className="keys-section calendar-section">
-              <h3>Calendar</h3>
-              <p className="models-sub">
-                Connect your work and personal accounts to see their upcoming meetings together.
-                Each account keeps its own calendars and sign-in. DoodleNote only reads your
-                calendar.
-              </p>
+            <>
+              <section className="keys-section calendar-section">
+                <h3>Your calendars</h3>
+                <p className="models-sub">
+                  Connect your work and personal accounts to see their upcoming meetings together.
+                  Each account keeps its own calendars and sign-in. DoodleNote only reads your
+                  calendar.
+                </p>
 
-              {calState?.error && <div className="models-error">{calState.error}</div>}
+                {calState?.error && <div className="models-error">{calState.error}</div>}
 
-              {calState === null ? (
-                <span className="calendar-note">loading calendar settings…</span>
-              ) : (!calState.configured && !calState.builtIn) || editingCalConfig ? (
-                <>
-                  <div className="key-form">
-                    <input
-                      type="text"
-                      spellCheck={false}
-                      placeholder="Client ID"
-                      value={clientId}
-                      onChange={(e) => setClientId(e.target.value)}
-                    />
-                    <input
-                      type="text"
-                      spellCheck={false}
-                      placeholder="Tenant ID"
-                      value={tenantId}
-                      onChange={(e) => setTenantId(e.target.value)}
-                    />
-                    <button type="button" onClick={() => void saveCalendarConfig()}>
-                      Save
-                    </button>
-                    {editingCalConfig && (
-                      <button type="button" onClick={() => setEditingCalConfig(false)}>
-                        Cancel
+                {calState === null ? (
+                  <span className="calendar-note">loading calendar settings…</span>
+                ) : (
+                  <>
+                    <div className="calendar-actions">
+                      <button
+                        type="button"
+                        className="provider-btn"
+                        disabled={!calState.configured || connecting || !!calState.connecting}
+                        onClick={() => void connectCalendar('microsoft')}
+                      >
+                        <MicrosoftLogo /> Add Microsoft account
                       </button>
-                    )}
-                  </div>
-                  <p className="calendar-help">
-                    Entra admin center → App registrations → DoodleNote — paste the Application
-                    (client) ID and Directory (tenant) ID from there.
-                  </p>
-                </>
-              ) : null}
-              {calState && (
-                <div className="calendar-connected">
-                  <div className="calendar-actions">
-                    <button
-                      type="button"
-                      className="provider-btn"
-                      disabled={!calState.configured || connecting || !!calState.connecting}
-                      onClick={() => void connectCalendar('microsoft')}
-                    >
-                      <MicrosoftLogo /> Add Microsoft account
-                    </button>
-                    {calState.googleAvailable ? (
                       <button
                         type="button"
                         className="provider-btn"
@@ -791,11 +874,35 @@ export default function ModelsView({
                       >
                         <GoogleLogo /> Add Google account
                       </button>
-                    ) : (
-                      <GoogleCalendarPending buttonClassName="provider-btn">
-                        <GoogleLogo /> Add Google account
-                      </GoogleCalendarPending>
+                    </div>
+                    {calState.tenantId &&
+                      !['common', 'organizations', 'consumers'].includes(
+                        calState.tenantId.toLowerCase()
+                      ) && (
+                        <p className="calendar-note">
+                          This custom Microsoft registration is restricted to its configured
+                          organization. Accounts from other organizations may require a different
+                          registration.
+                        </p>
+                      )}
+                    {!calState.signedIn && (
+                      <p className="calendar-note">
+                        Add an account to choose calendars and see upcoming meetings.
+                      </p>
                     )}
+                  </>
+                )}
+              </section>
+              {calState && (calState.signedIn || (calState.connections?.length ?? 0) > 0) && (
+                <SettingsFold
+                  title="Connected account controls"
+                  description="Calendars and sign-in stay separate for each account"
+                  attention={calState.connections
+                    ?.map((account) => account.error)
+                    .filter(Boolean)
+                    .join('|')}
+                >
+                  <div className="calendar-actions">
                     {calState.signedIn && (
                       <button
                         type="button"
@@ -807,42 +914,7 @@ export default function ModelsView({
                           : 'Sync now'}
                       </button>
                     )}
-                    {!calState.builtIn && !editingCalConfig && (
-                      <button
-                        type="button"
-                        className="calendar-ghost"
-                        onClick={() => setEditingCalConfig(true)}
-                      >
-                        Edit Microsoft IDs
-                      </button>
-                    )}
                   </div>
-                  {calState.connecting && (
-                    <div className="calendar-actions" role="status">
-                      <span>Finish signing in in your browser.</span>
-                      <button
-                        type="button"
-                        onClick={() => void window.calendar.cancelAuth().then(adoptCalState)}
-                      >
-                        Cancel sign-in
-                      </button>
-                    </div>
-                  )}
-                  {calState.tenantId &&
-                    !['common', 'organizations', 'consumers'].includes(
-                      calState.tenantId.toLowerCase()
-                    ) && (
-                      <p className="calendar-note">
-                        This custom Microsoft registration is restricted to its configured
-                        organization. Accounts from other organizations may require a different
-                        registration.
-                      </p>
-                    )}
-                  {!calState.signedIn && (
-                    <p className="calendar-note">
-                      Add an account to choose calendars and see upcoming meetings.
-                    </p>
-                  )}
                   {(calState.connections ?? []).map((account) => (
                     <section
                       className="cal-subcard"
@@ -935,9 +1007,12 @@ export default function ModelsView({
                       Use each account’s default calendar
                     </button>
                   )}
-
+                </SettingsFold>
+              )}
+              {calState && (
+                <section className="keys-section calendar-section">
+                  <h3>Display</h3>
                   <div className="cal-subcard">
-                    <div className="cal-subcard-head">Display</div>
                     {detect?.platform === 'darwin' && (
                       <div className="cal-row">
                         <span className="cal-row-icon">
@@ -977,24 +1052,104 @@ export default function ModelsView({
                       />
                     </div>
                   </div>
-                </div>
+                </section>
               )}
-            </section>
+              {calState && (!calState.builtIn || editingCalConfig) && (
+                <SettingsFold
+                  title="Microsoft registration"
+                  description="Custom-registration controls"
+                  attention={editingCalConfig || !calState.configured}
+                >
+                  {!calState.builtIn && !editingCalConfig && (
+                    <button
+                      type="button"
+                      className="calendar-ghost"
+                      onClick={() => setEditingCalConfig(true)}
+                    >
+                      Edit Microsoft IDs
+                    </button>
+                  )}
+
+                  {((!calState.configured && !calState.builtIn) || editingCalConfig) && (
+                    <>
+                      <div className="key-form">
+                        <input
+                          type="text"
+                          spellCheck={false}
+                          placeholder="Client ID"
+                          value={clientId}
+                          onChange={(e) => setClientId(e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          spellCheck={false}
+                          placeholder="Tenant ID"
+                          value={tenantId}
+                          onChange={(e) => setTenantId(e.target.value)}
+                        />
+                        <button type="button" onClick={() => void saveCalendarConfig()}>
+                          Save
+                        </button>
+                        {editingCalConfig && (
+                          <button type="button" onClick={() => setEditingCalConfig(false)}>
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                      <p className="calendar-help">
+                        Entra admin center → App registrations → DoodleNote — paste the Application
+                        (client) ID and Directory (tenant) ID from there.
+                      </p>
+                    </>
+                  )}
+                </SettingsFold>
+              )}
+              {calState?.connecting && (
+                <SettingsFold
+                  title="Sign-in in progress"
+                  description="Finish connecting your account in the browser"
+                  attention={Boolean(calState.connecting)}
+                >
+                  <div className="calendar-actions" role="status">
+                    <span>Finish signing in in your browser.</span>
+                    <button
+                      type="button"
+                      onClick={() => void window.calendar.cancelAuth().then(adoptCalState)}
+                    >
+                      Cancel sign-in
+                    </button>
+                  </div>
+                </SettingsFold>
+              )}
+            </>
           )}
 
           {section === 'general' && (
             <>
               <section className="keys-section">
-                <h3>Your name</h3>
-                <p className="models-sub">
-                  Used to label your own lines in transcripts and notes. Everyone else stays
-                  &ldquo;Them&rdquo; until you name them in the transcript.
-                </p>
+                <div className="settings-profile-title">
+                  <div>
+                    <h3>Your little corner.</h3>
+                    <p className="models-sub">
+                      The name beside your words in transcripts and notes.
+                    </p>
+                  </div>
+                  <span className="settings-profile-avatar" aria-hidden="true">
+                    {profileName
+                      .trim()
+                      .split(/\s+/)
+                      .slice(0, 2)
+                      .map((word) => word[0])
+                      .join('')
+                      .toUpperCase() || <SettingsIcon name="general" />}
+                  </span>
+                </div>
                 <div className="key-form">
                   <input
                     type="text"
                     spellCheck={false}
-                    placeholder="e.g. Sean Inman"
+                    aria-label="Your name"
+                    placeholder="Your name"
                     value={profileName}
                     maxLength={40}
                     onChange={(e) => setProfileName(e.target.value)}
@@ -1003,11 +1158,223 @@ export default function ModelsView({
                     }}
                   />
                   <button type="button" className="pill-btn" onClick={() => void saveProfileName()}>
-                    {profileSaved ? 'Saved' : 'Save'}
+                    {profileSaved ? 'Saved' : 'Save name'}
                   </button>
                 </div>
               </section>
 
+              <section className="keys-section">
+                <h3>Startup</h3>
+                {detect === null ? (
+                  <span className="calendar-note">loading detection settings…</span>
+                ) : (
+                  <div className="cal-subcard">
+                    <div className="cal-row">
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">Start DoodleNote at login</span>
+                        <span className="cal-row-sub">
+                          Keeps meeting prompts working without remembering to open the app
+                        </span>
+                      </span>
+                      <Toggle
+                        checked={detect.loginItem}
+                        label="Start DoodleNote at login"
+                        onChange={() => {
+                          void window.detect
+                            .setPrefs({ loginItem: !detect.loginItem })
+                            .then(setDetect)
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </section>
+              <details open className="keys-section settings-fold">
+                <summary>
+                  <span>
+                    <h3>Updates</h3>
+                    <span className="settings-fold-description">
+                      App version and software updates
+                    </span>
+                  </span>
+                </summary>
+                <div className="settings-fold-body">
+                  <div className="cal-subcard">
+                    <div className="cal-row">
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">
+                          DoodleNote v{update?.currentVersion ?? '…'}
+                        </span>
+                        <span className="cal-row-sub">
+                          {update ? updateStatusLine(update) : 'loading…'}
+                        </span>
+                      </span>
+                      {update?.status === 'downloaded' ? (
+                        <button
+                          type="button"
+                          className="pill-btn"
+                          onClick={() => void window.updates.install()}
+                        >
+                          Restart to update
+                        </button>
+                      ) : update?.status === 'downloading' ? (
+                        <button
+                          type="button"
+                          className="pill-btn"
+                          onClick={() => void window.updates.cancel()}
+                        >
+                          Cancel download
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="pill-btn"
+                          disabled={
+                            checkPending ||
+                            update?.supported === false ||
+                            update?.status === 'checking' ||
+                            update?.status === 'installing'
+                          }
+                          onClick={() => void checkForUpdates()}
+                        >
+                          {update?.status === 'installing'
+                            ? 'Restarting…'
+                            : update?.status === 'error' || update?.status === 'cancelled'
+                              ? 'Retry update'
+                              : 'Check for updates'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <details open className="keys-section settings-fold">
+                <summary>
+                  <span>
+                    <h3>Welcome tour</h3>
+                    <span className="settings-fold-description">
+                      Replay the first-run walkthrough
+                    </span>
+                  </span>
+                </summary>
+                <div className="settings-fold-body">
+                  <div className="cal-subcard">
+                    <div className="cal-row">
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">Replay the first-run tour</span>
+                        <span className="cal-row-sub">
+                          A quick tour of recording, calendars, detection, sync, and models.
+                        </span>
+                      </span>
+                      <button type="button" className="pill-btn" onClick={() => onShowTour?.()}>
+                        Show tour
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <details open className="keys-section settings-fold">
+                <summary>
+                  <span>
+                    <h3>Troubleshooting</h3>
+                    <span className="settings-fold-description">
+                      Tools for diagnosing a problem
+                    </span>
+                  </span>
+                </summary>
+                <div className="settings-fold-body">
+                  <div className="cal-subcard">
+                    <div className="cal-row">
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">Developer console</span>
+                        <span className="cal-row-sub">
+                          Raw engine controls and event logs — handy when reporting a bug.
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className="pill-btn"
+                        onClick={() => onOpenDevConsole?.()}
+                      >
+                        Open
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </>
+          )}
+
+          {section === 'appearance' && (
+            <>
+              <section className="keys-section">
+                <h3>Set the mood.</h3>
+                <p className="models-sub">A familiar space, whatever time of day.</p>
+                <div className="theme-seg" role="radiogroup" aria-label="Appearance">
+                  {(
+                    [
+                      ['light', 'Light'],
+                      ['dark', 'Dark'],
+                      ['system', 'Match system']
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={theme === value}
+                      tabIndex={theme === value ? 0 : -1}
+                      onKeyDown={(event) => {
+                        const choices = Array.from(
+                          event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                            '[role="radio"]'
+                          ) ?? []
+                        )
+                        const index = choices.indexOf(event.currentTarget)
+                        const next =
+                          event.key === 'Home'
+                            ? 0
+                            : event.key === 'End'
+                              ? choices.length - 1
+                              : ['ArrowRight', 'ArrowDown'].includes(event.key)
+                                ? (index + 1) % choices.length
+                                : ['ArrowLeft', 'ArrowUp'].includes(event.key)
+                                  ? (index + choices.length - 1) % choices.length
+                                  : -1
+                        if (next < 0) return
+                        event.preventDefault()
+                        choices[next]?.focus()
+                        choices[next]?.click()
+                      }}
+                      className={theme === value ? 'theme-seg-btn on' : 'theme-seg-btn'}
+                      onClick={() => {
+                        setThemePref(value)
+                        setTheme(value)
+                      }}
+                    >
+                      <span className={`settings-theme-preview theme-${value}`} aria-hidden="true">
+                        <span />
+                        <span>
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                      </span>
+                      <span className="settings-theme-caption">
+                        {label}
+                        <span className="settings-radio-dot" aria-hidden="true" />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </>
+          )}
+
+          {section === 'recording' && (
+            <>
               {detect?.platform === 'darwin' && (
                 <section className="keys-section">
                   <h3>Recording transcription</h3>
@@ -1069,101 +1436,6 @@ export default function ModelsView({
                 </section>
               )}
 
-              <section className="keys-section">
-                <h3>Appearance</h3>
-                <div className="theme-seg" role="radiogroup" aria-label="Appearance">
-                  {(
-                    [
-                      ['system', 'Match system'],
-                      ['light', 'Light'],
-                      ['dark', 'Dark']
-                    ] as const
-                  ).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      role="radio"
-                      aria-checked={theme === value}
-                      className={theme === value ? 'theme-seg-btn on' : 'theme-seg-btn'}
-                      onClick={() => {
-                        setThemePref(value)
-                        setTheme(value)
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section className="keys-section">
-                <h3>Updates</h3>
-                <div className="cal-subcard">
-                  <div className="cal-row">
-                    <span className="cal-row-main">
-                      <span className="cal-row-label">
-                        DoodleNote v{update?.currentVersion ?? '…'}
-                      </span>
-                      <span className="cal-row-sub">
-                        {update ? updateStatusLine(update) : 'loading…'}
-                      </span>
-                    </span>
-                    {update?.status === 'downloaded' ? (
-                      <button
-                        type="button"
-                        className="pill-btn"
-                        onClick={() => void window.updates.install()}
-                      >
-                        Restart to update
-                      </button>
-                    ) : update?.status === 'downloading' ? (
-                      <button
-                        type="button"
-                        className="pill-btn"
-                        onClick={() => void window.updates.cancel()}
-                      >
-                        Cancel download
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="pill-btn"
-                        disabled={
-                          checkPending ||
-                          update?.supported === false ||
-                          update?.status === 'checking' ||
-                          update?.status === 'installing'
-                        }
-                        onClick={() => void checkForUpdates()}
-                      >
-                        {update?.status === 'installing'
-                          ? 'Restarting…'
-                          : update?.status === 'error' || update?.status === 'cancelled'
-                            ? 'Retry update'
-                            : 'Check for updates'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </section>
-
-              <section className="keys-section">
-                <h3>Welcome tour</h3>
-                <div className="cal-subcard">
-                  <div className="cal-row">
-                    <span className="cal-row-main">
-                      <span className="cal-row-label">Replay the first-run tour</span>
-                      <span className="cal-row-sub">
-                        A quick tour of recording, calendars, detection, sync, and models.
-                      </span>
-                    </span>
-                    <button type="button" className="pill-btn" onClick={() => onShowTour?.()}>
-                      Show tour
-                    </button>
-                  </div>
-                </div>
-              </section>
-
               <section className="keys-section calendar-section">
                 <h3>Meeting detection</h3>
                 <p className="models-sub">
@@ -1174,23 +1446,6 @@ export default function ModelsView({
                   <span className="calendar-note">loading detection settings…</span>
                 ) : (
                   <div className="cal-subcard">
-                    <div className="cal-row">
-                      <span className="cal-row-main">
-                        <span className="cal-row-label">Start DoodleNote at login</span>
-                        <span className="cal-row-sub">
-                          Keeps meeting prompts working without remembering to open the app
-                        </span>
-                      </span>
-                      <Toggle
-                        checked={detect.loginItem}
-                        label="Start DoodleNote at login"
-                        onChange={() => {
-                          void window.detect
-                            .setPrefs({ loginItem: !detect.loginItem })
-                            .then(setDetect)
-                        }}
-                      />
-                    </div>
                     {detect.micDetectSupported && (
                       <div className="cal-row">
                         <span className="cal-row-main">
@@ -1238,9 +1493,38 @@ export default function ModelsView({
                 )}
               </section>
 
+              {detect?.platform === 'darwin' && (
+                <section className="keys-section">
+                  <h3>Audio capture</h3>
+                  <div className="cal-subcard">
+                    {detect?.platform === 'darwin' && (
+                      <div className="cal-row">
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">Capture without screen permission</span>
+                          <span className="cal-row-sub">
+                            System audio is captured with a Core Audio tap (macOS 14.2+) — no Screen
+                            Recording access needed. Turn off to use the legacy ScreenCaptureKit
+                            capture instead.
+                          </span>
+                        </span>
+                        <Toggle
+                          checked={tapEnabled}
+                          label="Capture system audio without screen permission"
+                          onChange={toggleTapBackend}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          {section === 'storage' && (
+            <>
               {detect?.platform === 'darwin' && <StorageSettings />}
               <section className="keys-section">
-                <h3>Meeting recordings</h3>
+                <h3>Saved meeting audio</h3>
                 <p className="models-sub">
                   Recordings stay on this computer — they are never uploaded, even with sync on.
                 </p>
@@ -1259,23 +1543,7 @@ export default function ModelsView({
                       onChange={togglePersistAudio}
                     />
                   </div>
-                  {detect?.platform === 'darwin' && (
-                    <div className="cal-row">
-                      <span className="cal-row-main">
-                        <span className="cal-row-label">Capture without screen permission</span>
-                        <span className="cal-row-sub">
-                          System audio is captured with a Core Audio tap (macOS 14.2+) — no Screen
-                          Recording access needed. Turn off to use the legacy ScreenCaptureKit
-                          capture instead.
-                        </span>
-                      </span>
-                      <Toggle
-                        checked={tapEnabled}
-                        label="Capture system audio without screen permission"
-                        onChange={toggleTapBackend}
-                      />
-                    </div>
-                  )}
+
                   <div className="cal-row">
                     <span className="cal-row-main">
                       <span className="cal-row-label">Delete all recordings</span>
@@ -1298,155 +1566,265 @@ export default function ModelsView({
                   </div>
                 </div>
               </section>
-
-              <section className="keys-section">
-                <h3>Troubleshooting</h3>
-                <div className="cal-subcard">
-                  <div className="cal-row">
-                    <span className="cal-row-main">
-                      <span className="cal-row-label">Developer console</span>
-                      <span className="cal-row-sub">
-                        Raw engine controls and event logs — handy when reporting a bug.
-                      </span>
-                    </span>
-                    <button type="button" className="pill-btn" onClick={() => onOpenDevConsole?.()}>
-                      Open
-                    </button>
-                  </div>
-                </div>
-              </section>
             </>
           )}
 
-          {section === 'sync' && (
-            <section className="keys-section calendar-section">
-              <h3>Sync with cloud</h3>
-              <p className="models-sub">
-                Off by default — your meetings live only on this computer. Turn it on to push
-                meetings, transcripts, and notes to your DoodleNote workspace so you can browse and
-                share them on the web.
-              </p>
-
-              {syncError && (
-                <div className="models-error" role="alert">
-                  {syncError}
-                </div>
-              )}
-              {syncStatus?.lastError && <div className="models-error">{syncStatus.lastError}</div>}
-
-              {syncStatus === null ? (
-                <span className="calendar-note">loading sync settings…</span>
-              ) : !syncStatus.connected ? (
-                <div className="calendar-actions">
-                  <button
-                    type="button"
-                    className="ms-signin"
-                    disabled={syncStatus.linking}
-                    onClick={() => void connectSync()}
-                  >
-                    <span>
-                      {syncStatus.linking
-                        ? 'Waiting for your browser…'
-                        : 'Connect DoodleNote Cloud'}
-                    </span>
-                  </button>
-                  {syncStatus.linking && (
-                    <>
-                      <button type="button" className="pill-btn" onClick={() => void cancelSync()}>
-                        Cancel
+          {section === 'more' && (
+            <>
+              <section className="settings-cloud-hero">
+                <div>
+                  <span className="settings-eyebrow">THE CLOUD SYNC PLAN</span>
+                  <h2>
+                    Your ideas.
+                    <br />A little more connected.
+                  </h2>
+                  <p>
+                    Keep your notes close, bring your team along, and give your AI tools the context
+                    they need.
+                  </p>
+                  <div className="settings-cloud-actions">
+                    <button
+                      type="button"
+                      className="pill-btn"
+                      onClick={() => window.open('https://www.doodlenote.ai/pricing')}
+                    >
+                      Get Cloud Sync <SettingsIcon name="plus" size={16} />
+                    </button>
+                    {!syncStatus?.connected ? (
+                      <button
+                        type="button"
+                        className="settings-cloud-existing"
+                        disabled={syncStatus === null || syncStatus.linking}
+                        onClick={() => void connectSync()}
+                      >
+                        {syncStatus?.linking
+                          ? 'Waiting for your browser…'
+                          : 'Already have an account? Connect'}
                       </button>
-                      <span className="calendar-note" role="status">
-                        Approve in your browser, or cancel to try again if you closed it.
+                    ) : (
+                      <span className="calendar-note">
+                        Connected as {syncStatus.email ?? 'your account'}
                       </span>
-                    </>
+                    )}
+                    {syncStatus?.linking && (
+                      <button type="button" className="pill-btn" onClick={() => void cancelSync()}>
+                        Cancel sign-in
+                      </button>
+                    )}
+                  </div>
+                  {syncError && (
+                    <p className="models-error" role="alert">
+                      {syncError}
+                    </p>
                   )}
                 </div>
-              ) : (
-                <div className="calendar-connected">
-                  <span className="calendar-status">
-                    Connected as <strong>{syncStatus.email ?? 'your account'}</strong>
-                    {syncStatus.workspaceName && (
-                      <span className="calendar-note">
-                        {' '}
-                        · workspace “{syncStatus.workspaceName}”
-                      </span>
-                    )}
-                    {syncStatus.lastSyncAt && (
-                      <span className="calendar-note">
-                        {' '}
-                        · {lastSyncLabel(syncStatus.lastSyncAt)}
-                      </span>
-                    )}
+                <div className="settings-cloud-art" aria-hidden="true">
+                  <span className="settings-cloud-note">
+                    <i className="settings-note-line" />
+                    <i className="settings-note-line" />
+                    <i className="settings-note-line short" />
+                    Good thoughts.
+                    <br />
+                    More possibilities.
                   </span>
-
-                  <div className="cal-subcard">
-                    <div className="cal-row">
-                      <span className="cal-row-main">
-                        <span className="cal-row-label">Sync meetings to the cloud</span>
-                        <span className="cal-row-sub">
-                          {syncStatus.enabled
-                            ? syncStatus.syncing
-                              ? 'Syncing now…'
-                              : syncStatus.pendingCount > 0
-                                ? `${syncStatus.pendingCount} meeting${syncStatus.pendingCount === 1 ? '' : 's'} waiting to sync`
-                                : syncStatus.blockedMessage
-                                  ? 'Everything else is synced'
-                                  : 'Everything is synced'
-                            : 'Paused — nothing is uploaded while this is off'}
-                        </span>
-                        {syncStatus.enabled && syncStatus.blockedMessage && (
-                          <span className="cal-row-sub" role="status">
-                            {syncStatus.blockedMessage}
-                          </span>
-                        )}
-                      </span>
-                      <Toggle
-                        checked={syncStatus.enabled}
-                        label="Sync meetings to the cloud"
-                        onChange={() => {
-                          void window.sync.setEnabled(!syncStatus.enabled).then(adoptSyncStatus)
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="calendar-actions">
-                    {syncStatus.linking && (
-                      <button type="button" onClick={() => void cancelSync()}>
-                        Cancel
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      disabled={syncStatus.syncing || !syncStatus.enabled}
-                      onClick={() => {
-                        void window.sync.syncNow().then(adoptSyncStatus)
-                      }}
-                    >
-                      {syncStatus.syncing ? 'Syncing…' : 'Sync now'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void window.sync.disconnect().then(adoptSyncStatus)
-                      }}
-                    >
-                      Disconnect
-                    </button>
-                  </div>
+                  <span className="settings-cloud-orbit">
+                    <SettingsIcon name="cloud" size={24} />
+                  </span>
+                  <span className="settings-cloud-orbit orbit-two">
+                    <SettingsIcon name="sparkle" size={22} />
+                  </span>
                 </div>
-              )}
-            </section>
+              </section>
+              <div className="settings-cloud-benefits">
+                {[
+                  [
+                    'Your notes, everywhere',
+                    'Keep meetings, notes, and transcripts in sync across your linked devices.'
+                  ],
+                  ['A library in your browser', 'Read and search your synced notes on the web.'],
+                  ['Share the useful bits', 'Send read-only meeting links so others can catch up.'],
+                  [
+                    'One shared team memory',
+                    'Bring your team’s meeting knowledge into a shared workspace.'
+                  ],
+                  [
+                    'The whole picture',
+                    'Images in your notes sync too, including on shared meeting pages.'
+                  ],
+                  [
+                    'Put your notes to work',
+                    'Give connected agents access to synced workspace notes and transcripts through remote MCP, including Composio.'
+                  ]
+                ].map(([title, description], index) => (
+                  <article key={title}>
+                    <span className="settings-benefit-icon">
+                      <SettingsIcon
+                        name={
+                          (
+                            [
+                              'cloud',
+                              'notebook',
+                              'integrations',
+                              'general',
+                              'appearance',
+                              'sparkle'
+                            ] as SettingsIconName[]
+                          )[index]
+                        }
+                      />
+                    </span>
+                    <h3>{title}</h3>
+                    <p>{description}</p>
+                  </article>
+                ))}
+              </div>
+              <p className="settings-cloud-footnote">
+                Everything in the free app stays included. Recording and on-device transcription
+                stay local. Cloud Sync is optional.
+              </p>
+            </>
           )}
 
-          {section === 'integrations' && (
-            <>
+          {section === 'more' && (
+            <SettingsCloudAccess
+              key={`${syncStatus?.baseUrl}:${syncStatus?.connectionRevision}`}
+              active={active}
+              status={syncStatus}
+              onConnect={() => void connectSync()}
+              onDisconnect={() => void window.sync.disconnect().then(adoptSyncStatus)}
+            >
+              <span className="settings-section-kicker">Your cloud connection</span>
+              <section className="keys-section calendar-section">
+                <h3>Sync with cloud</h3>
+                <p className="models-sub">
+                  Off by default — your meetings live only on this computer. Turn it on to push
+                  meetings, transcripts, and notes to your DoodleNote workspace so you can browse
+                  and share them on the web.
+                </p>
+
+                {syncError && (
+                  <div className="models-error" role="alert">
+                    {syncError}
+                  </div>
+                )}
+                {syncStatus?.lastError && (
+                  <div className="models-error">{syncStatus.lastError}</div>
+                )}
+
+                {syncStatus === null ? (
+                  <span className="calendar-note">loading sync settings…</span>
+                ) : !syncStatus.connected ? (
+                  <div className="calendar-actions">
+                    <button
+                      type="button"
+                      className="ms-signin"
+                      disabled={syncStatus.linking}
+                      onClick={() => void connectSync()}
+                    >
+                      <span>
+                        {syncStatus.linking
+                          ? 'Waiting for your browser…'
+                          : 'Connect DoodleNote Cloud'}
+                      </span>
+                    </button>
+                    {syncStatus.linking && (
+                      <>
+                        <button
+                          type="button"
+                          className="pill-btn"
+                          onClick={() => void cancelSync()}
+                        >
+                          Cancel
+                        </button>
+                        <span className="calendar-note" role="status">
+                          Approve in your browser, or cancel to try again if you closed it.
+                        </span>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="calendar-connected">
+                    <span className="calendar-status">
+                      Connected as <strong>{syncStatus.email ?? 'your account'}</strong>
+                      {syncStatus.workspaceName && (
+                        <span className="calendar-note">
+                          {' '}
+                          · workspace “{syncStatus.workspaceName}”
+                        </span>
+                      )}
+                      {syncStatus.lastSyncAt && (
+                        <span className="calendar-note">
+                          {' '}
+                          · {lastSyncLabel(syncStatus.lastSyncAt)}
+                        </span>
+                      )}
+                    </span>
+
+                    <div className="cal-subcard">
+                      <div className="cal-row">
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">Sync meetings to the cloud</span>
+                          <span className="cal-row-sub">
+                            {syncStatus.enabled
+                              ? syncStatus.syncing
+                                ? 'Syncing now…'
+                                : syncStatus.pendingCount > 0
+                                  ? `${syncStatus.pendingCount} meeting${syncStatus.pendingCount === 1 ? '' : 's'} waiting to sync`
+                                  : syncStatus.blockedMessage
+                                    ? 'Everything else is synced'
+                                    : 'Everything is synced'
+                              : 'Paused — nothing is uploaded while this is off'}
+                          </span>
+                          {syncStatus.enabled && syncStatus.blockedMessage && (
+                            <span className="cal-row-sub" role="status">
+                              {syncStatus.blockedMessage}
+                            </span>
+                          )}
+                        </span>
+                        <Toggle
+                          checked={syncStatus.enabled}
+                          label="Sync meetings to the cloud"
+                          onChange={() => {
+                            void window.sync.setEnabled(!syncStatus.enabled).then(adoptSyncStatus)
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="calendar-actions">
+                      {syncStatus.linking && (
+                        <button type="button" onClick={() => void cancelSync()}>
+                          Cancel
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={syncStatus.syncing || !syncStatus.enabled}
+                        onClick={() => {
+                          void window.sync.syncNow().then(adoptSyncStatus)
+                        }}
+                      >
+                        {syncStatus.syncing ? 'Syncing…' : 'Sync now'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void window.sync.disconnect().then(adoptSyncStatus)
+                        }}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
               {active && syncStatus?.connected && (
                 <PaidRemoteMcpSetup
                   key={`${syncStatus.baseUrl}:${syncStatus.connectionRevision}`}
                   baseUrl={syncStatus.baseUrl}
                 />
               )}
+              <span className="settings-section-kicker">On this computer</span>
               <section className="keys-section calendar-section">
                 <h3>Local MCP</h3>
                 <p className="models-sub">
@@ -1539,160 +1917,167 @@ export default function ModelsView({
                   </>
                 )}
               </section>
-            </>
+            </SettingsCloudAccess>
           )}
 
           {section === 'model' && (
-            <section className="keys-section">
-              <h3>Meeting notes</h3>
-              <div className="cal-row">
-                <span className="cal-row-main">
-                  <span className="cal-row-label">Generate notes automatically after Stop</span>
-                  <span className="cal-row-sub">
-                    After you stop recording or a detected meeting ends, generate notes once the
-                    transcript is saved. Uses your selected model and template. On-device processing
-                    stays local; your configured external provider receives text and may charge
-                    usage fees. Audio is not sent for note generation.
+            <>
+              <section className="keys-section">
+                <h3>Meeting notes</h3>
+                <div className="cal-row">
+                  <span className="cal-row-main">
+                    <span className="cal-row-label">Generate notes automatically after Stop</span>
+                    <span className="cal-row-sub">
+                      After you stop recording or a detected meeting ends, generate notes once the
+                      transcript is saved. Uses your selected model and template. On-device
+                      processing stays local; your configured external provider receives text and
+                      may charge usage fees. Audio is not sent for note generation.
+                    </span>
                   </span>
-                </span>
-                <Toggle
-                  checked={settings?.autoGenerateNotesAfterStop !== false}
-                  disabled={!settings || savingAutoNotes}
-                  onChange={() => void toggleAutoNotes()}
-                  label="Generate notes automatically after Stop"
-                />
-              </div>
-              <h3>AI keys (optional)</h3>
-              <p className="models-sub">
-                On-device is the default and needs no account. Add your own API key only if you want
-                cloud-quality notes — the key is encrypted with your system keychain and never shown
-                again.
-              </p>
-
-              <div className="engine-choice">
-                <label>
-                  <input
-                    type="radio"
-                    name="engine-choice"
-                    checked={engineChoice === 'local'}
-                    onChange={() => void chooseEngine('local')}
+                  <Toggle
+                    checked={settings?.autoGenerateNotesAfterStop !== false}
+                    disabled={!settings || savingAutoNotes}
+                    onChange={() => void toggleAutoNotes()}
+                    label="Generate notes automatically after Stop"
                   />
-                  On-device (default)
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="engine-choice"
-                    checked={engineChoice === 'cloud'}
-                    onChange={() => void chooseEngine('cloud')}
-                  />
-                  Cloud with my key
-                  {engineChoice === 'cloud' && !settings?.cloud?.hasKey && (
-                    <span className="model-note"> (no key saved yet — on-device will be used)</span>
-                  )}
-                </label>
-              </div>
-
-              <p className="models-sub">
-                External AI receives meeting titles (including Google Calendar titles), notes,
-                transcripts, and chat context. Use an API account with model training and data
-                sharing disabled. Consumer chat subscriptions are not API plans. On-device models
-                process content locally without sending it to the model publisher.
-              </p>
-              {(provider === 'groq' || provider === 'openrouter') && (
+                </div>
+              </section>
+              <section className="keys-section">
+                <h3>AI keys (optional)</h3>
                 <p className="models-sub">
-                  Groq and OpenRouter have been replaced by direct Grok and Gemini integrations.
-                  Choose a provider and enter its own API key. Existing keys are never reused with
-                  another provider. Your notes are unchanged.
+                  On-device is the default and needs no account. Add your own API key only if you
+                  want cloud-quality notes — the key is encrypted with your system keychain and
+                  never shown again.
                 </p>
-              )}
-              {provider !== 'ollama' && provider !== 'groq' && provider !== 'openrouter' && (
-                <label className="models-sub">
-                  <input
-                    type="checkbox"
-                    checked={dataPolicyConfirmed}
-                    onChange={(e) => setDataPolicyConfirmed(e.target.checked)}
-                  />
-                  I authorize sending meeting content to this API provider and confirm its account
-                  settings do not allow model training or data sharing for training.
-                  {provider === 'gemini' &&
-                    ' My Gemini API key belongs to a project with active Cloud Billing; unpaid Gemini API use is not permitted.'}
-                </label>
-              )}
 
-              <div className="key-form">
-                <select
-                  value={provider}
-                  onChange={(e) => {
-                    setProvider(e.target.value as CloudProvider)
-                    setApiKey('')
-                    setCloudModel('')
-                    setKeySaved(false)
-                    setDataPolicyConfirmed(false)
-                  }}
-                >
-                  {(provider === 'groq' || provider === 'openrouter') && (
-                    <option value={provider} disabled>
-                      {provider === 'groq' ? 'Groq' : 'OpenRouter'} (retired; choose a provider)
-                    </option>
-                  )}
-                  {CLOUD_PROVIDERS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
+                <div className="engine-choice">
+                  <label>
+                    <input
+                      type="radio"
+                      name="engine-choice"
+                      checked={engineChoice === 'local'}
+                      onChange={() => void chooseEngine('local')}
+                    />
+                    On-device (default)
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="engine-choice"
+                      checked={engineChoice === 'cloud'}
+                      onChange={() => void chooseEngine('cloud')}
+                    />
+                    Cloud with my key
+                    {engineChoice === 'cloud' && !settings?.cloud?.hasKey && (
+                      <span className="model-note">
+                        {' '}
+                        (no key saved yet — on-device will be used)
+                      </span>
+                    )}
+                  </label>
+                </div>
 
-                <input
-                  type="password"
-                  placeholder={
-                    provider === 'ollama'
-                      ? 'no key needed — uses localhost:11434'
-                      : settings?.cloud?.provider === provider && settings.cloud.hasKey
-                        ? '••••••••  (key saved)'
-                        : 'API key'
-                  }
-                  disabled={provider === 'ollama'}
-                  value={provider === 'ollama' ? '' : apiKey}
-                  onChange={(e) => {
-                    setApiKey(e.target.value)
-                    setDataPolicyConfirmed(false)
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={
-                    provider === 'groq' ||
-                    provider === 'openrouter' ||
-                    (provider !== 'ollama' && !dataPolicyConfirmed)
-                  }
-                  onClick={() => void saveCloudKey()}
-                >
-                  Save
-                </button>
-                {(keySaved ||
-                  (settings?.cloud?.provider === provider && settings.cloud.hasKey)) && (
-                  <span className="key-saved">key saved ✓</span>
+                <p className="models-sub">
+                  External AI receives meeting titles (including Google Calendar titles), notes,
+                  transcripts, and chat context. Use an API account with model training and data
+                  sharing disabled. Consumer chat subscriptions are not API plans. On-device models
+                  process content locally without sending it to the model publisher.
+                </p>
+                {(provider === 'groq' || provider === 'openrouter') && (
+                  <p className="models-sub">
+                    Groq and OpenRouter have been replaced by direct Grok and Gemini integrations.
+                    Choose a provider and enter its own API key. Existing keys are never reused with
+                    another provider. Your notes are unchanged.
+                  </p>
                 )}
-              </div>
-              {provider !== 'groq' && provider !== 'openrouter' && (
-                <CloudModelPicker
-                  key={provider}
-                  provider={provider}
-                  saved={
-                    settings?.cloud?.provider === provider &&
-                    settings.cloud.hasKey &&
-                    !apiKey.trim()
-                  }
-                  revision={catalogRevision}
-                  value={cloudModel}
-                  defaultModel={MODEL_PLACEHOLDERS[provider]}
-                  onChange={setCloudModel}
-                  onSave={() => void saveCloudKey()}
-                  canSave={provider === 'ollama' || dataPolicyConfirmed}
-                />
-              )}
-            </section>
+                {provider !== 'ollama' && provider !== 'groq' && provider !== 'openrouter' && (
+                  <label className="models-sub">
+                    <input
+                      type="checkbox"
+                      checked={dataPolicyConfirmed}
+                      onChange={(e) => setDataPolicyConfirmed(e.target.checked)}
+                    />
+                    I authorize sending meeting content to this API provider and confirm its account
+                    settings do not allow model training or data sharing for training.
+                    {provider === 'gemini' &&
+                      ' My Gemini API key belongs to a project with active Cloud Billing; unpaid Gemini API use is not permitted.'}
+                  </label>
+                )}
+
+                <div className="key-form">
+                  <select
+                    value={provider}
+                    onChange={(e) => {
+                      setProvider(e.target.value as CloudProvider)
+                      setApiKey('')
+                      setCloudModel('')
+                      setKeySaved(false)
+                      setDataPolicyConfirmed(false)
+                    }}
+                  >
+                    {(provider === 'groq' || provider === 'openrouter') && (
+                      <option value={provider} disabled>
+                        {provider === 'groq' ? 'Groq' : 'OpenRouter'} (retired; choose a provider)
+                      </option>
+                    )}
+                    {CLOUD_PROVIDERS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="password"
+                    placeholder={
+                      provider === 'ollama'
+                        ? 'no key needed — uses localhost:11434'
+                        : settings?.cloud?.provider === provider && settings.cloud.hasKey
+                          ? '••••••••  (key saved)'
+                          : 'API key'
+                    }
+                    disabled={provider === 'ollama'}
+                    value={provider === 'ollama' ? '' : apiKey}
+                    onChange={(e) => {
+                      setApiKey(e.target.value)
+                      setDataPolicyConfirmed(false)
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      provider === 'groq' ||
+                      provider === 'openrouter' ||
+                      (provider !== 'ollama' && !dataPolicyConfirmed)
+                    }
+                    onClick={() => void saveCloudKey()}
+                  >
+                    Save
+                  </button>
+                  {(keySaved ||
+                    (settings?.cloud?.provider === provider && settings.cloud.hasKey)) && (
+                    <span className="key-saved">key saved ✓</span>
+                  )}
+                </div>
+                {provider !== 'groq' && provider !== 'openrouter' && (
+                  <CloudModelPicker
+                    key={provider}
+                    provider={provider}
+                    saved={
+                      settings?.cloud?.provider === provider &&
+                      settings.cloud.hasKey &&
+                      !apiKey.trim()
+                    }
+                    revision={catalogRevision}
+                    value={cloudModel}
+                    defaultModel={MODEL_PLACEHOLDERS[provider]}
+                    onChange={setCloudModel}
+                    onSave={() => void saveCloudKey()}
+                    canSave={provider === 'ollama' || dataPolicyConfirmed}
+                  />
+                )}
+              </section>
+            </>
           )}
         </div>
       </div>

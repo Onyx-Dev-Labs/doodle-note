@@ -39,7 +39,12 @@ export function initAutoUpdater(
   broadcast: (channel: string, payload: unknown) => void,
   /** Awaited before quitAndInstall — unload native addons that crash on a
    *  normal teardown (the llama addon SIGABRTs if a model is loaded). */
-  beforeInstall?: () => Promise<void>
+  beforeInstall?: () => Promise<void>,
+  /**
+   * False for the development lineage: it has no update feed, never checks one,
+   * and reports itself as unsupported rather than reaching production services.
+   */
+  options: { enabled: boolean } = { enabled: true }
 ): void {
   let readyNotification: Notification | null = null
   let previousStatus: UpdateState['status'] | undefined
@@ -52,7 +57,7 @@ export function initAutoUpdater(
   const coordinator = new UpdateCoordinator(
     autoUpdater,
     app.getVersion(),
-    app.isPackaged,
+    app.isPackaged && options.enabled,
     (state) => {
       if (state.status !== previousStatus) log(state.status, state.latestVersion)
       previousStatus = state.status
@@ -120,7 +125,7 @@ export function initAutoUpdater(
     void installNow()
   })
 
-  if (!app.isPackaged) return
+  if (!app.isPackaged || !options.enabled) return
 
   applyUpdatePolicy(autoUpdater)
   autoUpdater.autoDownload = false

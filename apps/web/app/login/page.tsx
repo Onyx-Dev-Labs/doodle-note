@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { googleEnabled, microsoftEnabled } from "@/lib/create-auth";
+import { safeNextPath } from "@/lib/safe-next-path";
 import { resolveAuthEmailEnabled } from "@/lib/runtime-config";
 
 import { LoginForm } from "./login-form";
@@ -15,8 +16,7 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string }>;
 }) {
   const { next } = await searchParams;
-  // Only same-site paths — never redirect off-domain after sign-in.
-  const nextPath = next && next.startsWith("/") && !next.startsWith("//") ? next : "/app";
+  const nextPath = safeNextPath(next);
 
   const session = await auth.api.getSession({ headers: await headers() });
   if (session) redirect(nextPath);

@@ -1,3 +1,4 @@
+import * as dictationModel from './dictation-model'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import * as fs from 'node:fs'
@@ -47,6 +48,7 @@ function createService(
     },
     './library-path': libraryPath,
     './cloud-models': { fetchCloudModels: () => [] },
+    './dictation-model': dictationModel,
     './model-paths': { modelSearchDirectories: () => [dir] },
     'node:fs': fs,
     'node:path': path,

@@ -21,7 +21,8 @@ enum Events {
         guard JSONSerialization.isValidJSONObject(payload),
             let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         else {
-            log("dropped unencodable event: \(payload)")
+            // Names only: an event can carry transcript text, which never goes to a log.
+            log("dropped unencodable event: \(payload["event"] ?? "?") (fields: \(payload.keys.sorted().joined(separator: ", ")))")
             return
         }
         FileHandle.standardOutput.write(data)

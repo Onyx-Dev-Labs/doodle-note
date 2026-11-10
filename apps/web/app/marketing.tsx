@@ -45,8 +45,12 @@ export function MarketingHeader() {
     <header className="site-header wrap">
       <MarketingBrand />
       <nav className="desktop-nav" aria-label="Main navigation">
+        {/* Native anchor also scrolls correctly when the current URL already has #bark. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a href="/#bark">Bark</a>
         <Link href="/#how-it-works">How it works</Link>
         <Link href="/pricing">Pricing</Link>
+        <Link href="/help">Docs</Link>
       </nav>
       <div className="header-actions">
         <GitHubLink />
@@ -63,8 +67,12 @@ export function MarketingFooter() {
     <footer className="wrap footer">
       <MarketingBrand />
       <nav className="footer-nav" aria-label="Footer">
+        {/* Native anchor also scrolls correctly when the current URL already has #bark. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a href="/#bark">Bark</a>
         <Link href="/pricing">Pricing</Link>
         <Link href="/changelog">What’s new</Link>
+        <Link href="/help">Help &amp; guides</Link>
         <Link href="/contact">Contact</Link>
         <Link href="/privacy">Privacy</Link>
         <Link href="/terms">Terms</Link>

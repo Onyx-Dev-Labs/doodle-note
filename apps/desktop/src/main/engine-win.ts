@@ -14,19 +14,22 @@
  *        {t:'stop'}                       — finish session (emit finals+done)
  *   out: {t:'event', event:{...}}         — engine event object
  */
-import { spawn } from 'node:child_process'
-import { createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs'
-import { get as httpsGet } from 'node:https'
 import { join } from 'node:path'
 import {
   WINDOWS_ASR_SAMPLE_RATE,
   boundedTokenWindow,
   finishOnlineStream
 } from './engine-win-finalize'
-import { ensureWindowsWhisperModel, splitWhisperWindows } from './windows-whisper-model'
+import {
+  WINDOWS_LIVE_FILES,
+  WINDOWS_LIVE_MODEL,
+  ensureWindowsLiveModel,
+  ensureWindowsWhisperModel,
+  modelFilesMatch,
+  splitWhisperWindows
+} from './windows-whisper-model'
 
-const MODEL_NAME = 'sherpa-onnx-streaming-zipformer-en-2023-06-26'
-const MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`
+const MODEL_NAME = WINDOWS_LIVE_MODEL
 const PARTIAL_THROTTLE_MS = 400
 /** endSec for the trailing token when the next one hasn't arrived yet. */
 const TOKEN_TAIL_SEC = 0.25
@@ -55,70 +58,10 @@ function emit(event: Record<string, unknown>): void {
 /* ---- model management ---- */
 
 async function ensureModel(modelsDir: string): Promise<string> {
-  const dir = join(modelsDir, MODEL_NAME)
-  if (existsSync(join(dir, 'tokens.txt'))) return dir
-  mkdirSync(modelsDir, { recursive: true })
-  const archive = join(modelsDir, `${MODEL_NAME}.tar.bz2`)
-
-  emit({ event: 'status', stage: 'downloading_model', model: MODEL_NAME })
-  await download(MODEL_URL, archive, (pct) => emit({ event: 'download', progress: pct / 100 }))
-
-  emit({ event: 'status', stage: 'extracting_model' })
-  // Windows 10+ ships bsdtar as tar.exe; -xjf handles .tar.bz2.
-  await new Promise<void>((resolve, reject) => {
-    const tar = spawn('tar', ['-xjf', archive, '-C', modelsDir])
-    tar.on('error', reject)
-    tar.on('exit', (code) =>
-      code === 0 ? resolve() : reject(new Error(`tar exited with ${code}`))
-    )
-  })
-  rmSync(archive, { force: true })
-  if (!existsSync(join(dir, 'tokens.txt'))) {
-    throw new Error('Model archive extracted but tokens.txt is missing')
+  if (!modelFilesMatch(join(modelsDir, MODEL_NAME), WINDOWS_LIVE_FILES)) {
+    emit({ event: 'status', stage: 'downloading_model', model: MODEL_NAME })
   }
-  return dir
-}
-
-function download(url: string, dest: string, onPct: (pct: number) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const follow = (target: string, redirects: number): void => {
-      if (redirects > 5) return reject(new Error('Too many redirects'))
-      httpsGet(target, (res) => {
-        if (
-          res.statusCode &&
-          res.statusCode >= 300 &&
-          res.statusCode < 400 &&
-          res.headers.location
-        ) {
-          res.resume()
-          return follow(res.headers.location, redirects + 1)
-        }
-        if (res.statusCode !== 200) {
-          res.resume()
-          return reject(new Error(`Model download failed: HTTP ${res.statusCode}`))
-        }
-        const total = Number(res.headers['content-length'] ?? 0)
-        let seen = 0
-        let lastPct = -1
-        const file = createWriteStream(dest)
-        res.on('data', (chunk: Buffer) => {
-          seen += chunk.length
-          if (total > 0) {
-            const pct = Math.floor((seen / total) * 100)
-            if (pct !== lastPct) {
-              lastPct = pct
-              onPct(pct)
-            }
-          }
-        })
-        res.pipe(file)
-        file.on('finish', () => file.close(() => resolve()))
-        file.on('error', reject)
-        res.on('error', reject)
-      }).on('error', reject)
-    }
-    follow(url, 0)
-  })
+  return ensureWindowsLiveModel(modelsDir, (progress) => emit({ event: 'download', progress }))
 }
 
 /* ---- per-channel streaming pipeline ---- */

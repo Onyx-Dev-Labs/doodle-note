@@ -17,12 +17,14 @@ import ModelsView, { type SettingsSection } from './ModelsView'
 import OnboardingTour from './OnboardingTour'
 import mascotUrl from './assets/mascot-square.png'
 import './assets/sidebar-redesign.css'
+import { COMMUNITY_LABEL, openCommunity } from './lib/community'
 import { isOnboardingDone, isSetupWizardDone, markSetupWizardDone } from './lib/onboarding'
 import FirstRunWizard from './FirstRunWizard'
 import { startWinCapture, stopWinCapture, switchWinInputDevice } from './lib/win-capture'
 import { decodeWinBatchAudio, cancelWinBatchAudio } from './lib/win-batch-decode'
 import {
   CalendarIcon,
+  CommunityIcon,
   FolderIcon,
   GearIcon,
   HomeIcon,
@@ -119,6 +121,16 @@ function App(): React.JSX.Element {
   const refreshHome = useCallback(() => {
     setHomeRefresh((n) => n + 1)
   }, [])
+
+  // The dictation pill's menu asks for its settings page.
+  useEffect(
+    () =>
+      window.dictation.onOpenSettings(() => {
+        setSettingsJump({ section: 'dictation', n: Date.now() })
+        setView('settings')
+      }),
+    []
+  )
 
   // Cloud pull can add/update meetings while Home is on screen.
   useEffect(() => window.meetings.onChanged(refreshHome), [refreshHome])
@@ -641,6 +653,39 @@ function App(): React.JSX.Element {
             <div className="privacy-badge">
               <LockIcon size={12} /> Local &amp; private
             </div>
+            <button
+              type="button"
+              className="nav-item"
+              title="DoodleNote setup, tutorials, and troubleshooting"
+              onClick={() => window.open('https://www.doodlenote.ai/help')}
+            >
+              <span className="nav-icon" aria-hidden="true">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 5C8 2 5 3 2 4v15c3-1 6-2 10 1 4-3 7-2 10-1V4c-3-1-6-2-10 1Zm0 0v15" />
+                </svg>
+              </span>
+              Help &amp; guides
+            </button>
+            <button
+              type="button"
+              className="nav-item"
+              title="Help, updates and early testing on Discord"
+              onClick={openCommunity}
+            >
+              <span className="nav-icon">
+                <CommunityIcon size={14} />
+              </span>
+              {COMMUNITY_LABEL}
+            </button>
             <button
               type="button"
               className={view === 'settings' ? 'nav-item on' : 'nav-item'}

@@ -237,3 +237,146 @@ describe('EngineProcess dispose', { skip: process.platform === 'win32' }, () => 
     await waitFor(() => logLines(log).includes('SIGTERM'), 'immediate SIGTERM', 2_000)
   })
 })
+
+describe('EngineProcess voice filter', { skip: process.platform === 'win32' }, () => {
+  it('passes the recorded voice to a live session', async () => {
+    const { binary, log } = fakeEngine(
+      [
+        "log('argv ' + process.argv.slice(2).join(' '))",
+        'process.stdin.resume()',
+        "emit({ event: 'ready', mode: 'live' })"
+      ].join('\n')
+    )
+    const engine = new EngineProcess(binary)
+    cleanups.push(() => engine.dispose())
+    engine.start('live', undefined, { source: 'mic', voiceprint: '/profile/voice.json' })
+    await waitFor(() => logLines(log).length > 0, 'engine start')
+    assert.match(logLines(log)[0] ?? '', /--source mic .*--voiceprint \/profile\/voice\.json/)
+  })
+
+  it('the resident engine gets the voice on start and is asked to warm its models', async () => {
+    const { binary, log } = fakeEngine(
+      [
+        "emit({ event: 'status', stage: 'serve_ready' })",
+        "let buffer = ''",
+        "process.stdin.on('data', (chunk) => {",
+        '  buffer += chunk',
+        "  for (let nl = buffer.indexOf('\\n'); nl !== -1; nl = buffer.indexOf('\\n')) {",
+        "    log('cmd ' + buffer.slice(0, nl))",
+        '    buffer = buffer.slice(nl + 1)',
+        '  }',
+        '})'
+      ].join('\n')
+    )
+    const engine = new EngineProcess(binary)
+    cleanups.push(() => engine.dispose())
+    engine.startServe()
+    engine.warmVoice()
+    await waitFor(() => engine.warm, 'serve ready')
+    engine.start('live', undefined, { source: 'mic', voiceprint: '/profile/voice.json' })
+    await waitFor(() => logLines(log).length >= 2, 'serve commands')
+    const commands = logLines(log).map(
+      (line) => JSON.parse(line.slice(4)) as Record<string, unknown>
+    )
+    assert.deepEqual(commands[0], { cmd: 'warm-voice' })
+    assert.equal(commands[1]?.cmd, 'start')
+    assert.equal(commands[1]?.voiceprint, '/profile/voice.json')
+  })
+
+  it('records a voice: progress, an early finish, and the verdict', async () => {
+    const { binary, log } = fakeEngine(
+      [
+        "log('argv ' + process.argv.slice(2).join(' '))",
+        "emit({ event: 'download', progress: 0.5 })",
+        "emit({ event: 'ready', mode: 'enroll' })",
+        "emit({ event: 'level', channel: 'mic', peak: 0.25 })",
+        "process.stdin.on('data', (chunk) => {",
+        "  if (!String(chunk).includes('finish')) return",
+        "  emit({ event: 'status', stage: 'analysing_voice' })",
+        "  emit({ event: 'voiceprint', ok: true, speechSeconds: 12, levelDb: -20, deviceName: 'USB Mic' })",
+        "  emit({ event: 'done' })",
+        '  process.exit(0)',
+        '})'
+      ].join('\n')
+    )
+    const engine = new EngineProcess(binary)
+    cleanups.push(() => engine.dispose())
+    const progress: string[] = []
+    const run = engine.enrollVoice({
+      outPath: '/profile/voice.json',
+      inputDevice: 'usb-1',
+      seconds: 20,
+      onProgress: (event) => void progress.push(event.type)
+    })
+    assert.ok(run)
+    assert.equal(engine.enrolling, true)
+    assert.equal(engine.enrollVoice({ outPath: '/x', seconds: 20, onProgress: () => {} }), null)
+    await waitFor(() => progress.includes('level'), 'recording progress')
+    run.finish()
+    assert.deepEqual(await run.result, { ok: true, deviceName: 'USB Mic' })
+    assert.deepEqual(progress, ['download', 'recording', 'level', 'analysing'])
+    assert.equal(engine.enrolling, false)
+    assert.match(
+      logLines(log)[0] ?? '',
+      /^argv enroll-voice --out \/profile\/voice\.json --seconds 20 --exit-on-stdin-close --input-device usb-1$/
+    )
+  })
+
+  it('a cancelled or too-quiet recording says so, and a meeting start takes the microphone', async () => {
+    const quiet = fakeEngine(
+      [
+        "emit({ event: 'voiceprint', ok: false, reason: 'not_enough_speech', speechSeconds: 1 })",
+        "emit({ event: 'done' })"
+      ].join('\n')
+    )
+    const first = new EngineProcess(quiet.binary)
+    cleanups.push(() => first.dispose())
+    const short = first.enrollVoice({ outPath: '/x', seconds: 20, onProgress: () => {} })
+    assert.deepEqual(await short?.result, { ok: false, reason: 'not-enough-speech' })
+
+    const waiting = fakeEngine(
+      [
+        "if (process.argv[2] !== 'enroll-voice') { process.stdin.resume(); return }",
+        "process.stdin.on('end', () => { log('stdin-closed'); process.exit(0) })",
+        'process.stdin.resume()',
+        "emit({ event: 'ready', mode: 'enroll' })"
+      ].join('\n')
+    )
+    const second = new EngineProcess(waiting.binary)
+    cleanups.push(() => second.dispose())
+    const seen: string[] = []
+    const run = second.enrollVoice({
+      outPath: '/x',
+      seconds: 20,
+      onProgress: (event) => void seen.push(event.type)
+    })
+    await waitFor(() => seen.includes('recording'), 'recording')
+    second.start('live')
+    assert.deepEqual(await run?.result, { ok: false, reason: 'cancelled' })
+    assert.ok(logLines(waiting.log).includes('stdin-closed'))
+  })
+
+  it('a voice that was already saved when the cancel arrived is reported as saved', async () => {
+    const { binary } = fakeEngine(
+      [
+        "process.stdin.on('end', () => {",
+        "  emit({ event: 'voiceprint', ok: true, speechSeconds: 12, levelDb: -20 })",
+        '  process.exit(0)',
+        '})',
+        'process.stdin.resume()',
+        "emit({ event: 'ready', mode: 'enroll' })"
+      ].join('\n')
+    )
+    const engine = new EngineProcess(binary)
+    cleanups.push(() => engine.dispose())
+    const seen: string[] = []
+    const run = engine.enrollVoice({
+      outPath: '/x',
+      seconds: 20,
+      onProgress: (event) => void seen.push(event.type)
+    })
+    await waitFor(() => seen.includes('recording'), 'recording')
+    run?.cancel()
+    assert.deepEqual(await run?.result, { ok: true, deviceName: null })
+  })
+})

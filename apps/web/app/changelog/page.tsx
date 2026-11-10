@@ -9,6 +9,50 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "1.0.0",
+    date: "November 9, 2026",
+    highlights: [
+      "DoodleNote 1.0: a security-hardening release across the app and the website",
+      "Join our community: a new link in the sidebar and in Settings opens the DoodleNote Discord for help, updates, and early testing",
+      "Shared links stop working when you turn sharing off or move a note to Trash, and new links no longer include the transcript unless you choose to",
+      "Linking a Mac to your account now confirms the request came from your own browser session",
+      "Phone calling requires an active subscription and a phone number only you have verified",
+      "The Windows speech model is verified against a pinned checksum before it is used",
+      "Removed team members lose access to agent tokens and synced devices right away",
+    ],
+  },
+  {
+    version: "0.5.1",
+    date: "November 6, 2026",
+    highlights: [
+      "Only my voice for Bark: turn it on in Settings, read aloud for about twenty seconds, and Bark leaves out anyone else talking near your microphone. What it learns stays on your Mac, and the recording is not kept",
+      "Choose your own Bark keyboard shortcut: record a single key, a key combination, or a modifier on its own such as Right Option, then save or cancel",
+      "Sharper Bark logos in Settings and on the dictation pill",
+      "Security maintenance: updates to Electron, the on-device speech engine, and website dependencies",
+    ],
+  },
+  {
+    version: "0.5.0",
+    date: "November 5, 2026",
+    highlights: [
+      "Bark has its final logo and a vertical dictation pill when positioned on the left or right edge of your screen",
+      "A cleaner Settings layout groups Your preferences, Your workflow, and More, with sections open by default and consistent spacing as you switch tabs",
+      "Refined Calendar icons, appearance previews, and clearer controls for recordings, storage, and notes models",
+      "A refreshed Get more page with a Cloud Sync access overlay and blurred setup controls until subscription access is confirmed",
+      "Fraunces headings and Figtree text bring the app and existing website together",
+    ],
+  },
+  {
+    version: "0.4.38",
+    date: "November 5, 2026",
+    highlights: [
+      "Meet Bark, DoodleNote's dictation for Mac: press a key anywhere, speak, and your words are typed into the app you are using. It runs on your Mac, never keeps audio, and is off until you turn it on in Settings",
+      "Google Calendar connections are back: Google has approved DoodleNote's read-only calendar access, so you can add a Google account in Settings or during setup",
+      "A redesigned note page, with Fetches in its own tab next to The good stuff, My doodles, and Transcript",
+      "Settings has a new look",
+    ],
+  },
+  {
     version: "0.4.37",
     date: "October 30, 2026",
     highlights: [

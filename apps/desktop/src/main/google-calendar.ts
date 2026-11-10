@@ -5,6 +5,7 @@ import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { safeStorage, shell } from 'electron'
 import { BUILT_IN_GOOGLE_CLIENT_ID } from '../shared/google-app'
+import { GOOGLE_ERROR_PAGE, GOOGLE_SUCCESS_PAGE } from './calendar-landing-page'
 import { googleClientSecret, googleConfigurationError, googleTokenError } from './google-oauth'
 import { calendarJoinUrl } from '../shared/calendar-api'
 import type { CalendarAccount, CalendarEvent, CalendarInfo } from '../shared/calendar-api'
@@ -129,14 +130,16 @@ export class GoogleCalendarClient {
           res.writeHead(404).end()
           return
         }
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-        res.end(
-          '<html><body style="font-family:-apple-system,sans-serif;background:#f7f5ee;color:#26281f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2>Return to DoodleNote</h2><p>You can close this tab and return to DoodleNote.</p></div></body></html>'
-        )
         clearTimeout(timeout)
         server.close()
         const returnedState = url.searchParams.get('state')
         const code = url.searchParams.get('code')
+        const ok = returnedState === state && !!code
+        res.writeHead(ok ? 200 : 400, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store'
+        })
+        res.end(ok ? GOOGLE_SUCCESS_PAGE : GOOGLE_ERROR_PAGE)
         if (returnedState !== state) {
           reject(new Error('OAuth state mismatch — try connecting again'))
         } else if (!code) {

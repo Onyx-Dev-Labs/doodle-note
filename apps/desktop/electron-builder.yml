@@ -1,5 +1,6 @@
 appId: com.doodlenote.desktop
 productName: DoodleNote
+copyright: Copyright © 2026 Onyx Dev Labs
 directories:
   buildResources: resources
   output: release
@@ -33,6 +34,9 @@ mac:
       filter: ["*.png"]
     - from: ../../engine/.build/release/engine
       to: engine/engine
+    # Bark's typing helper: a separate small binary, signed like the engine.
+    - from: ../../engine/.build/release/dictation-helper
+      to: engine/dictation-helper
     - from: ../../engine/.build/whisper/whisper-cli
       to: engine/whisper-cli
     - from: ../../engine/.build/whisper/whisper-LICENSE.txt
@@ -68,8 +72,8 @@ mac:
         - arm64
   icon: resources/icon.icns
   category: public.app-category.productivity
-  # Signed with Sean's Developer ID (in the login Keychain). Stable signature
-  # = safeStorage/Keychain secrets survive rebuilds; TCC grants stick.
+  # Keep the shipped Developer ID team: Squirrel.Mac requires the same team
+  # for automatic updates. CI holds its certificate and notarization credentials.
   identity: "SEAN INMAN (VTZW6K32K4)"
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -81,7 +85,7 @@ mac:
   notarize: true
   extendInfo:
     CFBundleIconFile: doodlenote-opaque-v0411.icns
-    NSMicrophoneUsageDescription: DoodleNote captures meeting audio to transcribe it on-device. Nothing leaves your Mac.
+    NSMicrophoneUsageDescription: DoodleNote captures meeting audio, and your voice when you use Bark dictation, to transcribe it on-device. Nothing leaves your Mac.
     NSAudioCaptureUsageDescription: DoodleNote captures meeting audio (the other side of your call) to transcribe it on-device.
 dmg:
   title: DoodleNote ${version}
@@ -122,6 +126,15 @@ nsis:
   perMachine: false
   deleteAppDataOnUninstall: false
   artifactName: ${productName}-${version}-setup.${ext}
+# Electron fuses, flipped on the packaged binary. runAsNode must stay on: the
+# bundled MCP server is launched as `DoodleNote` with ELECTRON_RUN_AS_NODE=1.
+# NODE_OPTIONS and the inspector flags let another local process inject code
+# into that launch, and nothing in the app needs them.
+electronFuses:
+  runAsNode: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
 npmRebuild: false
 # Auto-update feed: electron-updater reads latest-mac.yml from here.
 # scripts/publish-release.mjs uploads the artifacts after packaging.

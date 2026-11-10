@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, getDb, member, organization, sql } from "@repo/db";
 
+import { PERSONAL_SLUG_PREFIX } from "./personal-workspace-slug";
+
 /**
  * Every user gets a "Personal" workspace so the app never opens empty.
  * Idempotent: returns the user's dedicated Personal workspace if it exists.
@@ -23,6 +25,8 @@ export async function ensurePersonalWorkspace(
     .where(
       and(
         eq(member.userId, userId),
+        // Invitees to someone else's workspace are never its owner.
+        eq(member.role, "owner"),
         sql`${organization.slug} like 'personal-%'`,
       ),
     )
@@ -30,7 +34,7 @@ export async function ensurePersonalWorkspace(
   if (existing[0]) return existing[0];
 
   const orgId = randomUUID();
-  const slug = `personal-${orgId.slice(0, 8)}`;
+  const slug = `${PERSONAL_SLUG_PREFIX}${orgId.slice(0, 8)}`;
   const now = new Date();
   await db.insert(organization).values({
     id: orgId,

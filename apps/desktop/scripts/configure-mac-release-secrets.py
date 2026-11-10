@@ -11,6 +11,9 @@ import sys
 import warnings
 
 REPOSITORY = "Onyx-Dev-Labs/doodle-note"
+# Release credentials belong to this GitHub environment, not to the whole repo,
+# so anyone who can push a branch cannot dispatch a workflow that reads them.
+ENVIRONMENT = "mac-release"
 EXPECTED_TEAM = "VTZW6K32K4"
 REQUIRED = (
     "DOODLENOTE_GOOGLE_CLIENT_SECRET", "MAC_CSC_LINK", "MAC_CSC_KEY_PASSWORD",
@@ -40,7 +43,7 @@ def save_secret(name, value):
     if len(value.encode("utf-8")) > 48 * 1024:
         raise ValueError(name + " exceeds GitHub's 48 KiB secret limit")
     result = subprocess.run(
-        ["gh", "secret", "set", name, "--repo", REPOSITORY],
+        ["gh", "secret", "set", name, "--repo", REPOSITORY, "--env", ENVIRONMENT],
         input=value, text=True, capture_output=True, check=False,
     )
     # Do not forward arbitrary subprocess output from a credential operation.
@@ -53,13 +56,13 @@ def configure():
     if not sys.stdin.isatty():
         raise ValueError("Run interactively in your own terminal; do not pipe credentials")
     result = subprocess.run(
-        ["gh", "secret", "list", "--repo", REPOSITORY, "--json", "name"],
+        ["gh", "secret", "list", "--repo", REPOSITORY, "--env", ENVIRONMENT, "--json", "name"],
         capture_output=True, text=True, check=False,
     )
     if result.returncode:
-        raise RuntimeError("Cannot list repository secrets; sign in with gh first")
+        raise RuntimeError("Cannot list secrets for the '" + ENVIRONMENT + "' environment; sign in with gh and create the environment first (GitHub > Settings > Environments)")
     existing = {item["name"] for item in json.loads(result.stdout)}
-    print("Destination: " + REPOSITORY + " / GitHub Actions repository secrets")
+    print("Destination: " + REPOSITORY + " / GitHub Actions environment '" + ENVIRONMENT + "' secrets")
     print("Existing secrets are preserved. Values are sent through gh stdin, not command arguments.")
     if "MAC_CSC_LINK" not in existing:
         path = Path(input("Path to exported Developer ID Application .p12 (includes private key): ").strip()).expanduser()
@@ -79,7 +82,7 @@ def configure():
             save_secret(name, hidden_input(label))
     if "APPLE_TEAM_ID" not in existing:
         save_secret("APPLE_TEAM_ID", EXPECTED_TEAM)
-    print("Candidate credential setup finished. Verify names with gh secret list.")
+    print("Candidate credential setup finished. Verify names with gh secret list --env " + ENVIRONMENT + ".")
     print("This does not run a workflow, publish a feed, or verify Apple's credentials.")
 
 

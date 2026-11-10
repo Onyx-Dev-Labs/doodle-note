@@ -1,0 +1,31 @@
+.shortcut-recorder {
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.shortcut-recorder-input {
+  padding: 16px;
+  min-height: 54px;
+  border: 1px dashed var(--accent);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--card);
+  font: 500 15px/1.4 var(--sans);
+  text-align: center;
+}
+.shortcut-recorder-input:focus-visible {
+  outline: 2px solid var(--accent-deep);
+  outline-offset: 3px;
+}
+.shortcut-recorder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}

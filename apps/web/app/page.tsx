@@ -2,6 +2,8 @@
 import type { Metadata } from "next";
 import { siteMetadata } from "@/lib/site-metadata";
 import { MarketingLayout, MarketingDownloadButtons } from "./marketing";
+import { AppleLogo } from "./logos";
+import { DOWNLOADS } from "./ui";
 import "./marketing.css";
 
 export const metadata: Metadata = {
@@ -13,6 +15,11 @@ export default function HomePage() {
   return (
     <MarketingLayout>
       <main id="main">
+        <a className="bark-announcement" href="#bark">
+          <span className="bark-new">NEW</span>
+          <span>Introducing <strong>Bark.</strong> Your voice, put into words.</span>
+          <span aria-hidden="true">→</span>
+        </a>
         <section className="hero wrap">
           <div className="hero-copy">
             <div className="eyebrow">
@@ -155,6 +162,58 @@ export default function HomePage() {
                 alt="DoodleNote's friendly doodle mascot"
               />
               <span className="handwritten">got it all!</span>
+            </div>
+          </div>
+        </section>
+        <section id="bark" className="bark-section" aria-labelledby="bark-heading">
+          <div className="wrap bark-grid">
+            <div className="bark-copy">
+              <p className="eyebrow">A NEW WAY TO GET YOUR WORDS OUT</p>
+              <div className="bark-brand">
+                <img src="/bark-pine-1024.png" alt="" width={84} height={84} />
+                <div>
+                  <span className="bark-introducing">Introducing</span>
+                  <h2 id="bark-heading">Bark<span>.</span></h2>
+                </div>
+              </div>
+              <h3>Think it. Say it. Keep going.</h3>
+              <p className="bark-description">
+                Voice dictation that goes beyond your notebook. Press a shortcut,
+                speak your mind, and Bark types your words into the app you’re
+                using. Emails, messages, the idea you don’t want to lose.
+              </p>
+              <a className="button button-dark bark-download" href={DOWNLOADS.mac}>
+                <AppleLogo className="platform-icon" />
+                Get Bark for Mac
+              </a>
+              <p className="bark-availability">
+                Included free in DoodleNote for Apple Silicon Macs.
+                <br />Already have the app? Turn it on in Settings → Bark.
+              </p>
+            </div>
+            <div className="bark-art" role="img" aria-label="Illustration of Bark turning a spoken thought into a written message">
+              <span className="handwritten bark-annotation">A little less typing. A lot more you.</span>
+              <div className="bark-message">
+                <div className="bark-message-header"><span>A THOUGHT, SENT</span><span aria-hidden="true">•••</span></div>
+                <p className="bark-message-to">To: Jamie</p>
+                <p className="bark-message-text">That’s the idea! Let’s lead with the story, then show the work.<span className="bark-cursor" /></p>
+                <span className="bark-message-note">Spoken by you. Written with Bark.</span>
+              </div>
+              <div className="bark-pill">
+                <img src="/bark-pine.png" alt="" width={36} height={36} />
+                <div className="bark-wave" aria-hidden="true">
+                  {[12, 22, 16, 30, 39, 25, 16, 32, 24, 14, 26, 18, 10].map((height, index) => (
+                    <i key={index} style={{ height }} />
+                  ))}
+                </div>
+                <span className="bark-stop" aria-hidden="true"><span /></span>
+              </div>
+              <span className="bark-art-caption">Your voice has a shortcut now.</span>
+            </div>
+            <div className="bark-details">
+              <div><h3>Right where you’re writing.</h3><p>Dictate into the app you’re already using, without breaking your flow.</p></div>
+              <div><h3>Your voice stays yours.</h3><p>Speech recognition runs on your Mac. Your audio is never saved or sent to the cloud.</p></div>
+              <div><h3>Ready when you are.</h3><p>Use a shortcut or the floating pill. Bark stays off until you turn it on.</p></div>
             </div>
           </div>
         </section>

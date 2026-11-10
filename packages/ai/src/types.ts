@@ -69,6 +69,15 @@ export interface GenerationControl {
   phase?: 'condensing' | 'writing'
   /** Activity counts only; intermediate text never leaves the engine. */
   onActivity?: () => void
+  /**
+   * A short request (dictation cleanup) can say how much room it needs. A small
+   * context is created far faster than the default one meant for whole meetings.
+   * Local engine only; hosted engines ignore these three.
+   */
+  contextSize?: number
+  /** Cap on generated tokens, below the phase ceiling. */
+  maxTokens?: number
+  temperature?: number
 }
 
 export interface NotesProgress {

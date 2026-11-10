@@ -170,6 +170,25 @@ enum Commands {
         let url = try options.requireFile()
         let realtime = options.flags.contains("realtime")
 
+        // --voiceprint: the live dictation path with "Only my voice", fed from a
+        // file — the same pipeline and gate a microphone session runs.
+        if let voiceprint = options.values["voiceprint"] {
+            let pipeline = ChannelPipeline(channel: "mic", voiceprint: (voiceprint, nil))
+            try await pipeline.prepare()
+            pipeline.begin()
+            Events.emit(["event": "ready", "model": "parakeet-unified-en-0.6b"])
+            let samples = try AudioConverter().resampleAudioFile(url)
+            var offset = 0
+            while offset < samples.count {
+                let end = min(offset + 4_000, samples.count)
+                pipeline.ingest(try AudioSupport.makePCMBuffer(Array(samples[offset..<end])))
+                if realtime { try await Task.sleep(nanoseconds: 250_000_000) }
+                offset = end
+            }
+            await pipeline.finish()
+            return
+        }
+
         Events.emit(["event": "status", "stage": "loading_models", "model": "parakeet-unified-en-0.6b"])
         let manager = StreamingUnifiedAsrManager()
         try await manager.loadModels()
@@ -199,7 +218,9 @@ enum Commands {
             offset = end
         }
 
+        let finishStarted = Date()
         let text = try await manager.finish()
+        let finishMs = Int(Date().timeIntervalSince(finishStarted) * 1000)
         let tail = await manager.consumeTokenTimings()
         if !tail.isEmpty {
             Events.emit(["event": "timings", "tokens": Timings.payload(tail)])
@@ -209,6 +230,7 @@ enum Commands {
         Events.emit([
             "event": "final",
             "text": text,
+            "finishMs": finishMs,
             "audioSeconds": audioSeconds,
             "processingSeconds": processing,
             "speedup": processing > 0 ? ((audioSeconds / processing) * 10).rounded() / 10 : 0,
