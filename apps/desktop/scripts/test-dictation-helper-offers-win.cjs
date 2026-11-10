@@ -3288,6 +3288,62 @@ async function main() {
     await h.stop()
   }
 
+  // 43. Round 31 (Astra): a performance canary. Every other case runs with a 60 s write budget, which would hide an
+  // ordinary write getting slower; case 41 covers the late BRANCH, not normal performance. Here 10 ordinary writes run
+  // under the real 1 s budget. Their OUTCOME is a check (fatal): each restored, or, if one ran late, its late result
+  // "restored" and the user's own text and bytes back. Their TIME is reported, not fatal: attempt 1 of run 42842819157
+  // showed this runner can take an ordinary write past 1 s in a slow window, so a fatal timing check would bring the
+  // flake back; a write over budget, or one over 500 ms, raises a GitHub warning annotation instead.
+  {
+    await begin('43')
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { realBudget: true })
+    await a.ready
+    const times = []
+    const wrong = []
+    let late = 0
+    for (let n = 0; n < 10; n++) {
+      copyMulti(user)
+      const mark = a.logs.length
+      const r = await a.req('__clipboard-txn', { text: `dictated text canary ${n}`, holdMs: 100 })
+      const isLate = !!r && /^late\|/.test(String(r.result))
+      if (isLate) {
+        late++
+        const ended = await a.waitEvent(
+          (e) => e.event === 'clipboard' && e.phase === 'late-restore' && e.id === r.id
+        )
+        if (!ended || ended.clipboard !== 'restored')
+          wrong.push(`#${n} late, then ${JSON.stringify(ended)}`)
+      } else if (!r || !/^restored\|/.test(String(r.result)))
+        wrong.push(`#${n} ${JSON.stringify(r)}`)
+      const line = await a.waitLog(
+        isLate ? /the late clipboard write ended \(/ : /test-trace: write /,
+        {
+          since: mark,
+          ms: 10000
+        }
+      )
+      const m = line && /; now (\d+) ms/.exec(line)
+      if (m) times.push(Number(m[1]))
+      else wrong.push(`#${n} no write timeline line`)
+      const back = observe()
+      if (!(back.text === user && back.extra === 'extra bytes for ' + user))
+        wrong.push(`#${n} the clipboard after it is not the user's (${back.text})`)
+    }
+    await a.stop()
+    const sorted = [...times].sort((x, y) => x - y)
+    const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : -1
+    const max = sorted.length ? sorted[sorted.length - 1] : -1
+    const summary = `10 ordinary writes under the real 1 s budget: median ${median} ms, max ${max} ms, ${late} over the budget (late path); times ${times.join(', ')}`
+    console.log(`# 43 performance canary (reported, not fatal): ${summary}`)
+    if (late > 0 || max > 500)
+      console.log(`::warning title=Clipboard write performance canary::${summary}`)
+    check(
+      'performance canary: 10 ordinary writes under the real 1 s budget each end correctly (restored, or late with the user clipboard back); their times are reported above',
+      wrong.length === 0 && times.length === 10,
+      wrong.join('; ')
+    )
+  }
+
   // 34. Round 21, the NULL-window open experiment (decides Opus's lead on the runner's Windows build): process A opens
   // the clipboard with NULL (then with its own message-only window) and holds it; process B calls OpenClipboard(NULL)
   // once, enumerates, and closes at once (or holds); A enumerates again while B acts. One table row per combination.
