@@ -377,10 +377,15 @@ Clipboard: the helper writes to the clipboard only over a save that is POSITIVEL
 below); otherwise it does not touch the clipboard at all, and the text is typed (classic text boxes) or kept for
 copying. A copy the user makes while we save is never overwritten. How long the save takes is bounded by a slow
 owner's render, not by us. Our own write (open, empty, set,
-close) runs on its own thread for at most 1 s; an owner that answered the WM_NULL probe and then
-stalls in WM_DESTROYCLIPBOARD makes the paste give up (typing may still run), and when the owner
-returns the late write puts the user's content back, never ours (and tells the app, which updates
-the warning it showed).
+close, and the journal of its stages, written under the same open) runs on its own thread for at most 1 s; past
+that (an owner that answered the WM_NULL probe and then stalls in WM_DESTROYCLIPBOARD, or a journal on a slow disk)
+the paste gives up (typing may still run), and when the write ends the late path puts the user's content back,
+never ours (and tells the app, which updates the warning it showed). Round 30: the log says where the write was
+when its budget ran out and when it ended (opened, journaled emptying, emptied, journaled emptied, set, closed,
+journaled written, each with its time), never a guessed cause. In CI the late path has its own end-to-end cases,
+forced by test-build gates under the real 1 s budget (before emptying; after our write closed; and a change before
+the late confirmation: an addition, CF_TEXT replaced, another app's copy); every other case runs with a 60 s
+budget, so its outcome is the path it tests, whatever the runner's speed.
 
 Each paste is a clipboard transaction with a record: the saved clipboard (DPAPI-encrypted for the
 user, with whether the save was complete, the transaction's random nonce and the dictated text's
