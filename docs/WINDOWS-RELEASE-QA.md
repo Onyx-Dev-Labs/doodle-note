@@ -450,7 +450,12 @@ delivery: only Begin's durable writes are waited for, at most 2 s, and the deliv
 right after them (a paste that no longer fits empties nothing). The queued steps run before the helper exits, inside
 its usual exit wait; past it, a record left behind is judged by content at the next start. The background writer
 serializes every write (one queue, in order) on immutable snapshots, and a record settled meanwhile is never written
-again, so an older queued write can never overwrite the settlement or recreate a deleted state.
+again, so an older queued write can never overwrite the settlement or recreate a deleted state. Every state write goes
+through its .tmp and is renamed over the state in ONE step (MoveFileEx, replace-existing, write-through when durable).
+Until round 33 it used File.Replace, which first moves the old state aside to a "~RF....TMP" temporary: CI found such
+files left by helpers killed during a journal write, and a kill between its steps could leave a record without its
+state (its payload then swept as an orphan after 10 minutes): a loss window older than round 33, closed by the
+single-step rename. Leftovers of the old way (a state copy, no user content) are deleted once older than 10 minutes.
 
 Every record carries its logon identity: the
 window-station session, the logon session (LUID), Windows' boot counter, the tick count and a per-logon
