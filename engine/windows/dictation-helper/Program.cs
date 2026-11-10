@@ -227,6 +227,11 @@ namespace DoodleNote.DictationHelper
             // is how the next helper finishes the job.
             Stopwatch wait = Stopwatch.StartNew();
             bool idle = DeliveriesInFlight.CloseAndWait(waitMs);
+            // Round 33: the journal's queued steps (a restored record's "settled" and its deletion above all) run before the
+            // exit, inside the SAME wait (what is left of it: the console handler's budget below is unchanged); past it, a
+            // record left behind is judged by content at the next start (already there: deleted; else offered).
+            int journalLeft = Math.Max(0, waitMs - (int)wait.ElapsedMilliseconds);
+            if (!PendingClipboard.DrainJournal(journalLeft)) Wire.Log("leaving with clipboard journal steps still queued (waited " + wait.ElapsedMilliseconds + " ms in all)");
             Wire.Log((idle ? "leaving with no delivery or clipboard write in progress" : "leaving with " + DeliveriesInFlight.Pending + " still in progress")
                 + " (waited " + wait.ElapsedMilliseconds + " ms)"
                 + (idle ? "" : "; the transaction record lets the next helper put the clipboard back"));

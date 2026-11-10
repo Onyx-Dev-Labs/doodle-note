@@ -468,7 +468,7 @@ namespace DoodleNote.DictationHelper
                 }
                 return Wire.Fields("seeded", true, "sequence", (double)Native.GetClipboardSequenceNumber());
             }
-            finally { Native.CloseClipboard(); }
+            finally { ClipboardText.Close(); }
         }
 
         static void SimulateAnsiTargetRead()
@@ -592,8 +592,19 @@ namespace DoodleNote.DictationHelper
             // The transaction is written down until its restore ran, so a helper that ends meanwhile
             // loses nothing (see PendingClipboard; content with a privacy marker stays in memory only).
             // Without a record, no paste.
+            // Round 33 (b, f): the record's first durable state and its payload are on disk before anything is emptied
+            // (Begin waits for them at most PendingClipboard.BeginDeadlineMs, outside the 1 s write budget); otherwise no
+            // paste. Then the delivery's own deadline is checked again (the TOTAL bound: a slow disk delays the paste at
+            // most that long, and a paste that no longer fits never empties anything).
             PendingRecord record = PendingClipboard.Begin(saved, text);
             if (record == null) { deliveryNoSave = "no-record"; return "no-record"; }
+            if (stillInTime != null && !stillInTime())
+            {
+                Wire.Log("the paste no longer fits the deadline after its record was written down; not pasting (nothing emptied)");
+                PendingClipboard.Finish(record, "untouched");
+                deliveryNoSave = "deadline";
+                return "deadline";
+            }
             saved.Record = record;
             // Test build only (round 30): a case that is not about the budget sets a generous one, so its outcome is the path it
             // tests (the late path has its own cases, forced by gates; see the offers end-to-end check).
@@ -1163,11 +1174,17 @@ namespace DoodleNote.DictationHelper
             // Another program may hold the clipboard for a moment.
             for (int attempt = 0; attempt < 12; attempt++)
             {
-                if (Native.OpenClipboard(window)) return true;
+                if (Native.OpenClipboard(window)) { openHere = true; return true; }
                 Thread.Sleep(15);
             }
             return false;
         }
+
+        /// <summary>Round 33: whether THIS thread holds the clipboard open through Open() (every journal write checks it).</summary>
+        [ThreadStatic] static bool openHere;
+        public static bool OpenOnThisThread { get { return openHere; } }
+        /// <summary>Round 33: the close of an Open() (the product's every close goes through here).</summary>
+        public static bool Close() { openHere = false; return Native.CloseClipboard(); }
 
         /// <summary>A write running on its own thread; Abandoned once the caller stopped waiting for it.</summary>
         /// <summary>
@@ -1290,7 +1307,7 @@ namespace DoodleNote.DictationHelper
             TestMode.Trace("write " + job.Timeline());
             ownership = job.Ours ?? new ClipboardOwnership();
             // The confirmation re-opens the clipboard while we own it (nothing waits on another app),
-            // so it runs here, outside the write's bound ("written" is already journaled inside Write).
+            // so it runs here, outside the write's bound (round 33: "written" is a diagnostic queued after the close).
             if (ownership.Emptied && ownership.PutBack == null) ConfirmWritten(ownership, saved);
             return job.Result;
         }
@@ -1323,6 +1340,8 @@ namespace DoodleNote.DictationHelper
             }
             if (job != null) job.Mark("opened");
             bool ok = false;
+            bool rollbackRan = false;
+            uint emptiedAt = 0;
             try
             {
                 // Under the lock: the clipboard must still be exactly what was saved, or emptying it
@@ -1336,16 +1355,15 @@ namespace DoodleNote.DictationHelper
                     Wire.Log(expectSequence == 0 || sequenceNow == 0 ? "the saved sequence is not usable evidence (0); not pasting" : "the clipboard changed after it was saved; not pasting");
                     return false;
                 }
-                // Journaled BEFORE emptying (with the sequence before it). A transaction that cannot be
-                // journaled is not started: nothing is emptied, no paste.
-                if (!PendingClipboard.Stage(record, "emptying", Native.GetClipboardSequenceNumber()))
+                // Round 33 (a, b): no journal here (nothing inside the open, nothing inside the 1 s). The first durable state
+                // ("emptying": may be emptied) and the payload were written by Begin before this write began; the payload on
+                // disk is the precondition of our EmptyClipboard (Begin returns no record otherwise). Checked again here.
+                if (record != null && record.Persisted && !record.PayloadPublished)
                 {
-                    Wire.Log("the clipboard transaction could not be journaled; not pasting (nothing emptied)");
-                    ownership.JournalFailed = true;
+                    Wire.Log("the saved clipboard is not on disk; not pasting (nothing emptied)");
                     ownership.NotStarted = "no-record";
                     return false;
                 }
-                if (job != null) job.Mark("journaled emptying");
                 // Test build only: an owner that stalls in WM_DESTROYCLIPBOARD (or a helper that dies before
                 // its EmptyClipboard), without needing one. Round 30: or held at a gate (the late path, forced).
                 TestMode.Gate("EMPTY");
@@ -1367,21 +1385,20 @@ namespace DoodleNote.DictationHelper
                     // on (a journal, a rollback, a trace), the user's content is off the clipboard and every caller knows.
                     ownership.Emptied = true;
                     if (job != null) job.Mark("emptied");
-                    // The sequence right after OUR EmptyClipboard, read under the same lock (journaled for diagnostics;
-                    // since round 18 no sequence on disk is proof of anything).
-                    uint emptiedAt = Native.GetClipboardSequenceNumber();
-                    bool journaled = PendingClipboard.Stage(record, "emptied", emptiedAt);
-                    if (job != null) job.Mark("journaled emptied");
-                    // Test build only: die with the clipboard emptied.
+                    // The sequence right after OUR EmptyClipboard, read under the same lock (journaled after the close, for
+                    // diagnostics; since round 18 no sequence on disk is proof of anything).
+                    emptiedAt = Native.GetClipboardSequenceNumber();
+                    // Test build only: die with the clipboard emptied. Round 33: or held at a gate (abandoned while emptying).
                     TestMode.Stall("STALL_AFTER_EMPTY_MS", TestMode.Int("DICTATION_HELPER_TEST_STALL_AFTER_EMPTY_MS", 0));
+                    TestMode.Gate("EMPTIED");
                     bool abandoned = job != null && job.Abandoned;
-                    if (saved != null && (abandoned || !journaled))
+                    if (saved != null && abandoned)
                     {
-                        // The caller gave up while emptying waited on the owner, or the emptied stage could not be
-                        // journaled (an interruption from here on could not be proven ours): give the user's
-                        // content back now, in this same open, never leave ours.
-                        PendingClipboard.Stage(record, "restore-emptied", emptiedAt);
-                        trace = new PutBackTrace(abandoned ? "write-rollback (late)" : "write-rollback (unjournaled)", sequenceBeforeOpen);
+                        // The caller gave up while emptying waited on the owner: give the user's content back now, in this
+                        // same open, never leave ours. (Round 33: a journal failure no longer leads here; journals are
+                        // diagnostics written after the close.)
+                        rollbackRan = true;
+                        trace = new PutBackTrace("write-rollback (late)", sequenceBeforeOpen);
                         trace.Emptied(true, 0); // the write's own EmptyClipboard, just above
                         // Test build only (round 23, B1): the rollback throws before its put-back, or after it but before
                         // its result is assigned.
@@ -1394,7 +1411,7 @@ namespace DoodleNote.DictationHelper
                         ownership.PutBack = saved.PutBackResult(rolledBack);
                         if (job != null) job.PutBack = ownership.PutBack;
                         saved.LoseAuthority("the write put the saved content back itself (" + ownership.PutBack + ")");
-                        Wire.Log((abandoned ? "the late clipboard write" : "the unjournaled clipboard write") + " put the user's saved content back: " + ownership.PutBack);
+                        Wire.Log("the late clipboard write put the user's saved content back: " + ownership.PutBack);
                         return false;
                     }
                     // Test build only: the write throws right after emptying the clipboard (round 22, Opus S2).
@@ -1433,22 +1450,23 @@ namespace DoodleNote.DictationHelper
             finally
             {
                 Native.ClearLastError(0); // round 22 (S6): the error read is this close's own
-                bool closed = Native.CloseClipboard();
+                bool closed = Close();
                 int closeError = closed ? 0 : Marshal.GetLastWin32Error();
                 if (job != null) job.Mark(closed ? "closed" : "close failed");
                 if (trace != null) trace.Closed(closed, closeError);
                 if (previousLayout != IntPtr.Zero) Native.ActivateKeyboardLayout(previousLayout, 0); // test build only (see above)
+                // Round 33 (c): the rollback's diagnostic stage, queued after the close (no I/O on this thread).
+                if (rollbackRan) PendingClipboard.Stage(record, "restore-emptied", emptiedAt);
             }
             if (ownership.Emptied)
             {
-                // Journaled right after the close (before any confirmation), on the normal and the late path.
-                // Test build only: die before "written" is journaled. Round 30: or held at a gate (our text on the clipboard,
-                // the write past its budget: the late path's confirmation and restore, forced).
+                // After the close (before any confirmation), on the normal and the late path. Test build only: die before
+                // "written" is journaled. Round 30: or held at a gate (our text on the clipboard, the write past its budget:
+                // the late path's confirmation and restore, forced). Round 33 (c): a diagnostic, queued (no flush, no I/O on
+                // this thread, inside neither the open nor the 1 s); its failure changes nothing.
                 TestMode.Gate("WRITTEN");
                 TestMode.Stall("STALL_BEFORE_WRITTEN_MS", TestMode.Int("DICTATION_HELPER_TEST_STALL_BEFORE_WRITTEN_MS", 0));
-                if (!PendingClipboard.Stage(record, "written", ownership.SequenceInside, ownership.SequenceInside) && saved != null)
-                    saved.LoseAuthority("the written stage could not be journaled");
-                if (job != null) job.Mark("journaled written");
+                PendingClipboard.Stage(record, ok ? "written" : "emptied", ok ? ownership.SequenceInside : emptiedAt, ok ? ownership.SequenceInside : 0);
             }
             if (confirm && ownership.Emptied) ConfirmWritten(ownership, saved);
             return ok;
@@ -1813,10 +1831,8 @@ namespace DoodleNote.DictationHelper
         /// <summary>The write emptied the clipboard and put the saved content back itself, in the same open, and that rollback
         /// COMPLETED: its result. Null for a rollback that did not finish (then Emptied alone decides: kept, offered).</summary>
         public string PutBack;
-        /// <summary>The transaction could not be journaled before emptying: nothing was emptied.</summary>
-        public bool JournalFailed;
         /// <summary>Round 24 (Astra S2): why the write did not start (nothing emptied): zero-sequence, clipboard-changed,
-        /// no-record (its journal failed), for the user's notice.</summary>
+        /// no-record (round 33: its saved clipboard is not on disk), for the user's notice.</summary>
         public string NotStarted;
         public uint SequenceInside;
         public uint SequenceFinal;
@@ -1912,7 +1928,7 @@ namespace DoodleNote.DictationHelper
                 SequenceFinal = now;
                 Confirmed = true;
             }
-            finally { Native.CloseClipboard(); }
+            finally { ClipboardText.Close(); }
         }
 
         /// <summary>Under the clipboard lock: the clipboard is still exactly as our write left it.</summary>
@@ -2640,7 +2656,7 @@ namespace DoodleNote.DictationHelper
         /// process that wrote; nothing read from disk ever carries it (PendingClipboard.Decide). One flag, set once by
         /// LoseAuthority and never cleared, checked at the top of RestoreInner (the only in-process path that writes the
         /// clipboard after our write) and of OurWriteStillThere. Set on: a confirmation rejection or failed read, every
-        /// keep-as-offer, an incomplete put-back, a stage that could not be journaled, the write's own put-back, and
+        /// keep-as-offer, an incomplete put-back, the write's own put-back, and
         /// settlement (the transaction leaving in-flight). The record, if any, is marked offer-only too (informational).
         /// </summary>
         public bool OfferOnly { get { return offerOnly; } }
@@ -2790,12 +2806,12 @@ namespace DoodleNote.DictationHelper
             if (result == "unrestored" || keepRecord) LoseAuthority("an incomplete put-back (" + result + ")");
             if (keepRecord && Record != null && Record.Persisted)
             {
-                // Put back, but an interruption could not have been proven ours (its stage was not journaled): the
+                // Not put back by this transaction (it lost its authority, or the clipboard is not exactly our write): the
                 // record is kept. The next check deletes it only when it was a WHOLE save and that content is exactly
                 // there; an incomplete one is offered (round 23).
                 PendingRecord record = Record;
                 Record = null;
-                PendingClipboard.Keep(record, "a restore whose stage could not be journaled");
+                PendingClipboard.Keep(record, "a restore that could not write on its own");
             }
             else Settle(result);
             return result;
@@ -2841,7 +2857,7 @@ namespace DoodleNote.DictationHelper
                 if (OurWriteStillThere(ours)) return Inspection.Ours;
                 return ours.Owner != IntPtr.Zero && Native.GetClipboardOwner() == ours.Owner ? Inspection.OwnedButChanged : Inspection.Foreign;
             }
-            finally { Native.CloseClipboard(); }
+            finally { ClipboardText.Close(); }
         }
 
         /// <summary>Keep this transaction's record as an offer: this transaction may never write on its own again.</summary>
@@ -2873,6 +2889,8 @@ namespace DoodleNote.DictationHelper
             // Someone else emptied the clipboard right after our write: their copy is newer and wins.
             if (ours.ForeignAtConfirm) return "user-changed";
             PutBackTrace trace = new PutBackTrace("restore"); // log only
+            bool restoreEmptied = false;
+            uint restoreEmptiedAt = 0;
             if (!ClipboardText.Open())
             {
                 // Not looked at: the record is kept and only ever offered (nothing on disk is proof).
@@ -2918,16 +2936,9 @@ namespace DoodleNote.DictationHelper
                 }
                 // If the clipboard cannot be emptied, do not partially overwrite it: report it plainly.
                 // (A test build can simulate EmptyClipboard failing here.)
-                // Journaled before our EmptyClipboard and again right after it under the same lock, so a restore cut
-                // short anywhere leaves a record that is offered (since round 18 nothing on disk finishes it on its
-                // own). A restore sets no sentinel: a restored clipboard holds only the user's content.
-                // Every journal result is honored: without "restoring" nothing is emptied (kept, retried).
-                if (!PendingClipboard.Stage(Record, "restoring", Native.GetClipboardSequenceNumber()))
-                {
-                    Wire.Log("the restore could not be journaled; nothing emptied (kept for a retry)");
-                    Holds = "dictated";
-                    return "unrestored";
-                }
+                // Round 33 (c): no journal inside this open. A restore cut short anywhere leaves the record as journaled
+                // before (offered: since round 18 nothing on disk finishes it on its own; recovery judges by content). A
+                // restore sets no sentinel: a restored clipboard holds only the user's content.
                 // Test build only: die before the restore empties.
                 TestMode.Stall("RESTORE_STALL_BEFORE_EMPTY_MS", TestMode.Int("DICTATION_HELPER_TEST_RESTORE_STALL_BEFORE_EMPTY_MS", 0));
                 bool emptied = TestMode.Env("DICTATION_HELPER_TEST_FAIL_RESTORE_EMPTY") != "1" && Native.EmptyClipboard();
@@ -2937,12 +2948,8 @@ namespace DoodleNote.DictationHelper
                     Holds = "dictated";
                     return "unrestored";
                 }
-                if (!PendingClipboard.Stage(Record, "restore-emptied", Native.GetClipboardSequenceNumber()))
-                {
-                    // The user's content goes back now (it must not stay off the clipboard), and the record is kept.
-                    Wire.Log("the restore's emptied stage could not be journaled: putting back, and keeping the record");
-                    keepRecord = true;
-                }
+                restoreEmptied = true;
+                restoreEmptiedAt = Native.GetClipboardSequenceNumber();
                 // Test build only: die in the middle of a restore.
                 TestMode.Stall("RESTORE_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_RESTORE_STALL_MS", 0));
                 ok = PutBackOpen(trace);
@@ -2950,9 +2957,11 @@ namespace DoodleNote.DictationHelper
             finally
             {
                 Native.ClearLastError(0); // round 22 (S6): the error read is this close's own
-                bool closed = Native.CloseClipboard();
+                bool closed = ClipboardText.Close();
                 int closeError = closed ? 0 : Marshal.GetLastWin32Error();
                 trace.Closed(closed, closeError);
+                // Round 33 (c): the restore's diagnostic stage, queued after the close.
+                if (restoreEmptied) PendingClipboard.Stage(Record, "restore-emptied", restoreEmptiedAt);
             }
             string result = RestoreResult(ok, complete, reportedSkip);
             if (result == "unrestored") Holds = "unknown";

@@ -53,6 +53,10 @@ namespace DoodleNote.DictationHelper
         public readonly object Gate = new object();
         public bool Settled;
         public Thread PayloadWriter;
+        /// <summary>Round 33: the payload was moved into place (under Gate): the precondition of our EmptyClipboard.</summary>
+        public volatile bool PayloadPublished;
+        /// <summary>Round 33: Begin's writer has finished (under Gate): whoever sees the other's flag removes the files.</summary>
+        public bool WriterDone;
         /// <summary>
         /// OFFER-ONLY (round 17): once set, never cleared (only the record's deletion removes it). The record can then only
         /// be offered (or deleted when the clipboard already holds exactly the saved content): no automatic restore, by
@@ -102,9 +106,13 @@ namespace DoodleNote.DictationHelper
     /// formats, whether the save was complete, the transaction's nonce and the dictated text's SHA-256)
     /// and a small plain state file (no user content) in the per-user %TEMP% under the app identity.
     ///
-    /// The state file journals the transaction's stage around every EmptyClipboard of ours (emptying, emptied,
-    /// written, restoring, restore-emptied, recovering, recovering-emptied, settled), with the sequence number of
-    /// that moment for diagnostics only (round 18: no sequence on disk is proof). Every record carries its logon
+    /// The state file journals the transaction's stage (round 33: two DURABLE writes, the rest diagnostics). DURABLE
+    /// (flushed, outside every clipboard open and outside the paste's 1 s): the first state, "emptying" ("may be
+    /// emptied"), written with the payload in Begin BEFORE any EmptyClipboard of ours (both on disk is its precondition);
+    /// and "settled", written before a restored record is deleted. DIAGNOSTIC (no flush, queued to one serialized
+    /// background writer, written after the clipboard is closed, their failure never changes behaviour): emptied,
+    /// written, restore-emptied, recovering-emptied, and the offer-only and unrestored facts of a live record. No stage
+    /// is a proof of anything (round 18); recovery decides by content (Decide), never by stage, except "settled". Every record carries its logon
     /// identity: the window-station session, the logon session (LUID), a per-logon key in a volatile
     /// registry key, Windows' boot counter and the tick count; the wall clock is never part of it.
     ///
@@ -127,8 +135,14 @@ namespace DoodleNote.DictationHelper
         static readonly object gate = new object();
         /// <summary>A payload larger than this is not read back (corrupt or not ours): logged and deleted.</summary>
         public const long MaxRecordBytes = 64L * 1024 * 1024;
-        /// <summary>How long a paste waits for its payload to be on disk before going ahead anyway.</summary>
-        public const int PayloadWaitMs = 250;
+        /// <summary>
+        /// Round 33: how long Begin waits for its durable state and payload to be on disk. Not met: the write is not
+        /// established (nothing emptied, no paste), so the user's clipboard is never off the clipboard without being on
+        /// disk (round 32 and earlier: the paste went ahead after 250 ms). Outside the paste's 1 s write budget.
+        /// </summary>
+        internal static int BeginDeadlineMs = TestMode.Int("DICTATION_HELPER_TEST_BEGIN_DEADLINE_MS", 2000);
+        /// <summary>Why the last Begin on this thread was not established (null when it was).</summary>
+        [ThreadStatic] internal static string LastBeginFailure;
         /// <summary>The private format our WRITE carries last ("&lt;record id&gt;:&lt;nonce&gt;"). Restores never set it.</summary>
         public const string SentinelFormat = "DoodleNote.Bark.Transaction";
         /// <summary>Allowance for the sequence moves Windows makes when the clipboard is closed (bounds only).</summary>
@@ -218,11 +232,13 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>
         /// Start a transaction before our write. Content with a privacy marker stays in memory only.
-        /// Otherwise the state file is written now and the payload in the background; the caller waits
-        /// for it at most PayloadWaitMs. Null when the record cannot be written at all (then no paste).
+        /// Otherwise (round 33) the first durable state ("emptying") and then the payload are written, flushed, on their
+        /// own thread; Begin waits for both at most BeginDeadlineMs. Null when they are not on disk by then, or cannot be
+        /// written at all: no paste, nothing emptied (LastBeginFailure says why).
         /// </summary>
         public static PendingRecord Begin(SavedClipboard saved, string dictated)
         {
+            LastBeginFailure = null;
             PendingRecord record = new PendingRecord();
             record.DeliveryId = Delivery.CurrentRequestId ?? "";
             record.DictatedHash = Hash(dictated);
@@ -232,25 +248,67 @@ namespace DoodleNote.DictationHelper
                 Wire.Log("the saved clipboard carries a privacy marker: kept in memory only (not written down)");
                 return record;
             }
-            try
+            record.Persisted = true;
+            // Round 33: the first state says "may be emptied" (there is no durable "saved" stage any more): a crash from
+            // here on leaves a record that recovery judges by CONTENT only (already there exactly: deleted; anything
+            // else: offered), never by its stage.
+            record.Stage = "emptying";
+            string json = StateJson(record);
+            Stopwatch watch = Stopwatch.StartNew();
+            lock (gate) writing.Add(record.Id);
+            bool stateOk = false;
+            // State first, then the payload, one after the other (a payload never exists without its state), on their own
+            // thread so that a stalled disk cannot hold the delivery past BeginDeadlineMs.
+            record.PayloadWriter = new Thread(delegate ()
             {
-                record.Persisted = true;
-                WriteState(record);
-                Stopwatch watch = Stopwatch.StartNew();
-                lock (gate) writing.Add(record.Id);
-                record.PayloadWriter = new Thread(delegate () { WritePayload(record, saved, record.DictatedHash, watch); });
-                record.PayloadWriter.IsBackground = true;
-                record.PayloadWriter.Name = "pending-clipboard";
-                record.PayloadWriter.Start();
-                bool ready = record.PayloadWriter.Join(PayloadWaitMs);
-                Wire.Log("the paste waited " + watch.ElapsedMilliseconds + " ms for the written-down clipboard" + (ready ? "" : " (still writing; going ahead)"));
+                try
+                {
+                    stateOk = WriteStateDurable(record, json, "emptying");
+                    if (stateOk) WritePayload(record, saved, record.DictatedHash, watch);
+                    else lock (gate) writing.Remove(record.Id);
+                }
+                catch (Exception error)
+                {
+                    Wire.Log("ERROR: the clipboard transaction could not be written down: " + error.GetType().Name);
+                    lock (gate) writing.Remove(record.Id);
+                }
+                finally
+                {
+                    // Begin gave up meanwhile (it saw this writer still running): this writer removes what it published.
+                    bool givenUp;
+                    lock (record.Gate) { record.WriterDone = true; givenUp = record.Settled; }
+                    if (givenUp) RemoveNotEstablished(record);
+                }
+            });
+            record.PayloadWriter.IsBackground = true;
+            record.PayloadWriter.Name = "pending-clipboard";
+            record.PayloadWriter.Start();
+            bool done = record.PayloadWriter.Join(BeginDeadlineMs);
+            if (done && stateOk && record.PayloadPublished)
+            {
+                Wire.Log("the clipboard transaction was written down in " + watch.ElapsedMilliseconds + " ms (state and payload, flushed)");
                 return record;
             }
-            catch (Exception error)
+            string why = !done ? "not on disk within " + BeginDeadlineMs + " ms" : !stateOk ? "its state could not be written" : "its payload could not be written";
+            LastBeginFailure = why;
+            // Settled under the publication lock: a writer still running publishes nothing from now on; what it already
+            // published is removed, by Begin if the writer is done, else by the writer when it ends (exactly one of them
+            // sees the other's flag). A crash meanwhile leaves a record judged by content: nothing was emptied.
+            bool writerDone;
+            lock (record.Gate) { record.Settled = true; writerDone = record.WriterDone; }
+            lock (gate) inFlight.Remove(record.Id);
+            Wire.Log("not pasting: the clipboard transaction was not written down (" + why + "); nothing emptied");
+            if (writerDone) RemoveNotEstablished(record);
+            return null;
+        }
+
+        static void RemoveNotEstablished(PendingRecord record)
+        {
+            lock (gate)
             {
-                Wire.Log("ERROR: the clipboard transaction could not be written down: " + error.GetType().Name);
-                lock (gate) inFlight.Remove(record.Id);
-                return null;
+                bool gone = DeleteFiles(record.Id);
+                if (!gone) NotDeleted(record.Id, "a transaction that was not established");
+                else Wire.Log("clipboard record " + record.Id.Substring(0, 8) + ": not established; its files removed");
             }
         }
 
@@ -269,7 +327,12 @@ namespace DoodleNote.DictationHelper
                     saved.WriteTo(writer);
                 }
                 byte[] sealedBytes = ProtectedData.Protect(plain.ToArray(), Entropy, DataProtectionScope.CurrentUser);
-                File.WriteAllBytes(tmp, sealedBytes);
+                // Round 33: flushed (it is the precondition of our EmptyClipboard: on disk means on disk).
+                using (FileStream stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+                {
+                    stream.Write(sealedBytes, 0, sealedBytes.Length);
+                    stream.Flush(true);
+                }
                 // A slow disk / AV scan: set by the test build's hook, or directly by the logic tests (which are not a
                 // DICTATION_TEST build, so not through TestMode.Stall); always 0 in a release build.
                 if (TestPayloadDelayMs > 0) { TestMode.Trace("stall PAYLOAD_DELAY_MS " + TestPayloadDelayMs + " ms"); Thread.Sleep(TestPayloadDelayMs); }
@@ -283,6 +346,7 @@ namespace DoodleNote.DictationHelper
                         return;
                     }
                     File.Move(tmp, path);
+                    record.PayloadPublished = true;
                 }
                 Wire.Log("the saved clipboard was written down (" + sealedBytes.Length + " bytes sealed and written in " + watch.ElapsedMilliseconds + " ms)");
             }
@@ -295,9 +359,10 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// The transaction moved on; journaled (with the stage's sequence number) for a later recovery.
-        /// False when a written-down transaction could not be journaled (after a short bounded retry): the
-        /// caller must not take the step the journal was the prerequisite for.
+        /// Round 33: a DIAGNOSTIC stage of a live transaction (emptied, written, restore-emptied): its fields are set now
+        /// and a snapshot of the state is queued to the journal writer (no flush). Its failure never changes behaviour;
+        /// it is never written inside a clipboard open (the writer thread never opens the clipboard). Always true (the
+        /// return value is kept for the callers' shape).
         /// </summary>
         public static bool Stage(PendingRecord record, string stage, uint sequenceAtStage = 0, uint sequenceAfterWrite = 0)
         {
@@ -306,25 +371,48 @@ namespace DoodleNote.DictationHelper
             record.SequenceAtStage = sequenceAtStage;
             record.SequenceClosed = 0;
             if (sequenceAfterWrite != 0) record.SequenceAfterWrite = sequenceAfterWrite;
-            return Journal(record);
+            QueueSnapshot(record, false, null);
+            return true;
         }
 
-        static bool Journal(PendingRecord record)
+        /// <summary>
+        /// Round 33 (g): a snapshot of the record's state now (immutable: serialized at the call), written later by the one
+        /// serialized writer, flushed or not. A record settled meanwhile is never written again (an older queued write can
+        /// never overwrite settlement or recreate a deleted state). `then` runs after it on the writer, in order.
+        /// </summary>
+        static void QueueSnapshot(PendingRecord record, bool durable, Action then)
         {
-            if (!record.Persisted) return true;
-            if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_JOURNAL") == record.Stage) { Wire.Log("ERROR: the clipboard transaction stage could not be recorded: test (" + record.Stage + ")"); return false; }
-            // A short retry: an AV scan or an indexer can hold the state file for a moment. The two waits (15 ms, 40 ms)
-            // are explicit delays between attempts, not a bound on how long one file-system call can take. Residual,
-            // stated plainly: some stages are journaled while our clipboard lock is held (so that the journal and the
-            // clipboard step cannot be separated), so a slow disk delays that open/close by the same amount.
+            if (!record.Persisted) { if (then != null) EnqueueJournal(then); return; }
+            string json = StateJson(record);
+            string stage = record.Stage;
+            EnqueueJournal(delegate
+            {
+                bool settled;
+                lock (record.Gate) settled = record.Settled;
+                if (!settled) WriteSnapshot(record.Id, json, stage, durable);
+                if (then != null) then();
+            });
+        }
+
+        /// <summary>Writes one snapshot now (the journal writer, or a recovery outside every open); false on failure.</summary>
+        static bool WriteSnapshot(string id, string json, string stage, bool durable)
+        {
+            if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_JOURNAL") == stage) { Wire.Log("ERROR: the clipboard transaction stage could not be recorded: test (" + stage + ")" + (durable ? "" : "; a diagnostic stage: nothing changes")); return false; }
+            Stopwatch took = Stopwatch.StartNew();
             for (int attempt = 0; ; attempt++)
             {
-                try { WriteState(record); return true; }
+                try
+                {
+                    WriteStateJson(StatePath(id), json, durable);
+                    JournalTrace(id, stage, durable, took);
+                    return true;
+                }
                 catch (Exception error)
                 {
+                    // A short retry: an AV scan or an indexer can hold the state file for a moment.
                     if (attempt >= 2 || !(error is IOException || error is UnauthorizedAccessException))
                     {
-                        Wire.Log("ERROR: the clipboard transaction stage could not be recorded: " + error.GetType().Name);
+                        Wire.Log("ERROR: the clipboard transaction stage could not be recorded: " + error.GetType().Name + (durable ? "" : "; a diagnostic stage: nothing changes"));
                         return false;
                     }
                     Thread.Sleep(attempt == 0 ? 15 : 40);
@@ -332,14 +420,115 @@ namespace DoodleNote.DictationHelper
             }
         }
 
+        /// <summary>
+        /// Round 33: every state write says where it ran (test build), and a write made by a thread that holds the
+        /// clipboard open is an error (never expected: the timelines' check in CI).
+        /// </summary>
+        static void JournalTrace(string id, string stage, bool durable, Stopwatch took)
+        {
+            bool inOpen = ClipboardText.OpenOnThisThread;
+            if (inOpen) Wire.Log("ERROR: a clipboard journal write ran inside a clipboard open (" + stage + ")");
+            TestMode.Trace("journal " + stage + " " + id.Substring(0, Math.Min(8, id.Length)) + " durable=" + durable + " in-open=" + inOpen + " took " + took.ElapsedMilliseconds + " ms");
+        }
+
+        /// <summary>The first durable state (Begin): published under the record's lock unless it was settled meanwhile.</summary>
+        static bool WriteStateDurable(PendingRecord record, string json, string stage)
+        {
+            if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_JOURNAL") == stage) { Wire.Log("ERROR: the clipboard transaction could not be written down: test (" + stage + ")"); return false; }
+            Stopwatch took = Stopwatch.StartNew();
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    WriteStateJson(StatePath(record.Id), json, true, record);
+                    JournalTrace(record.Id, stage, true, took);
+                    lock (record.Gate) return !record.Settled;
+                }
+                catch (Exception error)
+                {
+                    if (attempt >= 2 || !(error is IOException || error is UnauthorizedAccessException))
+                    {
+                        Wire.Log("ERROR: the clipboard transaction could not be written down: " + error.GetType().Name);
+                        return false;
+                    }
+                    Thread.Sleep(attempt == 0 ? 15 : 40);
+                }
+            }
+        }
+
+        // ---- Round 33 (g): the journal's one serialized background writer ----
+        static readonly object journalGate = new object();
+        static readonly Queue<Action> journalQueue = new Queue<Action>();
+        static Thread journalThread;
+        static int journalPending;
+
+        static void EnqueueJournal(Action work)
+        {
+            lock (journalGate)
+            {
+                journalQueue.Enqueue(work);
+                journalPending++;
+                if (journalThread == null)
+                {
+                    journalThread = new Thread(JournalLoop);
+                    journalThread.IsBackground = true;
+                    journalThread.Name = "clipboard-journal";
+                    journalThread.Start();
+                }
+                Monitor.PulseAll(journalGate);
+            }
+        }
+
+        static void JournalLoop()
+        {
+            for (;;)
+            {
+                Action work;
+                lock (journalGate)
+                {
+                    while (journalQueue.Count == 0) Monitor.Wait(journalGate);
+                    work = journalQueue.Dequeue();
+                }
+                try
+                {
+                    // Test build only: a stalled disk under the journal (the delivery must not wait for it).
+                    TestMode.Stall("JOURNAL_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_JOURNAL_STALL_MS", 0));
+                    work();
+                }
+                catch (Exception error) { Wire.Log("ERROR: a clipboard journal step failed (" + error.GetType().Name + ")"); }
+                finally { lock (journalGate) { journalPending--; Monitor.PulseAll(journalGate); } }
+            }
+        }
+
+        /// <summary>How many payload writers still run in this process (the logic tests).</summary>
+        internal static int WritersRunning() { lock (gate) return writing.Count; }
+
+        /// <summary>Waits (bounded) until every queued journal step ran: the helper's exit, and the logic tests.</summary>
+        public static bool DrainJournal(int ms)
+        {
+            Stopwatch waited = Stopwatch.StartNew();
+            lock (journalGate)
+            {
+                while (journalPending > 0)
+                {
+                    int left = ms - (int)waited.ElapsedMilliseconds;
+                    if (left <= 0) return false;
+                    Monitor.Wait(journalGate, left);
+                }
+                return true;
+            }
+        }
+
         /// <summary>The record is kept, as an offer only (offer-only is persisted first): checked again later.</summary>
         public static void Keep(PendingRecord record, string why)
         {
             if (record == null) return;
-            // Round 22 (nit): the record leaves in-flight whatever the offer-only journal does (a throw there must never
-            // leave it in flight for ever, where no check would ever look at it).
-            try { MarkOfferOnly(record, why); }
-            finally { lock (gate) { inFlight.Remove(record.Id); ScheduleRetry(record.Id, RetryKind.Failed); } }
+            // Round 22 (nit): the record leaves in-flight whatever the offer-only journal does. Round 33: the journal is
+            // queued, and the record leaves in-flight only after it (in order, on the writer), so no check judges it before.
+            bool mark = !record.OfferOnly;
+            record.OfferOnly = true;
+            if (mark) { record.OfferOnlyWhy = why ?? ""; Wire.Log("clipboard record " + record.Id.Substring(0, 8) + ": offer-only from now on (" + why + ")"); }
+            QueueSnapshot(record, true, delegate { lock (gate) { inFlight.Remove(record.Id); ScheduleRetry(record.Id, RetryKind.Failed); } });
         }
 
         /// <summary>A restore result that leaves nothing to do later: anything but "unrestored" and "user-changed" (both keep the record).</summary>
@@ -357,7 +546,8 @@ namespace DoodleNote.DictationHelper
             record.OfferOnly = true;
             record.OfferOnlyWhy = why ?? "";
             Wire.Log("clipboard record " + record.Id.Substring(0, 8) + ": offer-only from now on (" + why + ")");
-            if (record.Persisted && !Journal(record)) Wire.Log("ERROR: the offer-only fact could not be written down; this helper keeps it in memory");
+            // Round 33: queued (it can be called while the clipboard is open, e.g. the write's own put-back); informational.
+            QueueSnapshot(record, true, null);
         }
 
         /// <summary>Under gate: the offer-only fact for a record on disk (its state file is rewritten with it).</summary>
@@ -370,7 +560,7 @@ namespace DoodleNote.DictationHelper
                 if (state == null) return;
                 state["offerOnly"] = true;
                 state["offerOnlyWhy"] = why;
-                WriteStateJson(StatePath(id), Wire.Serialize(state));
+                WriteStateJson(StatePath(id), Wire.Serialize(state), true);
                 facts.OfferOnly = true;
                 facts.OfferOnlyWhy = why;
                 Wire.Log("clipboard record " + id.Substring(0, 8) + ": offer-only from now on (" + why + ")");
@@ -387,38 +577,44 @@ namespace DoodleNote.DictationHelper
             if (record == null) return;
             if (Settled(restoreResult))
             {
-                // Journaled "settled" and deleted BEFORE it leaves in-flight: a concurrent check never finds content that
-                // was already put back and offers it (a "settled" state is deleted on sight, never offered). It leaves
-                // in-flight whatever happens (finally), or every kept record's retry would wait on it until a restart.
-                try
+                // Journaled "settled" (DURABLE) and deleted BEFORE it leaves in-flight: a concurrent check never finds content
+                // that was already put back and offers it (a "settled" state is deleted on sight, never offered). Round 33:
+                // on the journal writer, after the clipboard is closed (never inside an open, never holding up the reply);
+                // the record stays in flight until then. A crash in that wider interval leaves a record judged by content
+                // (already there: deleted; else a spurious offer, never a loss). It leaves in-flight whatever happens.
+                if (!record.Persisted) { lock (gate) inFlight.Remove(record.Id); return; }
+                record.Stage = "settled";
+                string json = StateJson(record);
+                EnqueueJournal(delegate
                 {
-                    if (record.Persisted)
+                    try
                     {
-                        if (!Stage(record, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
+                        bool settledBefore;
+                        lock (record.Gate) settledBefore = record.Settled;
+                        if (!settledBefore && !WriteSnapshot(record.Id, json, "settled", true)) Wire.Log("the settled stage could not be journaled; deleting anyway");
                         Delete(record, "restore ran (" + restoreResult + ")");
                     }
-                }
-                finally { lock (gate) inFlight.Remove(record.Id); }
+                    finally { lock (gate) inFlight.Remove(record.Id); }
+                });
                 return;
             }
-            // Marked BEFORE it leaves in-flight: no concurrent check sees it unmarked.
-            try
+            // Marked BEFORE it leaves in-flight: no concurrent check sees it unmarked (round 33: in order, on the writer).
+            record.Unrestored = true;
+            bool mark = !record.OfferOnly;
+            record.OfferOnly = true;
+            if (mark) { record.OfferOnlyWhy = "a restore that did not complete (" + restoreResult + ")"; Wire.Log("clipboard record " + record.Id.Substring(0, 8) + ": offer-only from now on (" + record.OfferOnlyWhy + ")"); }
+            if (record.Persisted) QueueSnapshot(record, true, delegate { lock (gate) { inFlight.Remove(record.Id); ScheduleRetry(record.Id, RetryKind.Failed); } });
+            else
             {
-                record.Unrestored = true;
-                MarkOfferOnly(record, "a restore that did not complete (" + restoreResult + ")");
+                lock (gate) inFlight.Remove(record.Id);
+                Wire.Log("the restore failed and the saved clipboard was memory-only (privacy marker): it cannot be retried later");
             }
-            finally { lock (gate) inFlight.Remove(record.Id); }
-            if (record.Persisted)
-            {
-                Journal(record); // the unrestored flag (also when the record was offer-only already)
-                lock (gate) ScheduleRetry(record.Id, RetryKind.Failed);
-            }
-            else Wire.Log("the restore failed and the saved clipboard was memory-only (privacy marker): it cannot be retried later");
         }
 
-        static void WriteState(PendingRecord record)
+        /// <summary>The record's state as it is now (a snapshot: serialized here, written later or now).</summary>
+        static string StateJson(PendingRecord record)
         {
-            string json = Wire.Serialize(Wire.Fields(
+            return Wire.Serialize(Wire.Fields(
                 "format", Format,
                 "id", record.Id,
                 "pid", record.IdentityUnknown ? 0 : Process.GetCurrentProcess().Id,
@@ -448,21 +644,36 @@ namespace DoodleNote.DictationHelper
                 "offerOnly", record.OfferOnly,
                 "offerOnlyWhy", record.OfferOnlyWhy ?? "",
                 "updated", DateTime.UtcNow.ToString("o")));
-            WriteStateJson(StatePath(record.Id), json);
         }
 
-        static void WriteStateJson(string path, string json)
+        static void WriteState(PendingRecord record) { WriteStateJson(StatePath(record.Id), StateJson(record), true); }
+
+        /// <summary>
+        /// A state file written through its .tmp. DURABLE: flushed to the disk before it replaces the state file (a crash
+        /// never leaves a zeroed journal). Round 33: a diagnostic write is not flushed (a crash may lose it; nothing
+        /// depends on it). With `publish`, the move happens under its lock and only while it is not settled.
+        /// </summary>
+        static void WriteStateJson(string path, string json, bool durable, PendingRecord publish = null)
         {
             string tmp = path + ".tmp";
-            // Flushed to the disk before it replaces the state file, so a crash never leaves a zeroed journal.
             byte[] bytes = Encoding.UTF8.GetBytes(json);
-            using (FileStream stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            using (FileStream stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, durable ? FileOptions.WriteThrough : FileOptions.None))
             {
                 stream.Write(bytes, 0, bytes.Length);
-                stream.Flush(true);
+                if (durable) stream.Flush(true);
             }
             // Test build only (round 30): killed with the state's .tmp written and not yet in place (CI run 42842819157).
             TestMode.Stall("STATE_TMP_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_STATE_TMP_STALL_MS", 0));
+            if (publish == null) { MoveIntoPlace(tmp, path); return; }
+            lock (publish.Gate)
+            {
+                if (publish.Settled) { TryDelete(tmp); return; }
+                MoveIntoPlace(tmp, path);
+            }
+        }
+
+        static void MoveIntoPlace(string tmp, string path)
+        {
             if (Probe(path) != Presence.Absent) File.Replace(tmp, path, null); // atomic replacement (throws if it is not there after all)
             else File.Move(tmp, path);
         }
@@ -910,7 +1121,13 @@ namespace DoodleNote.DictationHelper
             }
             // Its restore had run (journaled before the deletion): deleted on sight, never offered.
             if (facts.Stage == "settled") return "settled earlier (never offered); " + (DeleteId(id, "settled: its restore had run") ? "deleted" : "deletion deferred (kept)");
-            if (facts.Stage == "saved" && !facts.OfferOnly) return "stage saved: nothing to put back; " + (DeleteId(id, "nothing had been emptied") ? "deleted" : "deletion deferred (kept)");
+            // Round 33 (a): no record is deleted by its stage alone any more (until round 32 a non-offer "saved" record was
+            // deleted as "nothing had been emptied"). Begin writes "emptying" ("may be emptied") as its first durable state;
+            // whether anything was emptied is decided by CONTENT below: the saved content exactly there (deleted), anything
+            // else (offered). Test build only: the mutation check puts the old rule back, keyed on the first durable stage,
+            // to prove a CI case catches it (DICTATION_HELPER_TEST_MUTANT_STAGE_RULE).
+            if (TestMode.Env("DICTATION_HELPER_TEST_MUTANT_STAGE_RULE") == "1" && (facts.Stage == "saved" || facts.Stage == "emptying") && !facts.OfferOnly)
+                return "MUTANT (test): stage " + facts.Stage + ": nothing to put back; " + (DeleteId(id, "nothing had been emptied (mutant)") ? "deleted" : "deletion deferred (kept)");
             SavedClipboard saved;
             string nonce;
             byte[] dictatedHash;
@@ -1010,6 +1227,19 @@ namespace DoodleNote.DictationHelper
             if (!ClipboardText.Open()) { result = RecoverResult.Busy; reply["result"] = "busy"; return "the clipboard is busy; kept for a retry"; }
             RestoreStep("opened");
             string outcome;
+            // Round 33 (e): the clipboard is open only for the look and, for the user's Restore, the empty and the put-back:
+            // every file step (an offer's facts, a deletion, a journal) runs after closeNow().
+            bool isOpen = true;
+            Action closeNow = delegate
+            {
+                if (!isOpen) return;
+                isOpen = false;
+                Native.ClearLastError(0); // round 22 (S6): the error read is this close's own
+                bool closed = ClipboardText.Close();
+                int closeError = closed ? 0 : Marshal.GetLastWin32Error();
+                RestoreStep(closed ? "closed" : "close failed");
+                if (trace != null) trace.Closed(closed, closeError);
+            };
             try
             {
                 ClipboardView view = ClipboardView.Read(saved, id, nonce, dictatedHash);
@@ -1020,6 +1250,7 @@ namespace DoodleNote.DictationHelper
                 // Round 23 (B2): only a WHOLE save can be "already there" (AllPresent says so too; checked here again).
                 if (verdict == RecoveryVerdict.Untouched && !saved.Incomplete)
                 {
+                    closeNow();
                     if (byUser) reply["result"] = "restored";
                     bool gone = DeleteId(id, "nothing of the user's is missing");
                     // A restore of it had been reported failed: the app learns the clipboard holds the user's content.
@@ -1028,6 +1259,7 @@ namespace DoodleNote.DictationHelper
                 }
                 if (!byUser)
                 {
+                    closeNow();
                     // ROUND 18: no automatic restore authority ever comes from disk. Whatever the journal and the clipboard
                     // say, a record read back here is OFFERED; only the user's Restore writes. The boot limit and the
                     // retention (policies) apply to what is offered.
@@ -1060,6 +1292,7 @@ namespace DoodleNote.DictationHelper
                     reply["formats"] = view.FormatCount;
                     long bytes = ClipboardText.OpenClipboardBytes(view.OwnerAlive && !view.OwnerIsUs);
                     reply["bytes"] = bytes >= 0 ? (object)(double)bytes : null;
+                    closeNow();
                     Offer(id, facts, saved, view);
                     return "the user's restore: the clipboard changed since the offer (" + seen + "); asked again";
                 }
@@ -1071,6 +1304,7 @@ namespace DoodleNote.DictationHelper
                     result = RecoverResult.Pending;
                     reply["result"] = "nothing-to-restore";
                     reply["missing"] = saved.Missing();
+                    closeNow();
                     Offer(id, facts, saved, view);
                     return "the user's restore: nothing with the user's content can go back; nothing emptied, kept (Dismiss deletes it)";
                 }
@@ -1081,6 +1315,7 @@ namespace DoodleNote.DictationHelper
                     result = RecoverResult.Pending;
                     reply["result"] = "incomplete";
                     reply["missing"] = saved.Missing();
+                    closeNow();
                     Offer(id, facts, saved, view);
                     return "the user's restore: the record is incomplete and the user was not shown what is missing; nothing emptied, kept";
                 }
@@ -1091,13 +1326,8 @@ namespace DoodleNote.DictationHelper
                     OfferOnly = true, OfferOnlyWhy = "the user's Restore of an offer" };
                 Inherit(journal, facts, match, (long)Native.GetTickCount64());
                 RestoreStep("looked");
-                if (!Stage(journal, "recovering", view.Sequence))
-                {
-                    result = RecoverResult.Failed;
-                    reply["result"] = "failed";
-                    return "the restore could not be journaled; nothing emptied, kept";
-                }
-                RestoreStep("journaled recovering");
+                // Round 33 (c, e): no "recovering" journal before the empty (and none inside the open): the record is
+                // offer-only on disk already, so a Restore cut short anywhere is offered again (judged by content).
                 // EmptyClipboard waits on a live foreign owner's WM_DESTROYCLIPBOARD (up to ~5 s on a hung one) while we hold the
                 // lock: an owner that does not answer a WM_NULL now is not asked at all (kept, tried again later).
                 string ownerProblem = view.OwnerAlive && !view.OwnerIsUs ? ClipboardText.OwnerUnresponsive() : null;
@@ -1116,31 +1346,35 @@ namespace DoodleNote.DictationHelper
                     return "the clipboard could not be emptied; kept for a retry";
                 }
                 RestoreStep("emptied");
-                bool journaled = Stage(journal, "recovering-emptied", Native.GetClipboardSequenceNumber());
-                RestoreStep("journaled recovering-emptied");
+                uint emptiedAt = Native.GetClipboardSequenceNumber();
                 // Test build only: die with the clipboard emptied by the user's Restore.
                 TestMode.Stall("RECOVERY_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_MS", 0));
                 bool setOk = saved.PutBackOpen(trace);
                 string restored = saved.PutBackResult(setOk);
                 RestoreStep("put back");
+                closeNow();
                 // Round 22 (S3): an incomplete record's put-back of everything that survived answers exactly that.
                 bool partially = setOk && saved.Incomplete;
                 reply["result"] = partially ? "restored-partially" : restored;
                 if (partially) reply["missing"] = saved.Missing();
-                if (!journaled)
-                {
-                    // Put back now (the user's content must not stay off the clipboard); the record is kept, as an offer.
-                    result = RecoverResult.Pending;
-                    return "put back (" + seen + "): " + restored + ", but its stage could not be journaled: kept as an offer";
-                }
                 // Round 23 (Opus SF1): an ACCEPTED partial restore (the user was shown what is missing and chose it) is done:
                 // settled and deleted like any completed restore, never offered again. Only a put-back that failed keeps it.
-                if (restored == "unrestored" && !partially) { result = RecoverResult.Failed; return "put back only in part; kept, offered again"; }
+                if (restored == "unrestored" && !partially)
+                {
+                    journal.Stage = "recovering-emptied";
+                    journal.SequenceAtStage = emptiedAt;
+                    WriteSnapshot(id, StateJson(journal), "recovering-emptied", false); // diagnostic, after the close
+                    result = RecoverResult.Failed;
+                    return "put back only in part; kept, offered again";
+                }
                 if (partially) restored = "restored-partially";
                 outcome = "the user's restore put back (" + seen + "): " + restored;
-                // Settled BEFORE the file cleanup, which may be deferred (a file held by another process): the offer is
-                // withdrawn now and a "settled" state is deleted on sight, so restored content is never offered again.
-                if (!Stage(journal, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
+                // Settled (DURABLE) BEFORE the file cleanup, which may be deferred (a file held by another process): the offer
+                // is withdrawn now and a "settled" state is deleted on sight, so restored content is never offered again.
+                // Round 33 (d): written after the close (the interval from the put-back to here widened by the close: a
+                // crash in it leaves the record judged by content: already there, deleted; else a spurious offer).
+                journal.Stage = "settled";
+                if (!WriteSnapshot(id, StateJson(journal), "settled", true)) Wire.Log("the settled stage could not be journaled; deleting anyway");
                 RestoreStep("journaled settled");
                 OfferGone(id, "restored");
                 outcome += DeleteId(id, outcome) ? "; deleted" : "; " + Deferred;
@@ -1150,14 +1384,7 @@ namespace DoodleNote.DictationHelper
                 if (partially) recovered["missing"] = saved.Missing();
                 Wire.Send(recovered);
             }
-            finally
-            {
-                Native.ClearLastError(0); // round 22 (S6): the error read is this close's own
-                bool closed = Native.CloseClipboard();
-                int closeError = closed ? 0 : Marshal.GetLastWin32Error();
-                RestoreStep(closed ? "closed" : "close failed");
-                if (trace != null) trace.Closed(closed, closeError);
-            }
+            finally { closeNow(); }
             return outcome;
         }
 
@@ -1366,7 +1593,7 @@ namespace DoodleNote.DictationHelper
                 state["offerBoots"] = facts.OfferBoots;
                 state["offerOnly"] = true; // an offered record is offer-only (informational: disk never grants authority)
                 if (!facts.OfferOnly) state["offerOnlyWhy"] = "offered";
-                WriteStateJson(StatePath(id), Wire.Serialize(state));
+                WriteStateJson(StatePath(id), Wire.Serialize(state), true);
                 facts.OfferOnly = true;
             }
             catch (Exception error) { Wire.Log("the offer could not be recorded in the state file (" + error.GetType().Name + "); offered from memory"); }
