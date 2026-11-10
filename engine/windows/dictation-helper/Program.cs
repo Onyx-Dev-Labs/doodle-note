@@ -562,10 +562,15 @@ namespace DoodleNote.DictationHelper
 #endif
                     break;
                 case "__retention-sweep":
-                    // Test build only (round 37): the 30-minute retention check, run now (the timer's own function).
+                    // Test build only (round 37): the 30-minute retention check, run now (the timer's own function), on a pool
+                    // thread like the timer's: NOT on the request queue, which a held delivery occupies (CI run 42918694530).
                     if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
 #if DICTATION_TEST
-                    work.Async(id, delegate { PendingClipboard.ExpireSweep(); Wire.Reply(id, true, Wire.Fields("result", "swept")); });
+                    ThreadPool.QueueUserWorkItem(delegate
+                    {
+                        try { PendingClipboard.ExpireSweep(); Wire.Reply(id, true, Wire.Fields("result", "swept")); }
+                        catch (Exception error) { Wire.Reply(id, false, Wire.Fields("reason", error.GetType().Name)); }
+                    });
 #endif
                     break;
                 case "__text-forms":
