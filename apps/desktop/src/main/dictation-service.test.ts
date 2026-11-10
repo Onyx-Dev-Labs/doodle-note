@@ -3198,6 +3198,7 @@ for (const delivery of ['d-old', ''] as const) {
     )
     await tick()
     assert.equal(notices(h, title), 1, 'exactly one notice')
+    assert.equal(h.overlay.at(-1)!.title, title, 'and it is the one shown')
   })
 }
 
@@ -3265,6 +3266,9 @@ for (const prior of [false, true]) {
       await tick()
     }
     assert.equal(notices(h, partialTitle), 1)
+    // Round 27: the notice is VISIBLE at the end (an offer-list refresh must not clear it).
+    assert.equal(h.overlay.at(-1)!.title, partialTitle, 'the notice is the one shown')
+    assert.equal(h.overlay.at(-1)!.title, partialTitle, 'the notice is the one shown')
   })
 }
 
@@ -3297,6 +3301,8 @@ test('Windows (round 26): a failed Restore, then a successful retry (its event b
   clickOffer(h, 'offer-restore')
   await tick()
   assert.equal(notices(h, partialTitle), 1)
+  // Round 27: the notice is VISIBLE at the end (an offer-list refresh must not clear it).
+  assert.equal(h.overlay.at(-1)!.title, partialTitle, 'the notice is the one shown')
 })
 
 test('Windows (round 26): an ordinary successful Restore right after startup (its event before its reply): exactly one notice', async () => {
@@ -3314,7 +3320,201 @@ test('Windows (round 26): an ordinary successful Restore right after startup (it
   clickOffer(h, 'offer-restore')
   await tick()
   assert.equal(notices(h, partialTitle), 1)
+  // Round 27: the notice is VISIBLE at the end (an offer-list refresh must not clear it).
+  assert.equal(h.overlay.at(-1)!.title, partialTitle, 'the notice is the one shown')
 })
+
+// Round 27 (Astra's verification of round 26, /tmp/tmp.oXv7AQmjA0/r26-additions.ts): every Restore notice is
+// asserted VISIBLE at the end, not only counted. Two assertions are adapted to the fix: a second click while the
+// first Restore is outstanding is now IGNORED (round 27), so there is no second request to answer "gone".
+const r27Deps = (h: ReturnType<typeof harness>): DictationDeps =>
+  (h.service as unknown as { deps: DictationDeps }).deps
+
+for (const replyResult of ['restored-partially', 'failed']) {
+  test(`Windows (round 27): the event before a ${replyResult} reply: one notice, and it stays visible`, async () => {
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+    h.helper.offers = [kept]
+    h.helper.restoreAnswers = [{ result: replyResult, missing: ['X (y)'] }]
+    await h.service.start()
+    await tick()
+    h.helper.beforeRestoreAnswer = () => {
+      h.helper.offers = []
+      h.helper.offerGoneListener!(kept.record)
+      h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], kept.record)
+    }
+    clickOffer(h, 'offer-restore')
+    await tick()
+    assert.equal(notices(h, partialTitle), 1)
+    assert.equal(
+      h.overlay.at(-1)!.title,
+      partialTitle,
+      'the completion notice remains visible after the reply and the list refresh'
+    )
+  })
+}
+
+test('Windows (round 27): the event before the reply with ANOTHER offer left: the notice stays visible (the card comes back after it)', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+  const other = offer({ record: 'c'.repeat(32) })
+  h.helper.offers = [kept, other]
+  h.helper.restoreAnswers = [{ result: 'restored-partially', missing: ['X (y)'] }]
+  await h.service.start()
+  await tick()
+  h.helper.beforeRestoreAnswer = () => {
+    h.helper.offers = [other]
+    h.helper.offerGoneListener!(kept.record)
+    h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], kept.record)
+  }
+  clickOffer(h, 'offer-restore')
+  await tick()
+  assert.equal(notices(h, partialTitle), 1)
+  assert.equal(h.overlay.at(-1)!.title, partialTitle)
+})
+
+test('Windows (round 27): two clicks before the first reply: the second is ignored; one notice, visible; a later retry still works', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+  h.helper.offers = [kept]
+  await h.service.start()
+  await tick()
+  const replies: Array<(x: ClipboardOfferRestore) => void> = []
+  r27Deps(h).helper.restoreClipboardOffer = () => new Promise((resolve) => replies.push(resolve))
+  clickOffer(h, 'offer-restore')
+  clickOffer(h, 'offer-restore')
+  assert.equal(replies.length, 1, 'the second click while the first is outstanding sends nothing')
+  // The first fails (no answer in time): a retry afterwards is a new request.
+  replies[0]!({ result: 'failed' })
+  await tick()
+  clickOffer(h, 'offer-restore')
+  assert.equal(replies.length, 2, 'a retry after the reply is sent')
+  h.helper.offers = []
+  h.helper.offerGoneListener!(kept.record)
+  h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], kept.record)
+  replies[1]!({ result: 'restored-partially', missing: ['X (y)'] })
+  await tick()
+  assert.equal(
+    notices(h, partialTitle),
+    1,
+    'one actual restore completion, not one event plus its reply'
+  )
+  assert.equal(h.overlay.at(-1)!.title, partialTitle)
+})
+
+test('Windows (round 27): the reply, then its event and a repeat: one notice, visible', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+  h.helper.offers = [kept]
+  await h.service.start()
+  await tick()
+  h.helper.offers = []
+  h.helper.restoreAnswers = [{ result: 'restored-partially', missing: ['X (y)'] }]
+  clickOffer(h, 'offer-restore')
+  await tick()
+  h.helper.offerGoneListener!(kept.record)
+  for (let i = 0; i < 2; i++)
+    h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], kept.record)
+  await tick()
+  assert.equal(notices(h, partialTitle), 1)
+  assert.equal(h.overlay.at(-1)!.title, partialTitle)
+})
+
+test('Windows (round 27): a separate later Restore of the same record has its own completion', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+  h.helper.offers = [kept]
+  await h.service.start()
+  await tick()
+  for (let i = 0; i < 2; i++) {
+    if (i) {
+      h.helper.offers = [kept]
+      h.helper.offerListener!(kept)
+      await tick()
+    }
+    h.helper.restoreAnswers = [{ result: 'failed' }]
+    clickOffer(h, 'offer-restore')
+    await tick()
+    h.helper.offers = []
+    h.helper.offerGoneListener!(kept.record)
+    h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], kept.record)
+    await tick()
+    assert.equal(h.overlay.at(-1)!.title, partialTitle, `visible after Restore ${i + 1}`)
+  }
+  assert.equal(notices(h, partialTitle), 2)
+})
+
+test('Windows (round 27): two different records in flight complete independently, each visible in turn', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const a = offer({ record: 'a'.repeat(32), delivery: '', incomplete: true, missing: ['X (y)'] })
+  const b = offer({ record: 'b'.repeat(32), delivery: '', incomplete: true, missing: ['Z (z)'] })
+  h.helper.offers = [a, b]
+  await h.service.start()
+  await tick()
+  const replies: Array<(x: ClipboardOfferRestore) => void> = []
+  r27Deps(h).helper.restoreClipboardOffer = () => new Promise((resolve) => replies.push(resolve))
+  clickOffer(h, 'offer-restore')
+  h.helper.offers = [b]
+  h.helper.offerGoneListener!(a.record)
+  await tick()
+  clickOffer(h, 'offer-restore')
+  h.helper.offers = []
+  h.helper.offerGoneListener!(b.record)
+  h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], a.record)
+  h.helper.clipboardLateListener!('restored-partially', undefined, ['Z (z)'], b.record)
+  replies[0]!({ result: 'failed' })
+  replies[1]!({ result: 'failed' })
+  await tick()
+  assert.equal(notices(h, partialTitle), 1)
+  assert.equal(notices(h, 'Your clipboard was put back except: Z (z).'), 1)
+  assert.equal(h.overlay.at(-1)!.title, 'Your clipboard was put back except: Z (z).')
+})
+
+for (const clicks of [1, 2]) {
+  test(`Windows (round 27): the production client (its request queue, result parser and event dispatch), ${clicks} click(s): one notice, visible`, async () => {
+    const { DictationHelperClient } = await import('./dictation-helper-client')
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+    h.helper.offers = [kept]
+    await h.service.start()
+    await tick()
+    // No process is launched: only the transport is replaced.
+    const client = new DictationHelperClient({ command: '/never-launched', platform: 'win32' })
+    const raw = client as unknown as {
+      request(op: string, ...args: unknown[]): Promise<unknown>
+      handleLine(line: string): boolean
+    }
+    const replies: Array<(x: unknown) => void> = []
+    raw.request = async (op: string) =>
+      op === 'clipboard-offers'
+        ? { ok: true, offers: h.helper.offers }
+        : new Promise((resolve) => replies.push(resolve))
+    client.onClipboardLate(h.helper.clipboardLateListener!)
+    client.onClipboardOfferGone(h.helper.offerGoneListener!)
+    r27Deps(h).helper.restoreClipboardOffer = client.restoreClipboardOffer.bind(client)
+    r27Deps(h).helper.clipboardOffers = client.clipboardOffers.bind(client)
+    for (let i = 0; i < clicks; i++) clickOffer(h, 'offer-restore')
+    await tick()
+    assert.equal(replies.length, 1, 'one request on the wire')
+    h.helper.offers = []
+    raw.handleLine(JSON.stringify({ event: 'clipboard', phase: 'offer-gone', record: kept.record }))
+    raw.handleLine(
+      JSON.stringify({
+        event: 'clipboard',
+        phase: 'recovered',
+        record: kept.record,
+        id: '',
+        clipboard: 'restored-partially',
+        missing: ['X (y)']
+      })
+    )
+    replies[0]!({ ok: true, result: 'restored-partially', missing: ['X (y)'] })
+    await tick()
+    assert.equal(replies.length, 1, 'no second request was queued')
+    assert.equal(notices(h, partialTitle), 1, 'the one restored record has exactly one notice')
+    assert.equal(h.overlay.at(-1)!.title, partialTitle, 'and it stays visible')
+  })
+}
 
 test('Windows (round 24): a clipboard too large to save gives no paste-it-yourself advice once typing put the text in', async () => {
   // Round 25: the advice only when the text was NOT inserted (an uncertain insertion may have put it in).
