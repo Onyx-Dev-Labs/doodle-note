@@ -485,7 +485,12 @@ past it, "clipboard-busy", nothing emptied). There is ONE delivery check at a ti
 outstanding check while it still waits for the lock, or waits (within its own allowance) for a running one before
 starting the next; a check that no delivery waits for any more does nothing once it gets the lock, and stops between
 records (CI case 56: three deliveries during one stall, one check thread; case 57: the retention check during a held
-write). The queued steps run before the helper exits, inside
+write). Round 38 (Opus, Astra P2): the delivery's wait for a look already inside never runs past its remaining allowance
+(in 50 ms slices; "deadline", nothing emptied), and the deadline is checked again right before the write (CI case 58).
+Round 38, option (b) of the two offered for the late write (refuse while it is outstanding, not a process-wide open
+lock): a late rollback is SEVERAL opens (its confirmation, then its put-back) with our late text on the clipboard in
+between, so a lock around each open would still let a delivery save our own text as the user's in a gap; refusing
+for the whole late transaction closes that too, and is a counter check with no lock order (it cannot deadlock). The queued steps run before the helper exits, inside
 its usual exit wait; past it, a record left behind is judged by content at the next start. The background writer
 serializes every write (one queue, in order) on immutable snapshots, and a record settled meanwhile is never written
 again, so an older queued write can never overwrite the settlement or recreate a deleted state. Every state write goes
@@ -914,9 +919,16 @@ reads its stdin on its own thread and ends itself when a read is still outstandi
 helper abandoned it, or ended); (4) the helper ends an abandoned reader after 120 s on an owner reported hung, or
 after 300 s whatever the owner reports. IsHungAppWindow alone is no bound: an owner that is busy but pumps is never
 "hung". So a reader outlives the helper by at most about 30 s. The cost: a reader ended by (3) or (4) mid-render may
-lose the format being rendered for its owner. An abandoned late write of ours holds the clipboard open while it waits
-in EmptyClipboard, so the user's Restore and the leftover checks find it busy (retried) until it has put the saved
-content back; its own record stays in flight until then.
+lose the format being rendered for its owner. An abandoned late write of ours keeps its record in flight until it has
+put the saved content back. Until round 37 this said the user's Restore and the leftover checks "find it busy": WRONG
+for the helper's own opens (round 38, Astra P2): the late write opens with the helper's SAME window, so another open of
+ours does not fail but takes its open over (the rollback then fails; the clipboard can be left empty, the record kept
+as an offer: never a loss), and between its opens our late text is on the clipboard. Since round 38 the leftover checks
+skip while anything is in flight (round 37), the user's Restore answers "busy" (nothing touched, the card kept) while
+a write thread of ours still runs (deliveries and the Restore share the request queue and recovery looks take the
+recovery lock, so a write thread whose delivery returned, a late write and its rollback, is the one opener left; it is
+counted until its rollback is done), and a new delivery waits for a late write at most 1 s
+within its deadline, else refuses ("clipboard-busy", nothing touched) (CI case 59).
 
 If the helper's UI thread itself crashes, the hooks may block input for up to 3 s while the bounded
 shutdown runs; a clipboard transaction in flight is then finished by the next helper from its record.
