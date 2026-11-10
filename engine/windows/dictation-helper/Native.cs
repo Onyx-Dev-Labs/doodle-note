@@ -28,6 +28,26 @@ namespace DoodleNote.DictationHelper
         public struct FILE_DISPOSITION_INFO { public byte DeleteFile; }
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateFileW")]
         public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileForDelete(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr GetProcessWindowStation();
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetUserObjectInformationW(IntPtr handle, int index, StringBuilder info, int length, out int needed);
+        const int UOI_NAME = 2;
+        /// <summary>Round 35: this process's window station name (e.g. "WinSta0"); "" when it cannot be read.</summary>
+        public static string WindowStationName()
+        {
+            try
+            {
+                IntPtr station = GetProcessWindowStation();
+                if (station == IntPtr.Zero) return "";
+                StringBuilder name = new StringBuilder(256);
+                int needed;
+                return GetUserObjectInformationW(station, UOI_NAME, name, name.Capacity * 2, out needed) ? name.ToString() : "";
+            }
+            catch (Exception) { return ""; }
+        }
+
         /// <summary>Round 33: an atomic rename over an existing file (one metadata operation on NTFS; no ~RF temporary).</summary>
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

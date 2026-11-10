@@ -157,9 +157,23 @@ namespace DoodleNote.DictationHelper
         /// <summary>How long a kept (pending) record is offered before it is deleted.</summary>
         public static readonly TimeSpan Retention = TimeSpan.FromHours(24);
         static readonly int[] RetryDelaysMs = { 3000, 10000, 30000, 60000, 120000 };
-        static readonly HashSet<string> inFlight = new HashSet<string>();
+        /// <summary>
+        /// Round 35 (Astra P2, Opus): the in-flight and writing sets are lock-free (a concurrent dictionary), so Begin's
+        /// answer path never takes `gate`, which a recovery sweep holds across file and clipboard operations.
+        /// </summary>
+        internal sealed class IdSet
+        {
+            readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ids = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>();
+            public void Add(string id) { ids[id] = 0; }
+            public bool Remove(string id) { byte unused; return ids.TryRemove(id, out unused); }
+            public bool Contains(string id) { return ids.ContainsKey(id); }
+            public int Count { get { return ids.Count; } }
+        }
+        static readonly IdSet inFlight = new IdSet();
+        /// <summary>Test only: a record taken out of flight (the logic tests judge it as a leftover).</summary>
+        internal static void ForgetInFlight(string id) { inFlight.Remove(id); }
         /// <summary>Payload writers still running in this process (their record must not be judged "no payload").</summary>
-        static readonly HashSet<string> writing = new HashSet<string>();
+        static readonly IdSet writing = new IdSet();
         /// <summary>Per transaction: its retry backoff step and timer.</summary>
         static readonly Dictionary<string, KeyValuePair<int, Timer>> retries = new Dictionary<string, KeyValuePair<int, Timer>>();
         /// <summary>The offers this helper has made (sent as "pending" events), by record id.</summary>
@@ -183,6 +197,11 @@ namespace DoodleNote.DictationHelper
         {
             try
             {
+                // Round 35 (Astra P2): the copies name the helper that WROTE a state, not the one that may be replacing it
+                // (an earlier build recovering a dead helper's record rewrote its facts without changing them), and an open
+                // handle is no protection (ReplaceFile shares delete). So nothing is swept while ANY other helper process
+                // runs (any identity, any pid: a dictation-helper* image), only when this helper is the only one.
+                if (OtherHelperRunning()) return false;
                 Dictionary<string, object> copy = Wire.Parse(File.ReadAllText(path));
                 if (copy == null) return false;
                 double? copySession = Wire.Num(copy, "session"), copyPid = Wire.Num(copy, "pid"), copyStart = Wire.Num(copy, "pidStart");
@@ -200,6 +219,26 @@ namespace DoodleNote.DictationHelper
                 return true;
             }
             catch (Exception) { return false; }
+        }
+
+        /// <summary>Any process of a dictation-helper* image other than this one (unknown counts as running).</summary>
+        static bool OtherHelperRunning()
+        {
+            try
+            {
+                int self = Process.GetCurrentProcess().Id;
+                foreach (Process other in Process.GetProcesses())
+                {
+                    using (other)
+                    {
+                        string name;
+                        try { name = other.ProcessName; } catch (Exception) { continue; }
+                        if (other.Id != self && name.StartsWith("dictation-helper", StringComparison.OrdinalIgnoreCase)) return true;
+                    }
+                }
+                return false;
+            }
+            catch (Exception) { return true; }
         }
 
         /// <summary>Round 33: File.Replace's temporary of an earlier build, for one of this identity's states.</summary>
@@ -278,7 +317,7 @@ namespace DoodleNote.DictationHelper
             PendingRecord record = new PendingRecord();
             record.DeliveryId = Delivery.CurrentRequestId ?? "";
             record.DictatedHash = Hash(dictated);
-            lock (gate) inFlight.Add(record.Id);
+            inFlight.Add(record.Id); // round 35: no lock on Begin's path
             if (saved.PrivacyMarked)
             {
                 Wire.Log("the saved clipboard carries a privacy marker: kept in memory only (not written down)");
@@ -293,8 +332,9 @@ namespace DoodleNote.DictationHelper
             record.SequenceAtStage = saved.Sequence;
             string json = StateJson(record);
             Stopwatch watch = Stopwatch.StartNew();
-            lock (gate) writing.Add(record.Id);
+            writing.Add(record.Id);
             bool stateOk = false;
+            TestMode.Trace("begin writing " + record.Id.Substring(0, 8));
             // State first, then the payload, one after the other (a payload never exists without its state), on their own
             // thread so that a stalled disk cannot hold the delivery past BeginDeadlineMs.
             record.PayloadWriter = new Thread(delegate ()
@@ -303,17 +343,19 @@ namespace DoodleNote.DictationHelper
                 {
                     stateOk = WriteStateDurable(record, json, "emptying");
                     if (stateOk && !record.Abandoned) WritePayload(record, saved, record.DictatedHash, watch);
-                    else lock (gate) writing.Remove(record.Id);
+                    else writing.Remove(record.Id);
                 }
                 catch (Exception error)
                 {
                     try { Wire.Log("ERROR: the clipboard transaction could not be written down: " + error.GetType().Name); } catch (Exception) { }
-                    lock (gate) writing.Remove(record.Id);
+                    writing.Remove(record.Id);
                 }
                 finally
                 {
-                    // Begin gave up first (state 2): this writer removes whatever it published; nobody waited on it.
-                    if (Interlocked.CompareExchange(ref record.BeginState, 1, 0) == 2) RemoveNotEstablished(record);
+                    // Round 35: the writer does every cleanup, never Begin: when Begin gave up first (state 2), and when the
+                    // writer itself failed (Begin then only answers). Nobody waits on it.
+                    bool established = stateOk && record.PayloadPublished;
+                    if (Interlocked.CompareExchange(ref record.BeginState, 1, 0) == 2 || !established) RemoveNotEstablished(record);
                 }
             });
             record.PayloadWriter.IsBackground = true;
@@ -338,10 +380,9 @@ namespace DoodleNote.DictationHelper
             }
             if (done) why = !stateOk ? "its state could not be written" : "its payload could not be written";
             LastBeginFailure = why;
-            lock (gate) inFlight.Remove(record.Id);
+            // Round 35: no lock, no file operation on the way out (the writer removes what it published, see above).
+            inFlight.Remove(record.Id);
             Wire.Log("not pasting: the clipboard transaction was not written down (" + why + "); nothing emptied");
-            // The writer finished (failed): what it published is removed here; still running (gave up): it removes it.
-            if (done) RemoveNotEstablished(record);
             return null;
         }
 
@@ -401,7 +442,7 @@ namespace DoodleNote.DictationHelper
                 TryDelete(tmp);
                 Wire.Log("ERROR: the saved clipboard could not be written down: " + error.GetType().Name);
             }
-            finally { lock (gate) writing.Remove(record.Id); }
+            finally { writing.Remove(record.Id); }
         }
 
         /// <summary>
@@ -549,7 +590,7 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>How many payload writers still run in this process (the logic tests).</summary>
-        internal static int WritersRunning() { lock (gate) return writing.Count; }
+        internal static int WritersRunning() { return writing.Count; }
 
         /// <summary>Waits (bounded) until every queued journal step ran: the helper's exit, and the logic tests.</summary>
         public static bool DrainJournal(int ms)
@@ -691,6 +732,7 @@ namespace DoodleNote.DictationHelper
                 "offerBoots", record.OfferBoots,
                 "offerOnly", record.OfferOnly,
                 "offerOnlyWhy", record.OfferOnlyWhy ?? "",
+                "windowStation", record.IdentityUnknown ? "" : windowStation,
                 "updated", DateTime.UtcNow.ToString("o")));
         }
 
@@ -940,6 +982,8 @@ namespace DoodleNote.DictationHelper
             TestMode.Gate("RETRY");
             lock (gate)
             {
+                // Test build only (round 35): a retry stalled inside its file work, holding `gate` (Begin must not wait on it).
+                TestMode.Gate("SWEEP_RETRY");
                 // Never while a delivery of ours is in flight (our write may be on the clipboard): wait, not consumed.
                 if (inFlight.Count > 0) { ScheduleRetry(id, RetryKind.Busy); return; }
                 if (Probe(StatePath(id)) == Presence.Absent) { CancelRetry(id); return; }
@@ -973,6 +1017,8 @@ namespace DoodleNote.DictationHelper
                 string[] files;
                 try { files = System.IO.Directory.GetFiles(Directory, "DoodleNote-Bark-clipboard-" + HelperIdentity.Sanitized + "*"); }
                 catch (Exception) { return; }
+                // Test build only (round 35): a sweep stalled inside its file work, holding `gate` (Begin must not wait on it).
+                TestMode.Gate("SWEEP");
                 Regex names = RecordName;
                 List<string> states = new List<string>();
                 foreach (string path in files)
@@ -1318,8 +1364,7 @@ namespace DoodleNote.DictationHelper
                 // EmptyClipboard would have moved it), so nothing of ours was emptied: the record is harmless and deleted, also
                 // an INCOMPLETE one (whose content proof below cannot hold: the user's real clipboard is the whole of it). Used
                 // only to DELETE, never to write.
-                if (facts.Stage == "emptying" && facts.SequenceAtStage != 0 && view.Sequence == facts.SequenceAtStage
-                    && match == LogonMatch.Same && facts.BootId.Length > 0 && facts.BootId == bootId)
+                if (UnchangedSinceCapture(facts, view, match))
                 {
                     closeNow();
                     if (byUser) reply["result"] = "restored";
@@ -1747,6 +1792,27 @@ namespace DoodleNote.DictationHelper
         /// user's is missing). The only automatic restore is the live transaction's own, in the process that wrote
         /// (SavedClipboard.Restore).
         /// </summary>
+        /// <summary>
+        /// Round 34-35 (Opus 3; Astra P2): the one deletion proof that uses a sequence number (unit-tested). The record's first
+        /// durable state ("emptying") with the save's capture sequence; a COMPLETE observation now (view.Incomplete: no
+        /// proof of anything, round 21); the same logon and boot; the same WINDOW STATION (sequence numbers are per window
+        /// station, and a session can have several); and that same sequence now. It proves nothing was emptied by us since
+        /// the capture, and is used ONLY to delete a record, never to write the clipboard.
+        /// </summary>
+        internal static bool UnchangedSinceCapture(RecordFacts facts, ClipboardView view, LogonMatch match)
+        {
+            return facts.Stage == "emptying" && facts.SequenceAtStage != 0 && view != null && !view.Incomplete
+                && view.Sequence != 0 && view.Sequence == facts.SequenceAtStage
+                && match == LogonMatch.Same && facts.BootId.Length > 0 && facts.BootId == bootId
+                && facts.WindowStation.Length > 0 && facts.WindowStation == windowStation;
+        }
+
+        /// <summary>This boot's id (the logic tests).</summary>
+        internal static string CurrentBootId { get { return bootId; } }
+
+        /// <summary>This process's window station name ("" when it cannot be read): the scope of a clipboard sequence.</summary>
+        internal static readonly string windowStation = Native.WindowStationName();
+
         public static RecoveryVerdict Decide(RecordFacts facts, ClipboardView view, LogonMatch logonMatch)
         {
             if (logonMatch == LogonMatch.OtherSession) return RecoveryVerdict.OtherSession;
@@ -1830,6 +1896,8 @@ namespace DoodleNote.DictationHelper
         public string Logon = "";
         public string SessionKey = "";
         public string BootId = "";
+        /// <summary>Round 35: the window station of the capture ("" when absent: no sequence proof).</summary>
+        public string WindowStation = "";
         public long Tick;
         public DateTime CreatedUtc = DateTime.MinValue;
         /// <summary>Fixed at the first offer (see PendingClipboard.Offer).</summary>
@@ -1856,6 +1924,11 @@ namespace DoodleNote.DictationHelper
             { "created", 's' }, { "offeredSequence", 'u' }, { "offeredTick", 'l' }, { "offeredBoot", 's' }, { "offered", 's' },
             { "offerBoots", 'i' }, { "offerOnly", 'b' }, { "offerOnlyWhy", 's' }, { "updated", 's' }
         };
+        /// <summary>
+        /// Round 35: fields a state MAY carry (earlier round-33/34 states lack them; absent, the proof they serve does not
+        /// apply: no default ever stands in for them). windowStation: the scope of the capture sequence.
+        /// </summary>
+        static readonly Dictionary<string, char> Optional = new Dictionary<string, char> { { "windowStation", 's' } };
 
         /// <summary>
         /// The rule (unit-tested, STRICT): null when the state is exactly one this helper writes for this record (every
@@ -1865,7 +1938,11 @@ namespace DoodleNote.DictationHelper
         internal static string Validate(Dictionary<string, object> state, string id)
         {
             if (state == null) return "it does not parse";
-            foreach (KeyValuePair<string, object> field in state) if (!Schema.ContainsKey(field.Key)) return "an unknown field (" + field.Key + ")";
+            foreach (KeyValuePair<string, object> field in state)
+            {
+                if (Optional.ContainsKey(field.Key)) { if (!(field.Value is string)) return "a wrong type (" + field.Key + ")"; continue; }
+                if (!Schema.ContainsKey(field.Key)) return "an unknown field (" + field.Key + ")";
+            }
             foreach (KeyValuePair<string, char> field in Schema)
             {
                 object value;
@@ -1911,6 +1988,7 @@ namespace DoodleNote.DictationHelper
             facts.Logon = Wire.Str(state, "logon") ?? "";
             facts.SessionKey = Wire.Str(state, "sessionKey") ?? "";
             facts.BootId = Wire.Str(state, "bootId") ?? "";
+            facts.WindowStation = Wire.Str(state, "windowStation") ?? "";
             facts.Tick = (long)(Wire.Num(state, "tick") ?? 0);
             facts.OfferedSequence = (uint)(Wire.Num(state, "offeredSequence") ?? 0);
             facts.OfferedTick = (long)(Wire.Num(state, "offeredTick") ?? 0);
