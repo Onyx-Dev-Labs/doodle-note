@@ -70,7 +70,7 @@ namespace DoodleNote.DictationHelper
         /// <summary>
         /// Round 30: a gate at a named point. Enabled per name (DICTATION_HELPER_TEST_GATES, a comma list) with a folder
         /// (DICTATION_HELPER_TEST_GATE_DIR): the n-th pass waits until the harness creates the file "NAME-n" there (at most
-        /// 120 s), announcing "gate NAME#n waiting" and then "gate NAME#n opened" (or "timed out"). The order of the
+        /// 120 s, or DICTATION_HELPER_TEST_GATE_TIMEOUT_MS), announcing "gate NAME#n waiting" and then "gate NAME#n opened" (or "timed out"). The order of the
         /// harness's action and the helper's next step is then fixed, not timed. Returns whether the gate was enabled
         /// (the caller's own timed wait is skipped then). Nothing in a release build.
         /// </summary>
@@ -90,7 +90,8 @@ namespace DoodleNote.DictationHelper
             Trace("gate " + name + "#" + n + " waiting");
             Stopwatch waited = Stopwatch.StartNew();
             bool opened;
-            while (!(opened = File.Exists(path)) && waited.ElapsedMilliseconds < 120000) Thread.Sleep(10);
+            int limit = Int("DICTATION_HELPER_TEST_GATE_TIMEOUT_MS", 120000); // round 31: the timeout itself is asserted once
+            while (!(opened = File.Exists(path)) && waited.ElapsedMilliseconds < limit) Thread.Sleep(10);
             Trace("gate " + name + "#" + n + (opened ? " opened" : " timed out") + " after " + waited.ElapsedMilliseconds + " ms");
             return true;
 #else

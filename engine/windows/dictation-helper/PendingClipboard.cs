@@ -787,17 +787,29 @@ namespace DoodleNote.DictationHelper
         /// "restored-partially" with what it could not include.
         public static Dictionary<string, object> RestoreOffer(string id, uint expectSequence, bool acceptIncomplete = false)
         {
+            // Round 31 (Opus): the user's Restore says where its time went (CI run 42842819157 saw Restores of 1.1-1.2 s,
+            // about 1 s over their usual 0.05-0.07 s, that nothing in the log explained). Steps and times only, no content.
+            StepTimeline steps = new StepTimeline();
             lock (gate)
             {
+                steps.Mark("lock taken");
                 if (!RecordName.IsMatch(Prefix + id + ".state") || Probe(StatePath(id)) == Presence.Absent) return Wire.Fields("result", "gone");
                 RecoverResult result;
                 Dictionary<string, object> reply = Wire.Fields();
-                string verdict = RecoverOne(id, out result, true, expectSequence, reply, 0, acceptIncomplete);
+                restoreSteps = steps;
+                string verdict;
+                try { verdict = RecoverOne(id, out result, true, expectSequence, reply, 0, acceptIncomplete); }
+                finally { restoreSteps = null; }
                 if (verdict != null) Wire.Log("clipboard record " + id.Substring(0, 8) + " (the user's restore): " + verdict);
                 if (result != RecoverResult.Done && result != RecoverResult.Foreign) ScheduleRetry(id, RetryKind.Check); // never for another session's
+                Wire.Log("clipboard record " + id.Substring(0, 8) + " (the user's restore) timeline: " + steps.Describe());
                 return reply;
             }
         }
+
+        /// <summary>Round 31: the steps of the user's Restore in progress on this thread (null otherwise).</summary>
+        [ThreadStatic] static StepTimeline restoreSteps;
+        static void RestoreStep(string step) { StepTimeline steps = restoreSteps; if (steps != null) steps.Mark(step); }
 
         /// <summary>The user dismissed an offer: its record is deleted now.</summary>
         public static bool DismissOffer(string id)
@@ -840,6 +852,7 @@ namespace DoodleNote.DictationHelper
             // A read that fails (another process holds the file: an AV scan, the helper writing it) is never
             // corruption: the record is kept and checked again. Only a fully read file that is not a valid state is.
             string text;
+            if (depth == 0) RestoreStep("checks");
             try { text = File.ReadAllText(StatePath(id)); }
             catch (Exception error)
             {
@@ -882,7 +895,9 @@ namespace DoodleNote.DictationHelper
             RecordFacts facts = RecordFacts.Of(state); // facts.OfferOnly is the ON-DISK value (a later write heals a failed one)
             // First of all: another session's record (same user, same boot, shared %TEMP%) is never touched here.
             if (facts.Compare(Now()) == LogonMatch.OtherSession) { result = RecoverResult.Foreign; reply["result"] = "busy"; return "another session's record; left to it"; }
+            RestoreStep("state read");
             Liveness itsHelper = facts.Pid != Process.GetCurrentProcess().Id ? HelperLiveness(facts.Pid, facts.PidStart) : Liveness.NotRunning;
+            RestoreStep("liveness checked");
             if (itsHelper == Liveness.Running) { result = RecoverResult.Busy; reply["result"] = "busy"; return "its helper (pid " + facts.Pid + ") still runs; left to it"; }
             if (itsHelper == Liveness.Unknown)
             {
@@ -933,6 +948,7 @@ namespace DoodleNote.DictationHelper
                 FileInfo info = new FileInfo(PayloadPath(id));
                 if (info.Length > MaxRecordBytes) { return "ERROR: payload of " + info.Length + " bytes over the cap; not read; " + (DeleteId(id, "payload over the size cap") ? "deleted" : Deferred); }
                 sealedBytes = File.ReadAllBytes(PayloadPath(id));
+                RestoreStep("payload read");
             }
             catch (Exception error)
             {
@@ -965,6 +981,7 @@ namespace DoodleNote.DictationHelper
                     dictatedHash = reader.ReadBytes(32);
                     saved = SavedClipboard.ReadFrom(reader);
                 }
+                RestoreStep("decrypted");
             }
             catch (CryptographicException error)
             {
@@ -991,6 +1008,7 @@ namespace DoodleNote.DictationHelper
             if (corrupt != null) { return "ERROR: payload corrupt (" + corrupt + "); " + (DeleteId(id, "payload corrupt") ? "deleted" : Deferred); }
             PutBackTrace trace = byUser ? new PutBackTrace("user-restore") : null; // log only
             if (!ClipboardText.Open()) { result = RecoverResult.Busy; reply["result"] = "busy"; return "the clipboard is busy; kept for a retry"; }
+            RestoreStep("opened");
             string outcome;
             try
             {
@@ -1072,12 +1090,14 @@ namespace DoodleNote.DictationHelper
                     OfferedSequence = facts.OfferedSequence, OfferedTick = facts.OfferedTick, OfferedBoot = facts.OfferedBoot, OfferedUtc = facts.OfferedUtc, OfferBoots = facts.OfferBoots,
                     OfferOnly = true, OfferOnlyWhy = "the user's Restore of an offer" };
                 Inherit(journal, facts, match, (long)Native.GetTickCount64());
+                RestoreStep("looked");
                 if (!Stage(journal, "recovering", view.Sequence))
                 {
                     result = RecoverResult.Failed;
                     reply["result"] = "failed";
                     return "the restore could not be journaled; nothing emptied, kept";
                 }
+                RestoreStep("journaled recovering");
                 // EmptyClipboard waits on a live foreign owner's WM_DESTROYCLIPBOARD (up to ~5 s on a hung one) while we hold the
                 // lock: an owner that does not answer a WM_NULL now is not asked at all (kept, tried again later).
                 string ownerProblem = view.OwnerAlive && !view.OwnerIsUs ? ClipboardText.OwnerUnresponsive() : null;
@@ -1095,11 +1115,14 @@ namespace DoodleNote.DictationHelper
                     reply["result"] = "failed";
                     return "the clipboard could not be emptied; kept for a retry";
                 }
+                RestoreStep("emptied");
                 bool journaled = Stage(journal, "recovering-emptied", Native.GetClipboardSequenceNumber());
+                RestoreStep("journaled recovering-emptied");
                 // Test build only: die with the clipboard emptied by the user's Restore.
                 TestMode.Stall("RECOVERY_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_MS", 0));
                 bool setOk = saved.PutBackOpen(trace);
                 string restored = saved.PutBackResult(setOk);
+                RestoreStep("put back");
                 // Round 22 (S3): an incomplete record's put-back of everything that survived answers exactly that.
                 bool partially = setOk && saved.Incomplete;
                 reply["result"] = partially ? "restored-partially" : restored;
@@ -1118,8 +1141,10 @@ namespace DoodleNote.DictationHelper
                 // Settled BEFORE the file cleanup, which may be deferred (a file held by another process): the offer is
                 // withdrawn now and a "settled" state is deleted on sight, so restored content is never offered again.
                 if (!Stage(journal, "settled")) Wire.Log("the settled stage could not be journaled; deleting anyway");
+                RestoreStep("journaled settled");
                 OfferGone(id, "restored");
                 outcome += DeleteId(id, outcome) ? "; deleted" : "; " + Deferred;
+                RestoreStep("files deleted");
                 // Round 23 (Astra S1): the event names what is missing too (it can reach the app before the reply).
                 Dictionary<string, object> recovered = Wire.Fields("event", "clipboard", "phase", "recovered", "id", facts.Delivery, "record", id, "clipboard", restored);
                 if (partially) recovered["missing"] = saved.Missing();
@@ -1130,6 +1155,7 @@ namespace DoodleNote.DictationHelper
                 Native.ClearLastError(0); // round 22 (S6): the error read is this close's own
                 bool closed = Native.CloseClipboard();
                 int closeError = closed ? 0 : Marshal.GetLastWin32Error();
+                RestoreStep(closed ? "closed" : "close failed");
                 if (trace != null) trace.Closed(closed, closeError);
             }
             return outcome;
