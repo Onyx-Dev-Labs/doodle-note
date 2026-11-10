@@ -424,10 +424,11 @@ export class DictationService {
   /** Windows: the clipboard note for one recovery card (by generation). */
   private clipboardWarning: { gen: number; message: string } | null = null
   /**
-   * Round 24 (Opus nit): the delivery id of an offer whose Restore got no answer in time. Its later result
-   * (the recovered event, which names that delivery) is shown even though another delivery is now current.
+   * Round 26 (Astra): the user's Restore requests, by record (the newest per record; at most 20 kept). Each is
+   * COMPLETED EXACTLY ONCE, by whichever of its recovered event or its reply comes first (the helper sends the
+   * event before the reply; a request that timed out completes by its event alone); the other is consumed silently.
    */
-  private restoreAwaiting: string | null = null
+  private readonly restoreRequests = new Map<string, { completed: boolean }>()
   /**
    * Round 25: offers the helper refused as nothing-to-restore. A list reload (an older helper sends no content count)
    * never brings their Restore back.
@@ -585,6 +586,12 @@ export class DictationService {
     if (!offer || !this.deps.helper.restoreClipboardOffer) return
     const changed = this.offerChanged?.record === offer.record ? this.offerChanged : null
     const sequence = changed?.sequence ?? offer.sequence
+    // A new request for this record (a retry replaces a timed-out one): completed once, by its event or its reply.
+    const request = { completed: false }
+    this.restoreRequests.delete(offer.record)
+    this.restoreRequests.set(offer.record, request)
+    while (this.restoreRequests.size > 20)
+      this.restoreRequests.delete(this.restoreRequests.keys().next().value as string)
     // An incomplete offer's card says what a Restore cannot put back: the click accepts exactly that.
     const done = await this.deps.helper.restoreClipboardOffer(
       offer.record,
@@ -599,11 +606,14 @@ export class DictationService {
       done.result === 'partial' ||
       done.result === 'skipped' ||
       done.result === 'restored-partially'
-    // Round 24 (Opus nit): no answer in time; the Restore may still finish, and its recovered event names the
-    // offer's delivery: that result is shown when it comes, whatever delivery is current then.
-    // Round 25 (Astra S1): keyed by the RECORD (a rebuilt record's delivery is ""), never by its delivery.
-    if (done.result === 'failed') this.restoreAwaiting = offer.record
-    else if (this.restoreAwaiting === offer.record) this.restoreAwaiting = null // a later answer: no second notice
+    // No answer in time ("failed"): the request stays open; its recovered event completes it when it comes (by its
+    // RECORD: a rebuilt record's delivery is ""). Any other answer that is not a completion ends the request.
+    if (
+      !completed &&
+      done.result !== 'failed' &&
+      this.restoreRequests.get(offer.record) === request
+    )
+      this.restoreRequests.delete(offer.record)
     if (!completed && !this.offers.has(offer.record)) return
     if (done.result === 'nothing-to-restore') {
       // Round 24 (Opus, the one rule at Restore): nothing with user content can go back; nothing was emptied.
@@ -641,8 +651,11 @@ export class DictationService {
       done.result === 'restored-partially'
     ) {
       const problem = clipboardProblem(done.result, undefined)
+      // Completed by its recovered event already: this reply is consumed silently (exactly one notice).
+      const already = request.completed
+      request.completed = true
       await this.offerResolved(offer.record)
-      if (problem)
+      if (problem && !already)
         this.setPanel(
           { kind: 'clipboard', problem, ...(done.missing ? { missing: done.missing } : {}) },
           NOTICE_MS
@@ -2147,16 +2160,28 @@ export class DictationService {
     missing?: string[],
     record?: string
   ): void {
-    // A Restore that got no answer in time: its result is shown now (round 24), matched by its record (round 25).
-    if (record && record === this.restoreAwaiting) {
-      this.restoreAwaiting = null
+    // Round 26 (Astra): a user's Restore request is completed exactly once, by this event or by its reply, whichever
+    // comes first (also one that timed out); a repeated event, or one after the reply, is consumed silently.
+    const request = record ? this.restoreRequests.get(record) : undefined
+    if (request) {
+      if (request.completed) {
+        this.deps.log(`clipboard: a Restore result already reported (${clipboard}); consumed`)
+        return
+      }
+      request.completed = true
       const late = clipboardProblem(clipboard, undefined)
-      this.deps.log(`clipboard: the result of a Restore that had timed out: ${clipboard}`)
+      this.deps.log(`clipboard: a Restore result by its event: ${clipboard}`)
       if (late)
         this.setPanel(
           { kind: 'clipboard', problem: late, ...(missing ? { missing } : {}) },
           NOTICE_MS
         )
+      return
+    }
+    // Round 26 (Astra): an event that names neither a record nor a delivery (an older helper) never changes a
+    // notice, whether or not a delivery has happened yet.
+    if (!record && !deliveryId) {
+      this.deps.log(`clipboard result naming nothing (${clipboard}); no notice changes`)
       return
     }
     // Only the newest delivery's notice changes: a result for an older one never clears (or sets) it. Round 24

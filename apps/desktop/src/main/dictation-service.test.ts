@@ -3201,6 +3201,121 @@ for (const delivery of ['d-old', ''] as const) {
   })
 }
 
+// Round 26 (Astra's four reproductions of round 25): a Restore completes exactly once, by its event or its reply;
+// an event naming nothing never changes a notice, before or after a first delivery.
+const partialTitle = 'Your clipboard was put back except: X (y).'
+for (const prior of [false, true]) {
+  test(`Windows (round 26): an event naming neither record nor delivery changes no notice (a delivery before: ${prior})`, async () => {
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    await h.service.start()
+    await tick()
+    if (prior) {
+      h.helper.delivery = {
+        outcome: 'delivered',
+        method: 'paste',
+        verified: true,
+        clipboard: 'restored'
+      }
+      await speak(h, 'some words')
+      await tick()
+    }
+    const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+    h.helper.offers = [kept]
+    h.helper.offerListener!(kept)
+    await tick()
+    h.helper.restoreAnswers = [{ result: 'failed' }]
+    clickOffer(h, 'offer-restore')
+    await tick()
+    h.helper.offers = []
+    h.helper.offerGoneListener!(kept.record)
+    h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], kept.record)
+    await tick()
+    const before = h.overlay.at(-1)!.title
+    assert.equal(before, partialTitle)
+    h.helper.clipboardLateListener!('restored-partially', undefined, ['Z (z)'])
+    await tick()
+    assert.equal(h.overlay.at(-1)!.title, before, 'unchanged')
+  })
+
+  test(`Windows (round 26): a repeated recovered event raises no second notice (a delivery before: ${prior})`, async () => {
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    await h.service.start()
+    await tick()
+    if (prior) {
+      h.helper.delivery = {
+        outcome: 'delivered',
+        method: 'paste',
+        verified: true,
+        clipboard: 'restored'
+      }
+      await speak(h, 'some words')
+      await tick()
+    }
+    const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+    h.helper.offers = [kept]
+    h.helper.offerListener!(kept)
+    await tick()
+    h.helper.restoreAnswers = [{ result: 'failed' }]
+    clickOffer(h, 'offer-restore')
+    await tick()
+    h.helper.offers = []
+    h.helper.offerGoneListener!(kept.record)
+    for (let n = 0; n < 2; n++) {
+      h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], kept.record)
+      await tick()
+    }
+    assert.equal(notices(h, partialTitle), 1)
+  })
+}
+
+test('Windows (round 26): a failed Restore, then a successful retry (its event before its reply): exactly one notice', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await h.service.start()
+  h.helper.delivery = {
+    outcome: 'delivered',
+    method: 'paste',
+    verified: true,
+    clipboard: 'restored'
+  }
+  await speak(h, 'some words')
+  await tick()
+  const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+  h.helper.offers = [kept]
+  h.helper.offerListener!(kept)
+  await tick()
+  h.helper.restoreAnswers = [
+    { result: 'failed' },
+    { result: 'restored-partially', missing: ['X (y)'] }
+  ]
+  clickOffer(h, 'offer-restore')
+  await tick()
+  h.helper.beforeRestoreAnswer = () => {
+    h.helper.offers = []
+    h.helper.offerGoneListener!(kept.record)
+    h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], kept.record)
+  }
+  clickOffer(h, 'offer-restore')
+  await tick()
+  assert.equal(notices(h, partialTitle), 1)
+})
+
+test('Windows (round 26): an ordinary successful Restore right after startup (its event before its reply): exactly one notice', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const kept = offer({ delivery: '', incomplete: true, missing: ['X (y)'] })
+  h.helper.offers = [kept]
+  h.helper.restoreAnswers = [{ result: 'restored-partially', missing: ['X (y)'] }]
+  await h.service.start()
+  await tick()
+  h.helper.beforeRestoreAnswer = () => {
+    h.helper.offers = []
+    h.helper.offerGoneListener!(kept.record)
+    h.helper.clipboardLateListener!('restored-partially', undefined, ['X (y)'], kept.record)
+  }
+  clickOffer(h, 'offer-restore')
+  await tick()
+  assert.equal(notices(h, partialTitle), 1)
+})
+
 test('Windows (round 24): a clipboard too large to save gives no paste-it-yourself advice once typing put the text in', async () => {
   // Round 25: the advice only when the text was NOT inserted (an uncertain insertion may have put it in).
   for (const [outcome, advice] of [
