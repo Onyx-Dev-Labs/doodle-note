@@ -65,6 +65,20 @@ export default function HomePage() {
               </svg>{" "}
               On-device transcription <span>·</span> No bot in the room
             </p>
+            <div className="producthunt-badge">
+              <a
+                href="https://www.producthunt.com/products/doodlenote?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-doodlenote"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <img
+                  src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1311655&theme=light"
+                  alt="Find DoodleNote on Product Hunt"
+                  width={200}
+                  height={43}
+                />
+              </a>
+            </div>
           </div>
           <div
             className="hero-art"

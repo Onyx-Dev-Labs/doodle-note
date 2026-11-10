@@ -3520,3 +3520,34 @@
   .marketing .bark-description { max-width: none; font-size: 15px; }
   .marketing .bark-announcement { font-size: 12px; gap: 10px; padding: 12px 20px; }
 }
+
+/* Community links approved in the homepage preview. */
+  .marketing .doodle-github-link {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--repo-color, #bcbfbd);
+    font: 500 12px/1 Inter, system-ui, -apple-system, sans-serif;
+    text-decoration: none;
+    white-space: nowrap;
+    vertical-align: middle;
+    transition: color 200ms ease, background-color 200ms ease;
+  }
+  .marketing .doodle-github-link:hover {
+    color: var(--repo-active-color, #f0f2f1);
+    background: var(--repo-hover, #242625);
+  }
+  .marketing .doodle-github-link:focus-visible { outline: 2px solid #3ecf8e; outline-offset: 3px; }
+  .marketing .doodle-github-link svg { display: block; flex: none; width: 24px; height: 24px; }
+  @media (prefers-reduced-motion: reduce) { .marketing .doodle-github-link { transition: none; } }
+
+.marketing .producthunt-badge { margin-top: 24px; line-height: 0; }
+.marketing .producthunt-badge a { display: inline-block; }
+.marketing .producthunt-badge img { display: block; width: 200px; height: auto; }
