@@ -123,10 +123,10 @@ ${overlayFontCss}
       <a class="btn" id="view" href="doodle-dictation://view" role="button" hidden>View</a>
       <a class="btn primary" id="undo" href="doodle-dictation://undo" role="button" hidden>Undo</a>
       <a class="btn primary" id="copy" href="doodle-dictation://copy" role="button" hidden>Copy text</a>
-      <a class="btn primary" id="offerRestore" href="doodle-dictation://offer-restore" role="button" hidden>Restore</a>
-      <a class="btn" id="offerDismiss" href="doodle-dictation://offer-dismiss" role="button" hidden>Dismiss</a>
-      <a class="btn" id="offerKeep" href="doodle-dictation://offer-keep" role="button" hidden>Keep it</a>
-      <a class="btn primary" id="offerDelete" href="doodle-dictation://offer-delete" role="button" hidden>Delete saved copy</a>
+      <a class="btn primary" id="offerRestore" data-action="offer-restore" href="doodle-dictation://offer-restore" role="button" hidden>Restore</a>
+      <a class="btn" id="offerDismiss" data-action="offer-dismiss" href="doodle-dictation://offer-dismiss" role="button" hidden>Dismiss</a>
+      <a class="btn" id="offerKeep" data-action="offer-keep" href="doodle-dictation://offer-keep" role="button" hidden>Keep it</a>
+      <a class="btn primary" id="offerDelete" data-action="offer-delete" href="doodle-dictation://offer-delete" role="button" hidden>Delete saved copy</a>
       <a class="btn" id="dismiss" href="doodle-dictation://dismiss" role="button" hidden>Dismiss</a>
     </div>
   </div>
@@ -236,20 +236,21 @@ ${overlayFontCss}
       $('view').hidden = !next.controls.view
       $('undo').hidden = !next.controls.undo
       $('dismiss').hidden = !next.controls.dismiss
+      // Round 29 (Astra P1): every offer button's link is REBUILT on every render from its fixed action
+      // (data-action) and the view, never derived from what an earlier render left in the DOM. Round 24: it names
+      // the offer this card shows, so a click acts on no other. Round 28: an outstanding Restore reads
+      // "Restoring…" and has no link (it cannot be clicked); the next render gives the link back.
       for (const id of ['offerRestore', 'offerDismiss', 'offerKeep', 'offerDelete']) {
-        $(id).hidden = !next.controls[id]
-        // Round 24: the button names the offer this card shows, so a click acts on no other.
-        const action = $(id).getAttribute('href').split('://')[1].split('/')[0]
-        $(id).setAttribute('href', 'doodle-dictation://' + action + (next.offerRecord ? '/' + next.offerRecord : ''))
+        const button = $(id)
+        button.hidden = !next.controls[id]
+        const pending = id === 'offerRestore' && !!next.restoring
+        if (pending) button.removeAttribute('href')
+        else button.setAttribute('href', 'doodle-dictation://' + button.dataset.action + (next.offerRecord ? '/' + next.offerRecord : ''))
+        if (pending) button.setAttribute('aria-disabled', 'true')
+        else button.removeAttribute('aria-disabled')
+        button.classList.toggle('pending', pending)
       }
-      // Round 28: an outstanding Restore: the button reads "Restoring…" and has no link (it cannot be clicked).
-      const restore = $('offerRestore')
-      restore.textContent = next.restoring ? 'Restoring…' : 'Restore'
-      restore.classList.toggle('pending', !!next.restoring)
-      if (next.restoring) {
-        restore.removeAttribute('href')
-        restore.setAttribute('aria-disabled', 'true')
-      } else restore.removeAttribute('aria-disabled')
+      $('offerRestore').textContent = next.restoring ? 'Restoring…' : 'Restore'
       const diff = $('diff')
       diff.hidden = !next.diff
       diff.textContent = ''

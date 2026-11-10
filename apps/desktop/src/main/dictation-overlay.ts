@@ -279,6 +279,9 @@ export class DictationOverlay {
       .filter(Boolean)
       .join(';')
     this.sentIcon = icon
-    void window.webContents.executeJavaScript(script).catch(() => {})
+    // Round 29: a render that throws in the page is logged (it used to be swallowed).
+    void window.webContents.executeJavaScript(script).catch((error: unknown) => {
+      console.error('[dictation] the overlay page failed to render:', error)
+    })
   }
 }
