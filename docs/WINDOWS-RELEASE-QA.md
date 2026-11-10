@@ -414,12 +414,13 @@ Two state writes are LOAD-BEARING and durable (flushed to the disk, and publishe
 or given up): the first state and "settled". The offer-only and unrestored facts of a live record are flushed too
 (round 34, stated as the code does it: they are what a later look reports about the record, and flushing them costs
 nothing on the paste, they are queued after the close), but nothing depends on them: no record read from disk grants
-authority (round 18). Every other write is a DIAGNOSTIC (no flush). No stage is a proof of anything (since round 18 no sequence on disk is either; the confirmed sequence
-lives in the live transaction): recovery decides by CONTENT, except that "settled" is deleted on sight.
+authority (round 18). Every other write is a DIAGNOSTIC (no flush). No stage is a proof of anything, and a sequence number on disk never grants a write (since round 18; the
+confirmed sequence lives in the live transaction): recovery decides by CONTENT, except that "settled" is deleted on
+sight and ONE narrowly scoped equality proof, below (1b), permits a deletion (never a write).
 
 | Write | When | Durable | Inside a clipboard open | In the paste's 1 s | If it fails |
 |---|---|---|---|---|---|
-| the first state, "emptying" ("may be emptied", with the save's capture sequence), then the encrypted payload | Begin, before any EmptyClipboard of ours | yes (both) | no | no (Begin waits about 2 s at most: a sliced wait that also checks the delivery's deadline, and gives up without taking any lock) | not established: no paste, nothing emptied ("no-record", or "deadline"); the writer removes what it had published |
+| the first state, "emptying" ("may be emptied", with the save's capture sequence and window station), then the encrypted payload | Begin, before any EmptyClipboard of ours | yes (both) | no | no (Begin waits about 2 s at most: a sliced wait that also checks the delivery's deadline; round 35: its answer takes no lock that is ever held across a file or clipboard operation, and does no file work: the writer cleans up) | not established: no paste, nothing emptied ("no-record", or "deadline"); the writer removes what it had published |
 | emptied / written (our write), restore-emptied (a restore or the write's own rollback) | after the clipboard is closed, queued to one serialized background writer | no | never | no | nothing changes (logged) |
 | offer-only and unrestored facts of a live record (a keep, a failed restore) | the same writer, after the close | yes (flushed; informational) | never | no | nothing changes (logged); the record still leaves in-flight |
 | the user's Restore: settled, or recovering-emptied when its put-back failed | after its put-back, once the clipboard is closed | settled: yes | never | (not a paste) | settled: logged, the record deleted anyway |
@@ -430,10 +431,15 @@ lives in the live transaction): recovery decides by CONTENT, except that "settle
 clipboard without being on disk (until round 32 a paste went ahead after 250 ms). The first state is "emptying"; there
 is no "saved" stage any more, and the old rule that deleted a non-offer "saved" record as "nothing had been emptied" is
 gone. **The proof that no new loss window opens:** a record is deleted without the user only when (1) its saved
-content is exactly, completely on the clipboard (the content-equality proof, a whole save only), (1b, round 34) its
-first state still says "emptying" and the clipboard's sequence equals the save's capture sequence in the same logon
-and boot (unchanged since the capture: our EmptyClipboard would have moved it; used only to delete, never to write;
-it covers an INCOMPLETE save, whose content proof cannot hold), (2) it is "settled" (its restore ran), (3) its payload
+content is exactly, completely on the clipboard (the content-equality proof, a whole save only), (1b, rounds 34-35) its
+first state still says "emptying" and a COMPLETE look at the clipboard (an incomplete enumeration proves nothing)
+shows the save's capture sequence, in the same logon, boot and WINDOW STATION (sequence numbers are per window station
+and one session can have several; the state names the capture's station, and a state without it, as round 33-34 wrote
+them, gets no such proof): unchanged since the capture, since our EmptyClipboard would have moved it; used only to
+delete, never to write; it covers an INCOMPLETE save, whose content proof cannot hold. One case it does not see, and
+why it costs nothing: if a delayed-render owner exits with formats it never rendered without moving the sequence (CI
+case 53 reports what this Windows build does), the proof can delete a record while that unrendered content has gone,
+but those bytes were never in our payload (a save holds only what renders), so the deletion loses nothing we held, (2) it is "settled" (its restore ran), (3) its payload
 is positively absent, damaged or unrecoverable, or (4) a retention or boot-limit policy ends it. A crash before our
 EmptyClipboard therefore leaves a record deleted by (1b) or (1) at the next start, or, if the user copied something
 meanwhile, a SPURIOUS OFFER (nothing lost; Dismiss deletes it). An unchanged clipboard does not ALWAYS allow the
@@ -459,7 +465,9 @@ stage rule would have deleted it: the CI mutation check proves the case catches 
 A stalled journal never holds the clipboard open (no journal call runs inside an open) and never holds up a
 delivery: only Begin's durable writes are waited for, about 2 s at most (round 34: in slices that also check the
 delivery's own deadline, and given up by a compare-and-swap, never by waiting on the lock the writer holds across its
-renames: CI case 50 stalls each rename), and the delivery's own deadline is checked again right after them (a paste that no longer fits empties nothing). The queued steps run before the helper exits, inside
+renames, nor the recovery lock: CI case 50 stalls each rename, case 52 a recovery retry inside the recovery lock;
+the residual: the delivery's own kept-record check BEFORE Begin still takes that lock, bounded by the delivery deadline
+checked after it), and the delivery's own deadline is checked again right after them (a paste that no longer fits empties nothing). The queued steps run before the helper exits, inside
 its usual exit wait; past it, a record left behind is judged by content at the next start. The background writer
 serializes every write (one queue, in order) on immutable snapshots, and a record settled meanwhile is never written
 again, so an older queued write can never overwrite the settlement or recreate a deleted state. Every state write goes
@@ -470,13 +478,17 @@ stopped half-way, so a kill INSIDE it is exercised by timing, not by constructio
 safety: same-volume rename durability rests on NTFS's metadata log, which is flushed lazily; a power loss can lose an
 unflushed diagnostic (a zero-filled state is rebuilt as an offer), and a power loss right after an EmptyClipboard could
 undo the first state's rename, leaving the payload without its state (swept after 10 minutes): a power-loss window,
-not a process-kill one. From round 10 (commit 033a56cd, which replaced a delete-then-move) to round 32 the state was
+not a process-kill one. From round 10 (commit 033a56cd, which replaced a delete-then-move with the same kill window:
+a kill between its delete and its move left a record without its state) to round 32 the state was
 replaced with File.Replace, which first moves the old state aside to a "~RF....TMP" temporary: CI found such files left
 by helpers killed during a journal write, and a kill between its steps could leave a record without its state (its
 payload then swept as an orphan after 10 minutes). That window existed only in unreleased Windows builds: no user was
 exposed. Leftovers of the old way (a state copy, no user content) are deleted only when nothing can still be replacing
-through them (round 34): older than 10 minutes, naming this session and a helper proven not running, and the record's
-own state, if present, naming one too; anything unknown is kept. The CI check that no journal write runs inside a
+through them (rounds 34-35): only while NO other helper process runs at all (any identity, any pid: the copies name
+the helper that wrote a state, not one that may be replacing it, and an open handle is no protection), older than 10
+minutes, naming this session and a helper proven not running, and the record's own state, if present, naming one too;
+anything unknown is kept. A leftover whose record has no state is not rescued (a state copy cannot be told current;
+this concerns unreleased builds only): it is swept like the others. The CI check that no journal write runs inside a
 clipboard open is LOGGING (an ERROR line every state write makes on a thread that holds an open), scanned by the CI
 run: it shows that no state write ran on such a thread in that run, not a guarantee enforced by the code. The crash
 cases kill only after the asynchronous "written" step is logged (so that a kill does not land mid-write by accident);
@@ -776,8 +788,9 @@ The full deletion contract, stated plainly.
   - a completed restore (the live transaction's own, or the user's Restore), reported as restored, partial or
     skipped;
   - the clipboard already holding exactly the saved content (any logon of this session; a whole save);
-  - round 34: the clipboard unchanged since the capture (the first durable state "emptying" with its capture
-    sequence, the same logon and boot, the same sequence now), so nothing was emptied (also an incomplete save);
+  - rounds 34-35: the clipboard unchanged since the capture (the first durable state "emptying" with its capture
+    sequence and window station; a complete look in the same logon, boot and window station showing the same
+    sequence), so nothing was emptied (also an incomplete save);
   - (until round 32: "stage saved = nothing emptied"; round 33 removed that rule: no record is deleted by its stage);
   - a state whose payload is positively absent (nothing to restore from).
 - THE USER: Dismiss (after "Delete the saved clipboard?").
