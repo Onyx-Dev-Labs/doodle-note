@@ -4245,6 +4245,171 @@ async function main() {
     )
   }
 
+  // 58. Round 38 (Opus, Astra P2): the delivery's wait for a recovery look already inside never runs past the delivery's
+  // allowance, and the deadline is checked again right before the write. The retention check is held INSIDE its look
+  // (the look lock held) while a delivery with a 400 ms deadline (counted from the end of its save) reaches the wait:
+  // (a) "deadline" within the allowance, while the look is still held; (b) the look released after 300 ms, the deadline
+  // found passed right after the wait (test hook): "deadline". Both: nothing emptied (bytes and sequence), no write.
+  for (const variant of ['a', 'b']) {
+    await begin(`58${variant}`)
+    copyMulti(user)
+    await keptRecord(`dictated text DL0${variant}`)
+    copyMulti(`the copy for case 58${variant} ` + identity)
+    const before = contentSnapshot()
+    const a = start(
+      testops,
+      variant === 'b'
+        ? { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_EXPIRE_AFTER_LOOK_WAIT: '1' }
+        : { DICTATION_HELPER_TEST: '1' },
+      { gates: ['RETRY', 'LOOK', 'AFTER_SAVE'] } // RETRY never opened: no retry runs in this case
+    )
+    // The start check runs before "ready": its look is released first.
+    await atLine(a, 'the start check inside its look', /test-trace: gate LOOK#1 waiting/)
+    a.open('LOOK')
+    await a.ready
+    const reply = a.req('__clipboard-txn', {
+      text: `dictated text DL${variant}`,
+      holdMs: 300,
+      deadlineMs: variant === 'a' ? 400 : 0
+    })
+    await atLine(a, "the delivery's check inside its look", /test-trace: gate LOOK#2 waiting/)
+    a.open('LOOK')
+    await atLine(a, 'the delivery after its save', /test-trace: gate AFTER_SAVE#1 waiting/)
+    const sweep = a.req('__retention-sweep')
+    await atLine(a, 'the retention check inside its look', /test-trace: gate LOOK#3 waiting/)
+    const t0 = Date.now()
+    a.open('AFTER_SAVE')
+    let live
+    let heldAtAnswer = null
+    if (variant === 'a') {
+      live = await reply
+      heldAtAnswer = !a.logs.some((l) => /test-trace: gate LOOK#3 opened/.test(l))
+      a.open('LOOK')
+    } else {
+      await atLine(
+        a,
+        'the delivery waiting for the look',
+        /test-trace: waiting for a recovery look/
+      )
+      await new Promise((r) => setTimeout(r, 300))
+      a.open('LOOK')
+      live = await reply
+    }
+    const took = Date.now() - t0
+    const swept = await sweep
+    const after = contentSnapshot()
+    await a.stop()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    for (const o of (listed && listed.offers) || [])
+      await h.req('clipboard-dismiss', { record: o.record })
+    await h.stop()
+    check(
+      variant === 'a'
+        ? 'the wait for a recovery look stops at the delivery\'s deadline: "deadline" within the allowance while the look is still held, nothing emptied (bytes and sequence), no write'
+        : 'the deadline is checked again after the wait for a recovery look: the look released, the deadline passed, "deadline", nothing emptied (bytes and sequence), no write',
+      !!live &&
+        live.result === 'deadline' &&
+        (variant === 'a'
+          ? heldAtAnswer === true &&
+            took < 900 &&
+            a.logs.some((l) =>
+              /the paste no longer fits the deadline while a recovery look holds the clipboard/.test(
+                l
+              )
+            )
+          : took >= 300 &&
+            a.logs.some((l) =>
+              /the paste no longer fits the deadline after waiting for a recovery look/.test(l)
+            )) &&
+        a.logs.some((l) => /test-trace: waiting for a recovery look/.test(l)) &&
+        !a.logs.some((l) => /test-trace: write opened/.test(l)) &&
+        JSON.stringify(after) === JSON.stringify(before) &&
+        !!swept &&
+        swept.result === 'swept',
+      `${JSON.stringify(live)} in ${took} ms; held ${heldAtAnswer}; ${JSON.stringify(swept)}`
+    )
+  }
+
+  // 59. Round 38 (Astra P2, Opus option b): a late write (its delivery answered "late" while it stalls right after its
+  // EmptyClipboard, inside its open) is an in-flight transaction no one else may open the clipboard over. Meanwhile the
+  // user's Restore of an older offer answers "busy" (nothing touched, the card kept) and a second dictation refuses
+  // ("clipboard-busy", after waiting at most about 1 s; no save, nothing touched). Released, the late write puts the
+  // user's copy back itself ("restored"), and the same Restore then succeeds.
+  {
+    await begin('59')
+    copyMulti(user)
+    await keptRecord('dictated text LW0')
+    const theirs = 'the copy for case 59 ' + identity
+    copyMulti(theirs)
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1' },
+      { gates: ['EMPTIED'], realBudget: true }
+    )
+    await a.ready
+    const listed = await a.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const first = await a.req('__clipboard-txn', { text: 'dictated text LW1', holdMs: 300 })
+    await atLine(
+      a,
+      'the late write held after its EmptyClipboard',
+      /test-trace: gate EMPTIED#1 waiting/
+    )
+    const mark = a.logs.length
+    const refusedRestore = offer
+      ? await a.req('clipboard-restore', { record: offer.record, sequence: offer.sequence })
+      : null
+    const t0 = Date.now()
+    const second = await a.req('__clipboard-txn', { text: 'dictated text LW2', holdMs: 300 })
+    const took = Date.now() - t0
+    const meanwhile = a.logs.slice(mark)
+    a.open('EMPTIED')
+    const ended = await a.waitEvent((e) => e.event === 'clipboard' && e.phase === 'late-restore')
+    await atLine(a, 'the late write counted out', /test-trace: late write finished/)
+    const afterLate = observe()
+    const done = offer ? await restoreConfirming(a, offer) : null
+    await a.stop()
+    const back = observe()
+    const h = start(release)
+    await h.ready
+    const left = await h.req('clipboard-offers')
+    for (const o of (left && left.offers) || [])
+      await h.req('clipboard-dismiss', { record: o.record })
+    await h.stop()
+    check(
+      'while a late write is in flight (held after its EmptyClipboard), the user\'s Restore answers "busy" and a second dictation refuses ("clipboard-busy" after at most about 1 s), neither touching the clipboard; the late write then puts the user\'s copy back itself, and the same Restore succeeds',
+      !!offer &&
+        !!first &&
+        /^late\|/.test(String(first.result)) &&
+        !!refusedRestore &&
+        refusedRestore.result === 'busy' &&
+        !!second &&
+        second.result === 'clipboard-busy' &&
+        took >= 900 &&
+        took < 3000 &&
+        meanwhile.some((l) =>
+          /the user's restore: another clipboard transaction of ours is in flight/.test(l)
+        ) &&
+        meanwhile.some((l) =>
+          /an earlier dictation's late clipboard write is still running/.test(l)
+        ) &&
+        !meanwhile.some((l) =>
+          /saving the clipboard|user-restore|test-trace: write opened/.test(l)
+        ) &&
+        !!ended &&
+        ended.clipboard === 'restored' &&
+        afterLate.text === theirs &&
+        !!done &&
+        done.result === 'restored' &&
+        back.text === user &&
+        !!left &&
+        left.offers.length === 0,
+      `${JSON.stringify(first)}; restore ${JSON.stringify(refusedRestore)}; ${JSON.stringify(second)} in ${took} ms; late ${JSON.stringify(ended)}; after late ${afterLate.text}; ${JSON.stringify(done)}; text ${back.text}; ${JSON.stringify(left)}`
+    )
+  }
+
   // 47. Round 33 (b, f): the payload not on disk in time: the write is NOT established (no record, no paste: "no-record")
   // within the total bound (BeginDeadlineMs, 2 s), the clipboard untouched (bytes and sequence); the late payload
   // writer publishes nothing.
