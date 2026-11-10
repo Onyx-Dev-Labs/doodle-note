@@ -1452,7 +1452,7 @@ namespace DoodleNote.DictationHelper.Tests
         }
 
         /// <summary>Round 34-35: the unchanged-since-capture deletion proof and every guard it needs.</summary>
-        public static void TheUnchangedSinceCaptureProofNeedsACompleteObservationInTheSameWindowStation()
+        public static void TheUnchangedSinceCaptureProofNeedsACompleteObservationInTheSameWindowStation() // round 36: every guard isolated
         {
             Func<RecordFacts> facts = () => new RecordFacts { Stage = "emptying", SequenceAtStage = 40, BootId = PendingClipboard.CurrentBootId, WindowStation = PendingClipboard.windowStation };
             Func<ClipboardView> view = () => new ClipboardView { Sequence = 40 };
@@ -1471,6 +1471,16 @@ namespace DoodleNote.DictationHelper.Tests
             RecordFacts boot = facts(); boot.BootId = "another-boot";
             Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(boot, view(), LogonMatch.Same), "another boot");
             Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(facts(), new ClipboardView { Sequence = 0 }, LogonMatch.Same), "a zero is no evidence");
+            // Round 36 (Astra P3, Opus): each guard isolated, so that removing any one of them fails here.
+            RecordFacts zero = facts(); zero.SequenceAtStage = 0;
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(zero, new ClipboardView { Sequence = 0 }, LogonMatch.Same), "both zero (capture and now): no evidence, though they are equal");
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(facts(), null, LogonMatch.Same), "no view at all");
+            RecordFacts noBoot = facts(); noBoot.BootId = "";
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(noBoot, view(), LogonMatch.Same, "", PendingClipboard.windowStation), "the boot unavailable on both sides (equal, but empty): no proof");
+            RecordFacts noStation = facts(); noStation.WindowStation = "";
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(noStation, view(), LogonMatch.Same, PendingClipboard.CurrentBootId, ""), "the window station unavailable on both sides (equal, but empty): no proof");
+            Assert.Equal(true, PendingClipboard.UnchangedSinceCapture(facts(), view(), LogonMatch.Same, PendingClipboard.CurrentBootId, PendingClipboard.windowStation), "the explicit form agrees with the one in use");
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(null, view(), LogonMatch.Same), "no facts at all");
         }
 
         public static void TheSharedWatcherGetsItsRealTickAndEvidenceWindow()
