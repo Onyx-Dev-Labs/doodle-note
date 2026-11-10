@@ -604,10 +604,12 @@ namespace DoodleNote.DictationHelper.Tests
                 Assert.Equal(true, PendingClipboard.OnDisk(plain.Id), "its record is on disk");
                 Assert.Equal(2, System.IO.Directory.GetFiles(dir).Length, "a state file and an encrypted payload");
                 PendingClipboard.Finish(plain, "restored");
+                Assert.Equal(true, PendingClipboard.DrainJournal(10000), "the journal writer ran its queue");
                 Assert.Equal(false, PendingClipboard.OnDisk(plain.Id), "deleted once the restore ran");
                 PendingRecord failed = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
                 failed.PayloadWriter.Join(10000);
                 PendingClipboard.Finish(failed, "unrestored");
+                Assert.Equal(true, PendingClipboard.DrainJournal(10000), "the journal writer ran its queue");
                 Assert.Equal(true, PendingClipboard.OnDisk(failed.Id), "kept after a restore that did not run");
                 Assert.Equal(false, PendingClipboard.Settled("unrestored"), "unrestored keeps the record");
                 Assert.Equal(false, PendingClipboard.Settled("user-changed"), "an owner change keeps the record (offered, never deleted on that guess)");
@@ -1343,17 +1345,26 @@ namespace DoodleNote.DictationHelper.Tests
             System.IO.Directory.CreateDirectory(dir);
             string old = PendingClipboard.Directory;
             int oldDelay = PendingClipboard.TestPayloadDelayMs;
+            int oldDeadline = PendingClipboard.BeginDeadlineMs;
             PendingClipboard.Directory = dir;
             try
             {
                 var items = new[] { new KeyValuePair<uint, byte[]>(13, System.Text.Encoding.Unicode.GetBytes("user\0")) };
-                // A slow payload writer (a busy disk, an AV scan) and a paste that settles at once.
+                // A slow payload writer (a busy disk, an AV scan). Round 33: the payload on disk is the precondition of our
+                // EmptyClipboard, so a payload later than Begin's deadline makes the transaction NOT established (no record,
+                // nothing emptied), and the late writer publishes nothing.
                 PendingClipboard.TestPayloadDelayMs = 600;
+                PendingClipboard.BeginDeadlineMs = 150;
                 PendingRecord record = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
-                PendingClipboard.Finish(record, "restored");
-                record.PayloadWriter.Join(5000);
-                Assert.Equal(false, PendingClipboard.OnDisk(record.Id), "the late writer did not publish a settled transaction (no payload, no .tmp, no state)");
+                Assert.Equal(true, record == null, "not established: the payload was not on disk within the deadline");
+                Assert.Equal(true, PendingClipboard.LastBeginFailure != null && PendingClipboard.LastBeginFailure.Contains("150 ms"), "the reason is given (" + PendingClipboard.LastBeginFailure + ")");
+                for (int i = 0; i < 100 && PendingClipboard.WritersRunning() > 0; i++) System.Threading.Thread.Sleep(50);
+                Assert.Equal(0, PendingClipboard.WritersRunning(), "the late writer finished");
+                // The writer removes what it had published once it ends (Begin had given up): polled with a deadline.
+                for (int i = 0; i < 100 && System.IO.Directory.GetFiles(dir).Length > 0; i++) System.Threading.Thread.Sleep(50);
+                Assert.Equal(0, System.IO.Directory.GetFiles(dir).Length, "the late writer did not publish (no payload, no .tmp, no state)");
                 PendingClipboard.TestPayloadDelayMs = 0;
+                PendingClipboard.BeginDeadlineMs = oldDeadline;
                 // Leftovers without a state file, and a round-8 record: deleted, never restored from.
                 string prefix = "DoodleNote-Bark-clipboard-" + HelperIdentity.Sanitized;
                 // Orphans older than 10 minutes go; a fresh one (another session's helper may be mid-step) stays.
@@ -1382,6 +1393,49 @@ namespace DoodleNote.DictationHelper.Tests
             {
                 PendingClipboard.Directory = old;
                 PendingClipboard.TestPayloadDelayMs = oldDelay;
+                PendingClipboard.BeginDeadlineMs = oldDeadline;
+                try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
+            }
+        }
+
+        /// <summary>Round 33: the journal's stage transitions (Begin's durable state, the queued diagnostics, settlement).</summary>
+        public static void TheJournalsStageTransitionsAreDurableOnlyWhereTheyMustBe()
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dn-journal-test-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            string old = PendingClipboard.Directory;
+            PendingClipboard.Directory = dir;
+            Func<string, string> state = id => System.IO.File.ReadAllText(System.IO.Directory.GetFiles(dir, "*" + id + ".state")[0]);
+            try
+            {
+                var items = new[] { new KeyValuePair<uint, byte[]>(13, System.Text.Encoding.Unicode.GetBytes("user\0")) };
+                // Begin: the first durable state ("emptying": may be emptied) and the payload are on disk when it returns.
+                PendingRecord record = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
+                Assert.Equal(true, record != null && record.PayloadPublished, "Begin returned with its payload published");
+                Assert.Equal(2, System.IO.Directory.GetFiles(dir).Length, "the state and the payload, no .tmp");
+                Assert.Equal(true, state(record.Id).Contains("\"stage\":\"emptying\""), "the first durable stage is emptying (no saved stage any more)");
+                // Diagnostics: queued, written in order by the one writer.
+                PendingClipboard.Stage(record, "emptied", 5);
+                PendingClipboard.Stage(record, "written", 7, 7);
+                Assert.Equal(true, PendingClipboard.DrainJournal(10000), "the journal writer ran its queue");
+                Assert.Equal(true, state(record.Id).Contains("\"stage\":\"written\""), "the last diagnostic stage queued is the one on disk");
+                // Settlement: settled and deleted on the writer; a stage queued AFTER it never recreates the state.
+                PendingClipboard.Finish(record, "restored");
+                PendingClipboard.Stage(record, "restore-emptied", 9);
+                Assert.Equal(true, PendingClipboard.DrainJournal(10000), "the journal writer ran its queue");
+                Assert.Equal(false, PendingClipboard.OnDisk(record.Id), "settled and deleted; the later stage wrote nothing");
+                // A restore that did not complete: kept, with its offer-only and unrestored facts written in order.
+                PendingRecord kept = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
+                PendingClipboard.Stage(kept, "written", 7, 7);
+                PendingClipboard.Finish(kept, "unrestored");
+                Assert.Equal(true, PendingClipboard.DrainJournal(10000), "the journal writer ran its queue");
+                string facts = state(kept.Id);
+                Assert.Equal(true, facts.Contains("\"offerOnly\":true") && facts.Contains("\"unrestored\":true") && facts.Contains("\"stage\":\"written\""), "kept: offer-only, unrestored, its last stage (" + facts + ")");
+            }
+            finally
+            {
+                PendingClipboard.DrainJournal(10000);
+                PendingClipboard.Directory = old;
                 try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
             }
         }
