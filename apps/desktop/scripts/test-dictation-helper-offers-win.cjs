@@ -2543,6 +2543,18 @@ async function main() {
         left === files,
       `${JSON.stringify(offer)}; ${JSON.stringify(answer)}; sequence ${before.sequence} -> ${after.sequence}; ${files} -> ${left} files`
     )
+    // The record stays for Dismiss (round 30: and this case ends clean through it, as the user would).
+    const r = start(release)
+    await r.ready
+    const again = await r.req('clipboard-offers')
+    const kept = again && again.offers.find((o) => offer && o.record === offer.record)
+    const gone = kept ? await r.req('clipboard-dismiss', { record: kept.record }) : null
+    await r.stop()
+    check(
+      "and the user's Dismiss of that record deletes every file",
+      !!gone && gone.dismissed === true && prefixFiles().length === 0,
+      `${JSON.stringify(again)}; ${JSON.stringify(gone)}; ${listing()}`
+    )
   }
 
   // 38. Round 22 (F7): whether a record's helper still runs cannot be told (test hook): nothing is judged or deleted on
