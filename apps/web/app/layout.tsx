@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Caveat, Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
+import { siteMetadata } from "@/lib/site-metadata";
 import "./globals.css";
 
 // Same variable font files as the desktop app and approved brand preview.
@@ -31,11 +32,7 @@ const caveat = Caveat({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "DoodleNote",
-  description: "AI meeting notes without the bot",
-  icons: { icon: "/mascot.png" },
-};
+export const metadata: Metadata = siteMetadata;
 
 export default function RootLayout({
   children,
