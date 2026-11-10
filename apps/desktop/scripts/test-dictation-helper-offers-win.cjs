@@ -8,7 +8,7 @@
 // when they hold), never on a timed guess, and a failed check prints its case's helper logs and every record file.
 // Run on Windows (CI):
 //   node scripts/test-dictation-helper-offers-win.cjs <release dictation-helper.exe> <dictation-helper-testops.exe>
-const { spawn } = require('node:child_process')
+const { spawn, execFileSync } = require('node:child_process')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -350,6 +350,8 @@ const until = async (predicate, ms = 15000, step = 25) => {
   }
 }
 const gateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-ci-gates-'))
+/** Every helper of the run (round 31: the write timelines of all of them feed the performance check at the end). */
+const allHelpers = []
 let gateFolders = 0
 let helperCount = 0
 let frame = { label: '(before the first case)', helpers: [] }
@@ -429,27 +431,70 @@ async function removeAll(ms = 10000) {
  * left. Anything else is a failed check of THE CASE BEFORE (its logs and the files printed), then cleared so one
  * leftover can never fail the cases after it (run 42842819157: one stray .state.tmp failed five later checks).
  */
+/**
+ * Round 31 (Opus): processes of either helper image still running, whoever started them (a clipboard reader is the
+ * helper's own image, started by a helper, not by this harness): an orphan outlives the case that made it.
+ */
+const helperImages = () => [...new Set([path.basename(release), path.basename(testops)])]
+function helperProcesses() {
+  const images = helperImages().map((i) => i.toLowerCase())
+  let text = ''
+  try {
+    text = execFileSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true })
+  } catch (error) {
+    // Not a finding about the helper: said once per occurrence, and the direct-child and file checks still stand.
+    console.log(
+      `# tasklist failed (${String(error.message || error)}); orphan helper processes not checked here`
+    )
+    return []
+  }
+  const out = []
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^"([^"]+)","(\d+)"/.exec(line)
+    if (m && images.includes(m[1].toLowerCase())) out.push({ image: m[1], pid: Number(m[2]) })
+  }
+  return out
+}
 async function begin(label) {
   const before = frame.label
   await until(() => running().length === 0, 20000, 50)
+  // A reader that outlived its helper gets the same grace as a direct child before it counts.
+  await until(() => helperProcesses().length === 0, running().length === 0 ? 10000 : 0, 250)
   const still = running()
+  const orphans = helperProcesses()
   const left = prefixFiles()
-  if (still.length || left.length) {
+  if (still.length || orphans.length || left.length) {
     dirtyAfter.push(before)
     check(
       `the case before "${label}" (${before}) ended clean: every process it started exited, no record file left`,
       false,
-      `still running: ${still.map((s) => `${s.label} pid ${s.child.pid}`).join(', ') || 'none'}; files: ${listing()}`
+      `still running: ${still.map((s) => `${s.label} pid ${s.child.pid}`).join(', ') || 'none'}; helper-image processes: ${orphans.map((o) => `${o.image} pid ${o.pid}${o.error ? ` (${o.error})` : ''}`).join(', ') || 'none'}; files: ${listing()}`
     )
     // Round 31: termination OBSERVED, then the files enumerated AFTER it (a process ended just now may have written
     // one), removed, and both postconditions verified; if they cannot be established the run stops here.
     const ended = await terminateAll()
-    const removed = ended && (await removeAll())
-    if (!ended || !removed || running().length || prefixFiles().length)
+    for (const o of helperProcesses())
+      if (o.pid > 0) {
+        try {
+          execFileSync('taskkill', ['/F', '/PID', String(o.pid)], {
+            stdio: 'ignore',
+            windowsHide: true
+          })
+        } catch {
+          // verified below
+        }
+      }
+    const orphansGone = await until(() => helperProcesses().length === 0, 10000, 250)
+    const removed = ended && orphansGone && (await removeAll())
+    if (!ended || !orphansGone || !removed || running().length || prefixFiles().length)
       throw new Error(
         `a clean state could not be established before "${label}": still running ${
           running()
             .map((s) => `${s.label} pid ${s.child.pid}`)
+            .join(', ') || 'none'
+        }; helper-image processes ${
+          helperProcesses()
+            .map((o) => `${o.image} pid ${o.pid}`)
             .join(', ') || 'none'
         }; files ${listing()}`
       )
@@ -624,6 +669,9 @@ function start(exe, env = {}, { gates = [], realBudget = false } = {}) {
   let buffer = ''
   let errBuffer = ''
   let seq = 1
+  let closed = false
+  // Round 31: 'close' comes after the exit AND the end of its output: a log read after stop() or kill() is complete.
+  child.once('close', () => (closed = true))
   child.stdout.setEncoding('utf8')
   child.stderr.setEncoding('utf8')
   child.stderr.on('data', (c) => {
@@ -709,6 +757,8 @@ function start(exe, env = {}, { gates = [], realBudget = false } = {}) {
       child.kill()
       const exited = await until(() => !alive(child), 10000)
       if (!exited) console.log(`# helper ${h.n} did not exit within 10 s of its kill`)
+      if (exited && !(await until(() => closed, 3000)))
+        console.log(`# helper ${h.n}: its output did not close within 3 s of its exit`)
       return exited
     },
     stop: async () => {
@@ -716,10 +766,13 @@ function start(exe, env = {}, { gates = [], realBudget = false } = {}) {
       child.stdin.end()
       const exited = await until(() => !alive(child), 20000)
       if (!exited) console.log(`# helper ${h.n} did not exit within 20 s of its input closing`)
+      if (exited && !(await until(() => closed, 3000)))
+        console.log(`# helper ${h.n}: its output did not close within 3 s of its exit`)
       return exited
     }
   }
   frame.helpers.push(h)
+  allHelpers.push(h)
   return h
 }
 /** Round 30: the helper reached a point (its line, within the deadline), or a failed check says it did not. */
@@ -740,7 +793,8 @@ const PAYLOAD = /the saved clipboard was written down \(/
  * set back). Round 30: it waits for THIS helper's own stall line and its payload being on disk, and returns the id of
  * the record it made (null, with a failed check, if it did not get there). Until round 29 it waited for ANY record's
  * "restore-emptied" stage: in case 5 the first record already had it, so the second helper was killed after 600 ms
- * wherever it was (attempt 1 of run 42842819157: inside its first state write, a lone .state.tmp left).
+ * wherever it was (attempt 1 of run 42842819157: most likely inside its first state write, which leaves the lone
+ * .state.tmp seen later; case 6's kill, also without the state it needed, is not excluded as its source).
  */
 async function keptRecord(dictated) {
   const before = new Set(recordIds())
@@ -1914,7 +1968,7 @@ async function main() {
     )
     // Every iteration: the seed, the offer's format count and size, and the helper's put-back trace (format ids and
     // lengths of what the saved record held).
-    const trace = h.logs.find((l) => /put-back trace: user-restore/.test(l))
+    const trace = await h.waitLog(/put-back trace: user-restore/, { ms: 5000 })
     const saving = a.logs.find((l) => /saving the clipboard \(attempt|test: saved formats/.test(l))
     if (label.startsWith('(a)')) tallySaves('25(a)', a.logs)
     if (!ok)
@@ -1992,8 +2046,8 @@ async function main() {
     const result = await a.req('__clipboard-txn', { text: 'dictated text H', holdMs: 300 })
     clearInterval(watch)
     const after = observe()
+    await a.stop() // round 31: its log is complete once stop() returns (output closed)
     const lines = a.logs.filter((l) => /saving the clipboard \(attempt/.test(l))
-    await a.stop()
     const notStarted = {
       'zero-sequence-write': 'zero-sequence',
       'journal-emptying': 'no-record',
@@ -2069,8 +2123,8 @@ async function main() {
     const live = await h.req('__clipboard-txn', { text: 'dictated text P', holdMs: 300 })
     const after = PRESENCE.map(available)
     const now = text()
-    const saving = saveLines(h)
     await h.stop()
+    const saving = saveLines(h)
     check(
       'class 1 (Clipboard Viewer Ignore and the three Scintilla / Visual Studio flags, offered with no data): saved as presence only and established at once; the put-back is "restored", every flag present again, the text back',
       ok &&
@@ -2099,8 +2153,8 @@ async function main() {
     const markers = MARKERS.map(available)
     const exclude = readFormat(RegisterClipboardFormatW(MARKERS[0]))
     const now = text()
-    const saving = saveLines(h)
     await h.stop()
+    const saving = saveLines(h)
     check(
       'class 2 (a privacy marker its owner does not render): established; the conservative exclusion markers go back with the text; never written down',
       ok &&
@@ -2129,8 +2183,8 @@ async function main() {
     const markers = MARKERS.map(available)
     const exclude = readFormat(RegisterClipboardFormatW(MARKERS[0]))
     const now = text()
-    const saving = saveLines(a)
     await a.stop()
+    const saving = saveLines(a)
     check(
       'B3: a privacy marker over its cap: the put-back carries the conservative exclusion markers (all three, the exclusion set), and the text',
       seededOk &&
@@ -2158,8 +2212,8 @@ async function main() {
     ])
     const live = await h.req('__clipboard-txn', { text: 'dictated text F', holdMs: 300 })
     const after = observe()
-    const saving = saveLines(h)
     await h.stop()
+    const saving = saveLines(h)
     const missing = /\|missing=(.*)$/.exec(String(live && live.result))
     check(
       `class 3 (${name}, not rendered by its owner, under a proven hold): the first attempt is not established, the second a named reported skip; the paste proceeds, the put-back restores the rest and names ${name}`,
@@ -2185,8 +2239,8 @@ async function main() {
     const { h, ok, seed: s } = await seededBy({}, ['FileContents|-'])
     const live = await h.req('__clipboard-txn', { text: 'dictated text L', holdMs: 300 })
     const still = available('FileContents')
-    const saving = saveLines(h)
     await h.stop()
+    const saving = saveLines(h)
     check(
       'class 3, its limit (only an owner-unrendered format, nothing with data): not established, no paste, the clipboard left as it was',
       ok && !!live && live.result === 'no-save' && still && recordFiles().length === 0,
@@ -2286,8 +2340,8 @@ async function main() {
     })
     await a.ready
     const live = await a.req('__clipboard-txn', { text: 'dictated text T', holdMs: 300 })
-    const threw = a.logs.find((l) => /the clipboard write threw/.test(l))
     await a.stop()
+    const threw = a.logs.find((l) => /the clipboard write threw/.test(l))
     const r = start(release)
     await r.ready
     const listed = await r.req('clipboard-offers')
@@ -2353,9 +2407,9 @@ async function main() {
     const before = observe()
     const live = await h.req('__clipboard-txn', { text: 'dictated text DL', holdMs: 300 })
     const after = observe()
+    await h.stop()
     const saving = saveLines(h)
     const why = h.logs.find((l) => /not pasting: the clipboard could not be saved/.test(l))
-    await h.stop()
     check(
       'the text unrendered by its owner, CF_LOCALE readable (round 23, the one rule): not established, no paste, the clipboard untouched, the reason unrendered',
       ok &&
@@ -2423,10 +2477,10 @@ async function main() {
     })
     await a.ready
     const live = await a.req('__clipboard-txn', { text: 'dictated text RB', holdMs: 300 })
+    await a.stop()
     const threw = a.logs.find((l) =>
       /the clipboard write threw .* after emptying the clipboard/.test(l)
     )
-    await a.stop()
     const files = recordFiles().length
     const r = start(release)
     await r.ready
@@ -2589,6 +2643,49 @@ async function main() {
       "and the user's Dismiss of that record deletes every file",
       !!gone && gone.dismissed === true && prefixFiles().length === 0,
       `${JSON.stringify(gone)}; ${listing()}`
+    )
+  }
+
+  // 40b. Round 31 (Opus): case 40's record WITHOUT its read-back hook is a whole save whose content is already exactly
+  // on the clipboard: the release helper's start-up check deletes it (round 23: only an incomplete record is never
+  // "already there"); nothing is offered and nothing is written (content and sequence unchanged).
+  {
+    await begin('40b')
+    const only = 'only custom content, already back ' + identity
+    const seeded = seed('only a custom format', [
+      [RegisterClipboardFormatW(EXTRA), Buffer.from(only)]
+    ])
+    const k = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS: '60000'
+    })
+    await k.ready
+    void k.req('__clipboard-txn', { text: 'dictated text NR2', holdMs: 200 })
+    const reached = !!(await atLine(
+      k,
+      'the end of its put-back',
+      /test-trace: stall PUTBACK_STALL_END_MS/
+    ))
+    await k.kill()
+    const files = recordFiles().length
+    const before = observe()
+    const r = start(release)
+    await r.ready
+    const listed = await r.req('clipboard-offers')
+    const after = observe()
+    await r.stop()
+    check(
+      "a whole record whose saved content is already on the clipboard: deleted by the release helper's start-up check, never offered, the clipboard unchanged (content and sequence)",
+      seeded &&
+        reached &&
+        files === 2 &&
+        !!listed &&
+        listed.offers.length === 0 &&
+        prefixFiles().length === 0 &&
+        after.extra === only &&
+        before.extra === only &&
+        after.sequence === before.sequence,
+      `${files} files; ${JSON.stringify(listed)}; extra ${after.extra}; sequence ${before.sequence} -> ${after.sequence}; ${listing()}`
     )
   }
 
@@ -2803,9 +2900,9 @@ async function main() {
     const before = observe()
     const live = await a.req('__clipboard-txn', { text: 'dictated text G2', holdMs: 300 })
     const after = observe()
+    await a.stop()
     const saving = a.logs.find((l) => /saving the clipboard \(attempt/.test(l))
     const why = a.logs.find((l) => /not pasting: the clipboard could not be saved/.test(l))
-    await a.stop()
     // Round 23, the one rule (a directed change; round 22 asserted a zero-item "skipped" save that emptied it).
     check(
       'only an oversize custom format (round 23, the one rule): not established, no paste, the clipboard untouched, the reason too-large',
@@ -2836,8 +2933,8 @@ async function main() {
     const before = observe()
     const live = await a.req('__clipboard-txn', { text: 'dictated text G', holdMs: 300 })
     const after = observe()
-    const why = a.logs.find((l) => /not pasting: the clipboard could not be saved/.test(l))
     await a.stop()
+    const why = a.logs.find((l) => /not pasting: the clipboard could not be saved/.test(l))
     // Round 23, the one rule (the 4K-screenshot case; round 22 asserted a "skipped" restore of only CF_LOCALE).
     check(
       'every user format over the cap (round 23, the one rule): not established, no paste, the clipboard untouched (only CF_LOCALE fit: no user content), the reason too-large',
@@ -3131,7 +3228,8 @@ async function main() {
   const holds = (snapHex, bytes) => !!snapHex && snapHex.startsWith(bytes.toString('hex'))
   const theirCopy = 'a copy by another app'
   for (const [label, gates, change, expect] of [
-    ['(a) before emptying', ['EMPTY'], null, 'restored'],
+    // Round 31 (Opus): a write the caller gave up on BEFORE it emptied no longer empties at all: "untouched".
+    ['(a) before emptying', ['EMPTY'], null, 'untouched'],
     ['(b) after our write closed', ['WRITTEN'], null, 'restored'],
     ['(c) an addition before the late confirmation', ['WRITTEN', 'CONFIRM'], 'add', 'unrestored'],
     [
@@ -3152,6 +3250,7 @@ async function main() {
     const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates, realBudget: true })
     await a.ready
     const dictated = `dictated text LT ${label.slice(1, 2)}`
+    const original = contentSnapshot() // the user's clipboard before the transaction (bytes and sequence)
     // The write waits at its gate: the transaction answers once the budget is over (the late path).
     const result = await a.req('__clipboard-txn', { text: dictated, holdMs: 300 })
     // Round 31: awaited (stderr and the stdout reply are independent streams).
@@ -3188,6 +3287,9 @@ async function main() {
     // The change, byte for byte and at the same sequence, once the late result is out (the event is sent after the late
     // write's last step), before the helper exits: nothing was written over it.
     const unchanged = change ? JSON.stringify(contentSnapshot()) === JSON.stringify(changed) : true
+    // (a): nothing was ever emptied: the user's clipboard byte for byte AND at its sequence from before the transaction.
+    const untouched =
+      expect === 'untouched' ? JSON.stringify(contentSnapshot()) === JSON.stringify(original) : true
     await a.stop()
     const after = observe()
     const files = recordFiles().length
@@ -3199,7 +3301,7 @@ async function main() {
           !/emptied at/.test(budgetLine)
         : !!budgetLine && /closed at \d+ ms; now/.test(budgetLine)
     check(
-      `the late path, forced ${label}: answered late (no paste), the log names where the write was, the late result "${expect}"${expect === 'restored' ? ', the user clipboard back, the record settled' : ', kept as an offer, the change untouched'}`,
+      `the late path, forced ${label}: answered late (no paste), the log names where the write was, the late result "${expect}"${expect === 'untouched' ? ', nothing emptied: the user clipboard unchanged (bytes and sequence), the record settled' : expect === 'restored' ? ', the user clipboard back, the record settled' : ', kept as an offer, the change untouched'}`,
       !!result &&
         /^late\|/.test(String(result.result)) &&
         where &&
@@ -3209,11 +3311,15 @@ async function main() {
         ended.id === result.id &&
         !!endLine &&
         endLine.endsWith(': ' + expect) &&
-        (expect === 'restored' ? userBack && files === 0 : files === 2) &&
+        (expect === 'restored' || expect === 'untouched' ? userBack && files === 0 : files === 2) &&
+        (expect !== 'untouched' ||
+          (untouched &&
+            /abandoned before emptying at \d+ ms/.test(endLine) &&
+            a.logs.some((l) => /before emptying: nothing emptied/.test(l)))) &&
         (change === null || (names() === theirs && changeThere && unchanged)),
-      `${JSON.stringify(result)}; ${budgetLine}; during ${during}; ${JSON.stringify(ended)}; ${endLine}; ${files} files; ${names()}; the change there ${changeThere}, unchanged after ${unchanged}; at the gate ${JSON.stringify(changed)}`
+      `${JSON.stringify(result)}; ${budgetLine}; during ${during}; ${JSON.stringify(ended)}; ${endLine}; ${files} files; ${names()}; untouched ${untouched}; the change there ${changeThere}, unchanged after ${unchanged}; at the gate ${JSON.stringify(changed)}`
     )
-    if (expect !== 'restored') {
+    if (expect !== 'restored' && expect !== 'untouched') {
       const h = start(release)
       await h.ready
       const listed = await h.req('clipboard-offers')
@@ -3274,16 +3380,23 @@ async function main() {
         prefixFiles().length === 1,
       `${left}; text ${after.text}; sequence ${before.sequence} -> ${after.sequence}; ${JSON.stringify(listed)}; ${listing()}`
     )
-    for (const f of prefixFiles()) {
-      const old = new Date(Date.now() - 60 * 60 * 1000)
-      fs.utimesSync(path.join(os.tmpdir(), f), old, old)
+    // Round 31 (Opus): both sides of the 10-minute threshold.
+    const age = (minutes) => {
+      for (const f of prefixFiles()) {
+        const old = new Date(Date.now() - minutes * 60 * 1000)
+        fs.utimesSync(path.join(os.tmpdir(), f), old, old)
+      }
     }
+    age(9)
     await h.req('clipboard-offers')
+    const at9 = prefixFiles().length
+    age(11)
+    await h.req('clipboard-offers')
+    const deletedLine = await h.waitLog(/a stray state \.tmp .* was deleted/, { ms: 5000 })
     check(
-      'and once older than 10 minutes the stray .state.tmp is deleted by the next look',
-      prefixFiles().length === 0 &&
-        h.logs.some((l) => /a stray state \.tmp .* was deleted/.test(l)),
-      `${listing()}; ${h.logs.filter((l) => /stray/.test(l)).join(' / ')}`
+      'and the stray .state.tmp is kept at 9 minutes old, deleted by the next look at 11 minutes',
+      at9 === 1 && prefixFiles().length === 0 && !!deletedLine,
+      `${at9} at 9 minutes; ${listing()}; ${h.logs.filter((l) => /stray/.test(l)).join(' / ')}`
     )
     await h.stop()
   }
@@ -3341,6 +3454,33 @@ async function main() {
       'performance canary: 10 ordinary writes under the real 1 s budget each end correctly (restored, or late with the user clipboard back); their times are reported above',
       wrong.length === 0 && times.length === 10,
       wrong.join('; ')
+    )
+  }
+
+  // 44. Round 31 (Opus): a gate nobody opens times out (asserted once, with a 1.5 s limit) and the helper goes on.
+  {
+    await begin('44')
+    copyMulti(user)
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_GATE_TIMEOUT_MS: '1500' },
+      { gates: ['HOLD'] }
+    )
+    await a.ready
+    const result = await a.req('__clipboard-txn', { text: 'dictated text GT', holdMs: 300 })
+    await a.stop()
+    const line = a.logs.find((l) => /test-trace: gate HOLD#1 timed out after \d+ ms/.test(l))
+    const waited = line ? Number(/after (\d+) ms/.exec(line)[1]) : -1
+    const back = observe()
+    check(
+      'a gate nobody opens times out after its limit (1.5 s) and the transaction goes on (restored, the user clipboard back)',
+      !!result &&
+        /^restored\|/.test(String(result.result)) &&
+        waited >= 1500 &&
+        waited < 10000 &&
+        back.text === user &&
+        back.extra === 'extra bytes for ' + user,
+      `${JSON.stringify(result)}; ${line}; text ${back.text}`
     )
   }
 
@@ -3485,6 +3625,24 @@ async function main() {
 
   // Round 30: the last case is verified like every other (its processes exited, nothing of this identity left).
   await begin('(the end of the run)')
+  // Round 31 (Opus): every ordinary write of the run (its "test-trace: write ..." timeline; late writes log another
+  // line), against gross thresholds only: median over 500 ms or any over 5 s fails. Finer timing is the canary's (43).
+  const writes = []
+  for (const h of allHelpers)
+    for (const l of h.logs) {
+      const m = /test-trace: write .*; now (\d+) ms$/.exec(l)
+      if (m) writes.push(Number(m[1]))
+    }
+  const ws = [...writes].sort((x, y) => x - y)
+  const at = (q) => (ws.length ? ws[Math.min(ws.length - 1, Math.floor(q * ws.length))] : -1)
+  console.log(
+    `# write timelines across the run: ${ws.length} ordinary writes; median ${at(0.5)} ms, p90 ${at(0.9)} ms, max ${at(1)} ms`
+  )
+  check(
+    'every ordinary write of the run within gross bounds (median under 500 ms, none over 5 s; at least 50 writes seen)',
+    ws.length >= 50 && at(0.5) < 500 && at(1) < 5000,
+    `${ws.length} writes; median ${at(0.5)}; max ${at(1)}`
+  )
   check(
     `every one of ${casesBegun - 1} cases started from a verified clean state`,
     dirtyAfter.length === 0,
