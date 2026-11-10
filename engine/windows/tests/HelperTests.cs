@@ -1192,7 +1192,7 @@ namespace DoodleNote.DictationHelper.Tests
                 var items = new[] { new KeyValuePair<uint, byte[]>(13, System.Text.Encoding.Unicode.GetBytes("saved stage\0")) };
                 PendingRecord record = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
                 record.PayloadWriter.Join(10000);
-                ((HashSet<string>)typeof(PendingClipboard).GetField("inFlight", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null)).Remove(record.Id);
+                PendingClipboard.ForgetInFlight(record.Id); // round 35: the in-flight set is lock-free (no HashSet to reach)
                 string state = System.IO.Directory.GetFiles(dir, "*.state").Single();
                 var parsed = Wire.Parse(System.IO.File.ReadAllText(state));
                 Assert.Equal("emptying", Wire.Str(parsed, "stage"), "Begin's first durable state is \"emptying\"");
@@ -1449,6 +1449,28 @@ namespace DoodleNote.DictationHelper.Tests
                 PendingClipboard.Directory = old;
                 try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
             }
+        }
+
+        /// <summary>Round 34-35: the unchanged-since-capture deletion proof and every guard it needs.</summary>
+        public static void TheUnchangedSinceCaptureProofNeedsACompleteObservationInTheSameWindowStation()
+        {
+            Func<RecordFacts> facts = () => new RecordFacts { Stage = "emptying", SequenceAtStage = 40, BootId = PendingClipboard.CurrentBootId, WindowStation = PendingClipboard.windowStation };
+            Func<ClipboardView> view = () => new ClipboardView { Sequence = 40 };
+            Assert.Equal(true, PendingClipboard.windowStation.Length > 0, "this process reads its window station (" + PendingClipboard.windowStation + ")");
+            Assert.Equal(true, PendingClipboard.UnchangedSinceCapture(facts(), view(), LogonMatch.Same), "the same sequence, logon, boot and window station, a complete look: unchanged");
+            ClipboardView incomplete = view(); incomplete.Incomplete = true;
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(facts(), incomplete, LogonMatch.Same), "an incomplete enumeration proves nothing (round 21)");
+            RecordFacts station = facts(); station.WindowStation = "Service-0x0-3e7$";
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(station, view(), LogonMatch.Same), "another window station: its sequence numbers are another series");
+            RecordFacts old = facts(); old.WindowStation = "";
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(old, view(), LogonMatch.Same), "a state without its window station (round 33-34): no proof");
+            RecordFacts written = facts(); written.Stage = "written";
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(written, view(), LogonMatch.Same), "only the first durable stage carries the capture sequence");
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(facts(), new ClipboardView { Sequence = 41 }, LogonMatch.Same), "the sequence moved");
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(facts(), view(), LogonMatch.Unknown), "the logon cannot be told");
+            RecordFacts boot = facts(); boot.BootId = "another-boot";
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(boot, view(), LogonMatch.Same), "another boot");
+            Assert.Equal(false, PendingClipboard.UnchangedSinceCapture(facts(), new ClipboardView { Sequence = 0 }, LogonMatch.Same), "a zero is no evidence");
         }
 
         public static void TheSharedWatcherGetsItsRealTickAndEvidenceWindow()
