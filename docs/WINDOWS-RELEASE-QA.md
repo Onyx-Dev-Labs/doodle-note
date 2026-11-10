@@ -377,18 +377,18 @@ Clipboard: the helper writes to the clipboard only over a save that is POSITIVEL
 below); otherwise it does not touch the clipboard at all, and the text is typed (classic text boxes) or kept for
 copying. A copy the user makes while we save is never overwritten. How long the save takes is bounded by a slow
 owner's render, not by us. Our own write (open, empty, set,
-close, and the journal of its stages, written under the same open) runs on its own thread; the paste waits for it at
-most 1 s. Past that (an owner that answered the WM_NULL probe and then stalls in WM_DESTROYCLIPBOARD, or a journal on
-a slow disk) the paste gives up (typing may still run), while the write thread itself goes on for as long as its
+close; round 33: clipboard operations only, no journal: see the journal below) runs on its own thread; the paste waits
+for it at most 1 s. Past that (an owner that answered the WM_NULL probe and then stalls in WM_DESTROYCLIPBOARD; until
+round 32 also a journal on a slow disk) the paste gives up (typing may still run), while the write thread itself goes on for as long as its
 step takes. Round 31: a write whose abandonment is observed at the check right before its EmptyClipboard does not
 empty the clipboard at all (nothing to put back: "untouched"); one abandoned later, while EmptyClipboard waits, still
 empties and rolls back. (The check is a point in the write's own sequence, not a scheduling guarantee.) Otherwise, when it ends, the late path puts the user's content back (never pastes ours); if another
 app changed the clipboard meanwhile (added a format, replaced a text form, copied its own content), its change stays
 and the saved content is kept as an offer, until the user's Restore. The app is told either way and updates the
 warning it showed. Round 30: the log says where the write was when the 1 s ran out and when it ended (opened,
-journaled emptying, emptied, journaled emptied, set, closed, journaled written, each with its time), never a guessed
-cause; round 31: the user's Restore logs its own timeline the same way (lock taken, state read, liveness checked,
-payload read, decrypted, opened, looked, journaled, emptied, put back, settled, files deleted, closed). The timelines
+emptied, set, closed, each with its time; until round 32 also its journal steps), never a guessed cause; round 31: the user's Restore logs its own timeline the same way (lock taken, state read, liveness checked,
+payload read, decrypted, opened, looked, emptied, put back, closed, settled, files deleted; round 33: the close before
+every file step). The timelines
 locate time in steps: a "journaled" step is the whole journal call (serializing the state, the file operations, the
 flush, the replace), not the disk's flush alone.
 
@@ -407,12 +407,52 @@ Each paste is a clipboard transaction with a record: the saved clipboard (DPAPI-
 user, with whether the save was complete, the transaction's random nonce and the dictated text's
 SHA-256) and a plain journal of its stage in %TEMP% under the app identity (record files are matched
 exactly: identity X never reads X-foo's, and a dev and a production identity never see each other's
-records or offers). Each stage is journaled around every EmptyClipboard of ours (emptying, emptied, written,
-restoring, restore-emptied, recovering, recovering-emptied, settled), with the sequence numbers of that moment
-for diagnostics only: since round 18 no sequence on disk is proof of anything (the confirmed sequence lives in the
-live transaction). A step whose journal could not be written (after a short bounded retry) is not taken, and the
-live transaction then loses its authority; a put-back whose stage could not be journaled still puts the content
-back, and keeps the record (offered). Every record carries its logon identity: the
+records or offers).
+
+**The journal (round 33, an owner-decision item: the journal moved out of the paste's budget; the owner may veto).**
+Two state writes are DURABLE (flushed to the disk, and published only while the record is not settled); every other
+is a DIAGNOSTIC. No stage is a proof of anything (since round 18 no sequence on disk is either; the confirmed sequence
+lives in the live transaction): recovery decides by CONTENT, except that "settled" is deleted on sight.
+
+| Write | When | Durable | Inside a clipboard open | In the paste's 1 s | If it fails |
+|---|---|---|---|---|---|
+| the first state, "emptying" ("may be emptied"), then the encrypted payload | Begin, before any EmptyClipboard of ours | yes (both) | no | no (bounded by its own 2 s) | not established: no paste, nothing emptied ("no-record") |
+| emptied / written (our write), restore-emptied (a restore or the write's own rollback), offer-only and unrestored facts | after the clipboard is closed, queued to one serialized background writer | no | never | no | nothing changes (logged) |
+| the user's Restore: settled, or recovering-emptied when its put-back failed | after its put-back, once the clipboard is closed | settled: yes | never | (not a paste) | settled: logged, the record deleted anyway |
+| settled (a live transaction restored) | on the background writer, before the record is deleted; it stays in flight until then | yes | never | no | logged, deleted anyway |
+
+**Which records are proofs.** The payload on disk is the precondition of our EmptyClipboard (Begin waits for it, at most
+2 s, outside the 1 s write budget, which now measures clipboard operations only): the user's content is never off the
+clipboard without being on disk (until round 32 a paste went ahead after 250 ms). The first state is "emptying"; there
+is no "saved" stage any more, and the old rule that deleted a non-offer "saved" record as "nothing had been emptied" is
+gone. **The proof that no new loss window opens:** a record is deleted without the user only when (1) its saved
+content is exactly, completely on the clipboard (the content-equality proof, a whole save only; if nothing was
+emptied, that is exactly what the clipboard still holds), (2) it is "settled" (its restore ran), (3) its payload is
+positively absent, damaged or unrecoverable, or (4) a retention or boot-limit policy ends it. A crash before our
+EmptyClipboard therefore leaves a record deleted by (1) at the next start, or, if the user copied something
+meanwhile, a SPURIOUS OFFER (nothing lost; Dismiss deletes it). A crash after the EmptyClipboard, before any further
+journal, leaves "emptying" on disk: the clipboard does not hold the saved content, so it is offered (the old
+stage rule would have deleted it: the CI mutation check proves the case catches that).
+
+**The crash windows.**
+
+| Crash between | On disk | At the next start |
+|---|---|---|
+| the save and Begin's durable writes | nothing, or a lone .state.tmp (swept after 10 minutes) | nothing offered; the clipboard was not touched |
+| Begin's writes and our EmptyClipboard | "emptying" + payload | the saved content still there: deleted (1); the user copied: a spurious offer |
+| our EmptyClipboard and its close | "emptying" + payload | offered (the clipboard does not hold the saved content) |
+| our close and the queued "written" | "emptying" (or "written") + payload | offered, never restored on its own (round 18) |
+| a restore's put-back and its queued "settled" (wider since round 33: the close and the queue are in it) | the last diagnostic stage + payload | the saved content back exactly: deleted (1); else offered again: a spurious offer, never a loss |
+| "settled" and the deletion | "settled" | deleted on sight |
+
+A stalled journal never holds the clipboard open (no journal call runs inside an open) and never holds up a
+delivery: only Begin's durable writes are waited for, at most 2 s, and the delivery's own deadline is checked again
+right after them (a paste that no longer fits empties nothing). The queued steps run before the helper exits, inside
+its usual exit wait; past it, a record left behind is judged by content at the next start. The background writer
+serializes every write (one queue, in order) on immutable snapshots, and a record settled meanwhile is never written
+again, so an older queued write can never overwrite the settlement or recreate a deleted state.
+
+Every record carries its logon identity: the
 window-station session, the logon session (LUID), Windows' boot counter, the tick count and a per-logon
 random key in a volatile registry value (HKCU\Software\DoodleNote.Bark.Session). Volatile means it is
 removed when the user's hive is unloaded (logoff, reboot); the LUID covers a new logon while the hive
@@ -432,9 +472,9 @@ That covers a record after a helper crash, kill or restart, on a retry tick, on 
 rebuild, after a failed or interrupted restore, and from another boot, logon or session. Nothing read from disk is
 ever WRITTEN to the clipboard without the user's Restore. Records are not offered, but left or deleted, only as
 the deletion contract below lists: another session's record is left alone; deleted without writing anything are a
-record whose saved content is already exactly on the clipboard, one that never emptied anything (stage "saved"), one
-journaled "settled", one whose payload is positively absent, damaged or unrecoverable, and those the retention and
-boot-limit policies end. What the user sees: after a helper crash or kill mid-dictation the saved clipboard
+record whose saved content is already exactly on the clipboard (a whole save), one journaled "settled", one whose
+payload is positively absent, damaged or unrecoverable, and those the retention and boot-limit policies end (round
+33: no longer one "that never emptied anything" by its stage: see the journal above). What the user sees: after a helper crash or kill mid-dictation the saved clipboard
 is offered on the card ("Put back what you had copied before?") instead of being put back silently. The user's
 Restore and Dismiss are unchanged.
 
@@ -787,8 +827,9 @@ start never use a step. Payloads without a journal are deleted, never
 restored from, and a settled transaction is never published. Records of earlier formats are removed
 with a log line, never restored from. **Content that carries any clipboard privacy
 marker (as password managers set) is never written to disk**: that transaction stays in memory, so a
-helper killed between our write and the restore cannot give it back, and after a crash there is nothing to offer (the offer card says so). The encrypted write runs in the
-background; a paste waits for it at most 250 ms (a large clipboard may go ahead before it is on disk).
+helper killed between our write and the restore cannot give it back, and after a crash there is nothing to offer (the offer card says so). Round 33: the encrypted
+payload is on disk, flushed, before anything is emptied (the paste waits for it at most 2 s; otherwise no paste,
+"no-record"): the earlier 250 ms window, in which a large clipboard could go ahead before it was on disk, is closed.
 
 Leaving: the app asks the helper to quit by closing its stdin (there is no quit op). On every exit
 path (stdin closed, a restart, an unhandled exception, a console close or logoff event; one atomic step decides which thread runs the exit, and every other starter waits for it to finish) a delivery in progress finishes its restore and
