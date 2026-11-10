@@ -3638,6 +3638,23 @@ async function main() {
   console.log(
     `# write timelines across the run: ${ws.length} ordinary writes; median ${at(0.5)} ms, p90 ${at(0.9)} ms, max ${at(1)} ms`
   )
+  // Round 31 (Opus, the open observation): every user Restore's own timeline, reported (not a check): the slowest three
+  // in full, so a slow run says where a Restore's time went.
+  const restores = []
+  for (const h of allHelpers)
+    for (const l of h.logs) {
+      const m = /\(the user's restore\) timeline: (.*; now (\d+) ms)$/.exec(l)
+      if (m) restores.push({ ms: Number(m[2]), line: m[1] })
+    }
+  restores.sort((x, y) => x.ms - y.ms)
+  const rq = (q) =>
+    restores.length
+      ? restores[Math.min(restores.length - 1, Math.floor(q * restores.length))].ms
+      : -1
+  console.log(
+    `# user Restore timelines across the run: ${restores.length}; median ${rq(0.5)} ms, p90 ${rq(0.9)} ms, max ${rq(1)} ms`
+  )
+  for (const r of restores.slice(-3)) console.log(`# slowest Restore: ${r.line}`)
   check(
     'every ordinary write of the run within gross bounds (median under 500 ms, none over 5 s; at least 50 writes seen)',
     ws.length >= 50 && at(0.5) < 500 && at(1) < 5000,
