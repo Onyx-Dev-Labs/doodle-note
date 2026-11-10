@@ -2095,15 +2095,11 @@ async function main() {
         ? /^write-failed\/untouched\|.*\|not-started=zero-sequence$/.test(
             String(result && result.result)
           )
-        : fault === 'journal-emptying'
-          ? /^write-failed\/untouched\|.*\|not-started=no-record$/.test(
-              String(result && result.result)
-            )
-          : fault === 'zero-sequence'
-            ? result && result.result === 'zero-sequence'
-            : fault === 'journal-emptying'
-              ? result && result.result === 'no-record'
-              : result && result.result === 'no-save'
+        : fault === 'zero-sequence'
+          ? result && result.result === 'zero-sequence'
+          : fault === 'journal-emptying'
+            ? result && result.result === 'no-record'
+            : result && result.result === 'no-save'
     check(
       `reader fault "${fault}": not established, the delivery never touches the clipboard (byte-identical, sequence unchanged, no record${written ? ' left; the reason said' : ' ever'})`,
       seeded &&
