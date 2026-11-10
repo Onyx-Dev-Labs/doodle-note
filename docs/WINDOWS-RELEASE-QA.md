@@ -380,17 +380,24 @@ owner's render, not by us. Our own write (open, empty, set,
 close, and the journal of its stages, written under the same open) runs on its own thread; the paste waits for it at
 most 1 s. Past that (an owner that answered the WM_NULL probe and then stalls in WM_DESTROYCLIPBOARD, or a journal on
 a slow disk) the paste gives up (typing may still run), while the write thread itself goes on for as long as its
-step takes: when it ends, the late path puts the user's content back, never ours, and tells the app, which updates the
-warning it showed. If another app changed the clipboard before that late confirmation (added a format, replaced a text
-form, copied its own content), the late path deliberately writes nothing: the record is kept as an offer and the
-changed clipboard is left exactly as that app left it, until the user's Restore. Round 30: the log says where the write
-was when the 1 s ran out and when it ended (opened, journaled emptying, emptied, journaled emptied, set, closed,
-journaled written, each with its time), never a guessed cause. In CI the late path has its own end-to-end cases,
-forced by test-build gates under the real 1 s budget (before emptying; after our write closed; and a change before the
-late confirmation, checked byte for byte and by sequence); every other case runs with a 60 s budget so its outcome is
-the path it tests, whatever the runner's speed. That longer budget would hide an ordinary write getting slower, so a
-performance canary runs ten ordinary writes under the real budget: their outcome is checked, their times are reported
-(a write over budget or over 500 ms raises a CI warning, not a failure, because a slow runner window can do that).
+step takes. Round 31: a write given up on before it emptied the clipboard does not empty it at all (nothing to put
+back: "untouched"). Otherwise, when it ends, the late path puts the user's content back (never pastes ours); if another
+app changed the clipboard meanwhile (added a format, replaced a text form, copied its own content), its change stays
+and the saved content is kept as an offer, until the user's Restore. The app is told either way and updates the
+warning it showed. Round 30: the log says where the write was when the 1 s ran out and when it ended (opened,
+journaled emptying, emptied, journaled emptied, set, closed, journaled written, each with its time), never a guessed
+cause; round 31: the user's Restore logs its own timeline the same way (lock taken, state read, liveness checked,
+payload read, decrypted, opened, looked, journaled, emptied, put back, settled, files deleted, closed).
+
+In CI the late path has its own end-to-end cases, forced by test-build gates under the real 1 s budget (before
+emptying; after our write closed; and a change before the late confirmation, checked byte for byte and by sequence);
+every other case runs with a 60 s budget so its outcome is the path it tests, whatever the runner's speed. **The gap,
+stated plainly:** that longer budget means those cases would not notice an ordinary write getting slower. Two checks
+stand in for it: every ordinary write of the run (its timeline) must stay within gross bounds (median under 500 ms,
+none over 5 s; a failure), and a canary runs ten ordinary writes under the real budget, checking their outcome and
+reporting their times (a write over budget or over 500 ms raises a CI warning, not a failure: a slow runner window
+can take an ordinary write past 1 s, as attempt 1 of run 42842819157 did). A regression smaller than the gross bounds
+shows only as that warning.
 
 Each paste is a clipboard transaction with a record: the saved clipboard (DPAPI-encrypted for the
 user, with whether the save was complete, the transaction's random nonce and the dictated text's
