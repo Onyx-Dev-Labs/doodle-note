@@ -7,13 +7,18 @@
  * (a) a Restore request completes EXACTLY ONCE, by whichever of its recovered event or its reply comes first; the
  *     other is consumed. A request whose reply was "failed" (no answer in time) completes by its later event. A
  *     completion with something to say SETS the slot. A further click while a request is pending is ignored.
- * (b) a later user interaction (Dismiss of any card, a click on a card, a new dictation, a transform) SUPERSEDES
- *     the slot: that notice is gone for good; no path shows it again (only a NEW completion or report sets the slot).
+ * (b) a later ACCEPTED user interaction with the current UI (Dismiss of any card; a click on the card shown; a new
+ *     dictation, meaning a start accepted after its prerequisite checks and the capture ownership; a transform)
+ *     SUPERSEDES the slot: that notice is gone for good; no path shows it again (only a NEW completion or report sets
+ *     the slot). A stale click naming a withdrawn card is rejected before it reaches here and supersedes nothing.
  * (c) offer-gone and offer-added, for any record, and every offer-list refresh never change the slot (they are not
  *     events of this reducer at all).
  * (d) a newer completion or report replaces an older notice.
- * (e) the slot's notice is what the overlay displays while it is current; it ends only by (b), (d) or its own
- *     expiry (the notice that set the timer, by id).
+ * (e) the slot's notice is what the overlay displays while it is current, EXCEPT that a live session, a recovery
+ *     card and an error or status notice keep their priority over it. It ends only by (b), (d), its own expiry (the
+ *     notice that set the timer, by id; the six-second timer starts when the notice is set, so a completion that
+ *     arrives during a recording can expire while hidden and never be seen), or, for a delivery's own report only,
+ *     withdraw-report (its late result says the report is no longer true).
  */
 import type { ClipboardProblem } from './dictation-overlay-view'
 

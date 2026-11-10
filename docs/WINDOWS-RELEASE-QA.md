@@ -504,14 +504,21 @@ slot, separate from the offer card and from every other panel; the overlay shows
 current. (a) A Restore request completes exactly once, by whichever of its recovered event or its reply comes first
 (the other is consumed; a request whose reply was "no answer in time" completes by its later event), and a completion
 with something to say sets the slot. While a record's Restore is outstanding its card reads "Restoring…" (not
-clickable; Dismiss stays) and a further click is ignored; after the reply a retry works. (b) A later user
-interaction (Dismiss of any card, a click on a card, a new dictation, a transform) supersedes the notice for good:
-no path shows it again. (c) Offer-gone, offer-added and offer-list refreshes never change the slot. (d) A newer
-completion or delivery report replaces an older notice. (e) A notice ends only by (b), (d) or its own timer. A
-permutation test runs every ordering of scripts of these events (6,480 orderings, one and two records) through the
-production client and the service and checks: never two notices for one completion, a superseded notice never
-returns, a completion not superseded since is visible at the end, and the notice shown is always the one raised
-last.
+clickable; Dismiss stays) and a further click is ignored; after the reply a retry works. (b) A later ACCEPTED user
+interaction with the current UI supersedes the notice for good: Dismiss of any card, a click on the card shown, a
+new dictation (a start accepted after its prerequisite checks and the capture ownership), a transform; no path
+shows it again. A stale click naming a withdrawn card is rejected and supersedes nothing. (c) Offer-gone,
+offer-added and offer-list refreshes never change the slot. (d) A newer completion or delivery report replaces an
+older notice. (e) While current, the notice is what the overlay shows, except that a live session, a recovery card
+and an error or status notice keep their priority. It ends only by (b), (d), its own six-second timer (which
+starts when the notice is set: a completion arriving during a recording can expire while hidden and never be
+seen), or, for a delivery's own report only, its withdrawal by that delivery's late result. The overlay page
+rebuilds every button's link on every render from a fixed action (round 29); CI renders same-page transition
+sequences (pending, reply, timeout and retry, Dismiss and its confirmation, repeated pending, expiry) and fails on
+any page error. A permutation test (11,160 orderings of ten scripts, one and two records, timers mocked) runs the
+production client and the service and compares the shown title after EVERY step with an independent model of the
+events (the last notice-bearing completion unless a Dismiss, an accepted start or its expiry came after it); with
+every completion notice suppressed, 6,904 of the orderings fail.
 
 | Class | What | The save | The put-back | What the user is told |
 | --- | --- | --- | --- | --- |
