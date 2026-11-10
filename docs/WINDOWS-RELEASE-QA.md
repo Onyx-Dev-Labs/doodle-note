@@ -438,7 +438,8 @@ and one session can have several; the state names the capture's station, and a s
 them, gets no such proof): unchanged since the capture, since our EmptyClipboard would have moved it; used only to
 delete, never to write; it covers an INCOMPLETE save, whose content proof cannot hold. One case it does not see, and
 why it costs nothing: if a delayed-render owner exits with formats it never rendered without moving the sequence (CI
-case 53 reports what this Windows build does), the proof can delete a record while that unrendered content has gone,
+case 53 reports what the CI runner's Windows build does: Windows Server 2025, 10.0.26100, where the sequence MOVED
+from 7765 to 7766 when such an owner exited, so there the proof does not apply; other builds are not observed), the proof can delete a record while that unrendered content has gone,
 but those bytes were never in our payload (a save holds only what renders), so the deletion loses nothing we held, (2) it is "settled" (its restore ran), (3) its payload
 is positively absent, damaged or unrecoverable, or (4) a retention or boot-limit policy ends it. A crash before our
 EmptyClipboard therefore leaves a record deleted by (1b) or (1) at the next start, or, if the user copied something
@@ -466,8 +467,12 @@ A stalled journal never holds the clipboard open (no journal call runs inside an
 delivery: only Begin's durable writes are waited for, about 2 s at most (round 34: in slices that also check the
 delivery's own deadline, and given up by a compare-and-swap, never by waiting on the lock the writer holds across its
 renames, nor the recovery lock: CI case 50 stalls each rename, case 52 a recovery retry inside the recovery lock;
-the residual: the delivery's own kept-record check BEFORE Begin still takes that lock, bounded by the delivery deadline
-checked after it), and the delivery's own deadline is checked again right after them (a paste that no longer fits empties nothing). The queued steps run before the helper exits, inside
+round 36: neither does a privacy-marked, memory-only transaction's settlement, CI case 54), and the delivery's own
+deadline is checked again right after them. The delivery's own kept-records check BEFORE Begin takes the recovery lock
+and does file and clipboard work, which cannot be bounded in place (until round 35 its wait was therefore UNBOUNDED;
+the deadline check after it only prevented a late paste). Round 36: it runs on its own thread, and the delivery waits
+for it only while its deadline allows and at most 5 s; not done by then, the paste is refused ("clipboard-busy", or
+"deadline") with nothing emptied, and the check finishes on its own (it never writes the clipboard: CI case 55) (a paste that no longer fits empties nothing). The queued steps run before the helper exits, inside
 its usual exit wait; past it, a record left behind is judged by content at the next start. The background writer
 serializes every write (one queue, in order) on immutable snapshots, and a record settled meanwhile is never written
 again, so an older queued write can never overwrite the settlement or recreate a deleted state. Every state write goes
@@ -487,7 +492,9 @@ exposed. Leftovers of the old way (a state copy, no user content) are deleted on
 through them (rounds 34-35): only while NO other helper process runs at all (any identity, any pid: the copies name
 the helper that wrote a state, not one that may be replacing it, and an open handle is no protection), older than 10
 minutes, naming this session and a helper proven not running, and the record's own state, if present, naming one too;
-anything unknown is kept. A leftover whose record has no state is not rescued (a state copy cannot be told current;
+anything unknown is kept (round 36: a process whose name cannot be read for any reason other than having exited counts
+as running). The helper's own clipboard reader has the same image name, so it blocks the sweep while it is alive: the
+sweep effectively runs at the helper's start, or whenever no reader is running. A leftover whose record has no state is not rescued (a state copy cannot be told current;
 this concerns unreleased builds only): it is swept like the others. The CI check that no journal write runs inside a
 clipboard open is LOGGING (an ERROR line every state write makes on a thread that holds an open), scanned by the CI
 run: it shows that no state write ran on such a thread in that run, not a guarantee enforced by the code. The crash
