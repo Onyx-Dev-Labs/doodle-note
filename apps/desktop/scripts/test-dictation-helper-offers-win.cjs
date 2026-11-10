@@ -1229,25 +1229,26 @@ async function main() {
   {
     await begin('12')
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD'] })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD', 'RETRY'] })
     await a.ready
     const reply = a.req('__clipboard-txn', { text: 'dictated text K' })
     await atLine(a, 'our write confirmed and held', HOLDING)
-    // Round 30: the holder holds BEFORE the restore runs and through its result, then adds and closes; the helper's
-    // own retry is awaited by its line, and must come after the addition.
+    // Round 30: the holder holds BEFORE the restore runs and through its result, then adds and closes. Round 31: the
+    // helper's own retry waits at its gate, opened only once the holder has added its format and its exit is observed,
+    // so the retry runs after the addition by construction (no comparison of two output streams).
     const holder = holdThenAdd()
     if (!(await holder.held))
       check(`${frame.label}: reached the holder holding the clipboard`, false, holder.output())
     a.open('HOLD')
     const result = await reply
-    const beforeAdd = a.logs.length
-    await holder.release()
-    const early = a.logs.slice(beforeAdd).find((l) => /\(retry\)/.test(l))
-    const afterAdd = a.logs.length
-    if (early) check(`${frame.label}: the retry ran after the addition`, false, early)
-    await atLine(a, 'its own retry, after the addition', /clipboard record \w+ \(retry\)/, {
-      since: afterAdd
-    })
+    if (!(await holder.release()))
+      check(
+        `${frame.label}: reached the holder adding its format and closing`,
+        false,
+        holder.output()
+      )
+    a.open('RETRY')
+    await atLine(a, 'its own retry, after the addition', /clipboard record \w+ \(retry\)/)
     const kept = recordFiles().length
     await a.stop()
     check(
