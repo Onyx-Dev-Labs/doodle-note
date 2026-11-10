@@ -86,6 +86,7 @@ ${overlayFontCss}
   .btns{flex:none;display:flex;gap:6px;justify-content:flex-end}
   .btn{color:var(--ink);background:var(--wash);border:1.4px solid var(--ink);padding:1px 10px;border-radius:9px;text-decoration:none;font-size:13px}
   .btn.primary{background:var(--accent);color:#fff;border-color:var(--ink)}
+  .btn.pending{opacity:.6;cursor:default}
   .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   [hidden]{display:none!important}
   @media (prefers-reduced-motion:reduce){.rest{transition:none}.rest:hover{transform:none}}
@@ -241,6 +242,14 @@ ${overlayFontCss}
         const action = $(id).getAttribute('href').split('://')[1].split('/')[0]
         $(id).setAttribute('href', 'doodle-dictation://' + action + (next.offerRecord ? '/' + next.offerRecord : ''))
       }
+      // Round 28: an outstanding Restore: the button reads "Restoring…" and has no link (it cannot be clicked).
+      const restore = $('offerRestore')
+      restore.textContent = next.restoring ? 'Restoring…' : 'Restore'
+      restore.classList.toggle('pending', !!next.restoring)
+      if (next.restoring) {
+        restore.removeAttribute('href')
+        restore.setAttribute('aria-disabled', 'true')
+      } else restore.removeAttribute('aria-disabled')
       const diff = $('diff')
       diff.hidden = !next.diff
       diff.textContent = ''

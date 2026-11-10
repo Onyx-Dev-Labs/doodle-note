@@ -98,6 +98,14 @@ import { conflictingShortcuts, diffWords } from '../shared/dictation-transforms'
 import { barkCopy, barkPlatform, type BarkCopy } from '../shared/dictation-platform'
 import type { HelperIntegrityState } from './helper-integrity'
 import type { OverlayAction } from './dictation-overlay'
+import {
+  initialNoticeState,
+  reduceNotice,
+  restorePending,
+  type NoticeEvent,
+  type NoticeState,
+  type NoticeStep
+} from './dictation-notice'
 
 export interface EngineLike {
   tryStartLive(opts: EngineStartOptions): { started: true } | { started: false; reason: string }
@@ -424,19 +432,11 @@ export class DictationService {
   /** Windows: the clipboard note for one recovery card (by generation). */
   private clipboardWarning: { gen: number; message: string } | null = null
   /**
-   * Round 26 (Astra): the user's Restore requests, by record (the newest per record; at most 20 kept). Each is
-   * COMPLETED EXACTLY ONCE, by whichever of its recovered event or its reply comes first (the helper sends the
-   * event before the reply; a request that timed out completes by its event alone); the other is consumed silently.
+   * Round 28: the clipboard NOTICE SLOT and the user's Restore requests, one pure reducer (dictation-notice.ts). The
+   * slot is separate from the offer card and from every other panel: list refreshes and offer events never touch it.
    */
-  private readonly restoreRequests = new Map<
-    string,
-    { completed: boolean; notice?: OverlayPanel }
-  >()
-  /**
-   * Round 27 (Astra): records whose Restore is outstanding (sent, no reply yet). A further click for one of them is
-   * ignored (the client would only queue it behind the first); a click after the reply (a retry) works.
-   */
-  private readonly restoreInFlight = new Set<string>()
+  private noticeState: NoticeState = initialNoticeState()
+  private noticeTimer: NodeJS.Timeout | null = null
   /**
    * Round 25: offers the helper refused as nothing-to-restore. A list reload (an older helper sends no content count)
    * never brings their Restore back.
@@ -544,9 +544,9 @@ export class DictationService {
 
   /** Show the current offer unless another panel is up (then it comes when that one closes, see setPanel). */
   private refreshOfferPanel(): void {
+    // Round 28: it recomputes the card only; the notice slot is never touched by a refresh (rule c).
     const panel = this.panel
-    if (!panel || panel.kind === 'clipboard' || panel.kind === 'clipboard-offer')
-      this.setPanel(null)
+    if (!panel || panel.kind === 'clipboard-offer') this.setPanel(null)
   }
 
   private offerPanel(): OverlayPanel | null {
@@ -558,7 +558,9 @@ export class DictationService {
       kind: 'clipboard-offer',
       offer,
       ...(changed ? { changed: { formats: changed.formats, bytes: changed.bytes } } : {}),
-      ...(confirm ? { confirmDelete: true, deleteFailed: confirm.failed } : {})
+      ...(confirm ? { confirmDelete: true, deleteFailed: confirm.failed } : {}),
+      // Round 28: its Restore is outstanding: the card says "Restoring…" and its Restore cannot be clicked.
+      ...(restorePending(this.noticeState, offer.record) ? { pending: true } : {})
     }
   }
 
@@ -592,52 +594,45 @@ export class DictationService {
   private async restoreOffer(): Promise<void> {
     const offer = this.currentOffer()
     if (!offer || !this.deps.helper.restoreClipboardOffer) return
-    if (this.restoreInFlight.has(offer.record)) {
+    // Rule (a): a click while this record's Restore is pending is ignored (the card shows "Restoring…").
+    if (this.notice({ type: 'request', record: offer.record }).ignored) {
       this.deps.log(
         'clipboard offer: a Restore of this record is still outstanding; the click is ignored'
       )
       return
     }
-    this.restoreInFlight.add(offer.record)
-    try {
-      await this.restoreOfferOnce(offer)
-    } finally {
-      this.restoreInFlight.delete(offer.record)
-    }
-  }
-
-  private async restoreOfferOnce(offer: ClipboardOffer): Promise<void> {
-    if (!this.deps.helper.restoreClipboardOffer) return
+    this.refreshOfferPanel() // the card now shows its pending state
     const changed = this.offerChanged?.record === offer.record ? this.offerChanged : null
     const sequence = changed?.sequence ?? offer.sequence
-    // A new request for this record (a retry replaces a timed-out one): completed once, by its event or its reply.
-    const request: { completed: boolean; notice?: OverlayPanel } = { completed: false }
-    this.restoreRequests.delete(offer.record)
-    this.restoreRequests.set(offer.record, request)
-    while (this.restoreRequests.size > 20)
-      this.restoreRequests.delete(this.restoreRequests.keys().next().value as string)
     // An incomplete offer's card says what a Restore cannot put back: the click accepts exactly that.
-    const done = await this.deps.helper.restoreClipboardOffer(
-      offer.record,
-      sequence,
-      offer.incomplete === true
-    )
+    let done: ClipboardOfferRestore
+    try {
+      done = await this.deps.helper.restoreClipboardOffer(
+        offer.record,
+        sequence,
+        offer.incomplete === true
+      )
+    } catch {
+      done = { result: 'failed' }
+    }
     this.deps.log(`clipboard offer: restore ${done.result}`)
-    // Round 23 (Astra S1): a COMPLETED restore is reported even when its offer was withdrawn first (the helper
-    // sends offer-gone and recovered before its reply): the reply carries the names of what is missing.
     const completed =
       done.result === 'restored' ||
       done.result === 'partial' ||
       done.result === 'skipped' ||
       done.result === 'restored-partially'
-    // No answer in time ("failed"): the request stays open; its recovered event completes it when it comes (by its
-    // RECORD: a rebuilt record's delivery is ""). Any other answer that is not a completion ends the request.
-    if (
-      !completed &&
-      done.result !== 'failed' &&
-      this.restoreRequests.get(offer.record) === request
-    )
-      this.restoreRequests.delete(offer.record)
+    const problem = completed ? clipboardProblem(done.result, undefined) : null
+    // Rule (a): the reply completes the request unless its event did (then it is consumed); "failed" (no answer in
+    // time) leaves it open for its event; any other answer ends it. The card's pending state ends here.
+    this.notice({
+      type: 'reply',
+      record: offer.record,
+      outcome: completed ? 'completed' : done.result === 'failed' ? 'failed' : 'other',
+      notice: problem
+        ? { kind: 'clipboard', problem, ...(done.missing ? { missing: done.missing } : {}) }
+        : null
+    })
+    this.refreshOfferPanel()
     if (!completed && !this.offers.has(offer.record)) return
     if (done.result === 'nothing-to-restore') {
       // Round 24 (Opus, the one rule at Restore): nothing with user content can go back; nothing was emptied.
@@ -668,28 +663,9 @@ export class DictationService {
       this.refreshOfferPanel()
       return
     }
-    if (
-      done.result === 'restored' ||
-      done.result === 'partial' ||
-      done.result === 'skipped' ||
-      done.result === 'restored-partially'
-    ) {
-      const problem = clipboardProblem(done.result, undefined)
-      // Completed by its recovered event already: this reply raises no second notice (exactly one).
-      const already = request.completed
-      request.completed = true
+    // Completed: the offer leaves and the list is asked for again. The notice slot is not touched (rule c).
+    if (completed) {
       await this.offerResolved(offer.record)
-      // Round 27 (Astra): the offer list's refresh above cleared the panel; the notice stays visible. One the event
-      // already raised is shown again, NOT counted as another notice.
-      const notice: OverlayPanel | undefined = already
-        ? request.notice
-        : problem
-          ? { kind: 'clipboard', problem, ...(done.missing ? { missing: done.missing } : {}) }
-          : undefined
-      if (notice) {
-        request.notice = notice
-        this.setPanel(notice, NOTICE_MS, !already)
-      }
       return
     }
     if (done.result === 'gone') await this.offerResolved(offer.record)
@@ -746,6 +722,8 @@ export class DictationService {
     this.transforming?.abort()
     if (this.offerSweep) clearInterval(this.offerSweep)
     this.offerSweep = null
+    if (this.noticeTimer) clearTimeout(this.noticeTimer)
+    this.noticeTimer = null
     this.setPanel(null)
     this.lastTranscript = null
     this.lastChange = null
@@ -1259,20 +1237,31 @@ export class DictationService {
         if (gen !== null) void this.copyRecovery(gen)
         break
       case 'dismiss':
+        // Round 28 (rule b): Dismiss of any card ends the current notice for good. A notice that was the card on
+        // screen is all this Dismiss does.
+        if (this.noticeState.current && this.panelFits()) {
+          this.supersedeNotice()
+          break
+        }
+        this.supersedeNotice()
         // The shared dismiss never touches a clipboard offer (it has its own actions, and Dismiss asks first).
         if (this.panel?.kind === 'clipboard-offer') break
         if (this.panel) this.setPanel(null)
         else this.dispatch({ type: 'dismiss' })
         break
       case 'offer-restore':
-        if (this.panel?.kind === 'clipboard-offer' && this.shownOffer(record))
+        if (this.panel?.kind === 'clipboard-offer' && this.shownOffer(record)) {
+          this.supersedeNotice() // rule (b): a click on a card
           void this.restoreOffer()
+        }
         break
       case 'offer-dismiss':
       case 'offer-delete':
       case 'offer-keep':
-        if (this.panel?.kind === 'clipboard-offer' && this.shownOffer(record))
+        if (this.panel?.kind === 'clipboard-offer' && this.shownOffer(record)) {
+          this.supersedeNotice() // rule (b)
           this.offerAction(action)
+        }
         break
       case 'view':
         this.viewLastChange()
@@ -1418,6 +1407,7 @@ export class DictationService {
     this.deferredStart = null
     this.lastStartAt = now
     this.showHiddenPill()
+    this.supersedeNotice() // rule (b): a new dictation
     this.setPanel(null)
     const context: SessionContext = {
       gen,
@@ -1877,7 +1867,9 @@ export class DictationService {
         : {})
     }
     const base = overlayView(this.state, context)
-    this.deps.overlay.render(this.panel && this.panelFits() ? panelView(this.panel, base) : base)
+    // Round 28 (rule e): the notice slot's notice is what shows while it is current; else the panel or the card.
+    const shown: OverlayPanel | null = this.noticeState.current?.notice ?? this.panel
+    this.deps.overlay.render(shown && this.panelFits() ? panelView(shown, base) : base)
   }
 
   /** The app a live session will type into, when the user wants it shown on the pill. */
@@ -1924,13 +1916,36 @@ export class DictationService {
   /** The last clipboard notices raised (their sentences; the newest 20), for the log and the tests (round 25). */
   private readonly noticesRaised: string[] = []
 
-  private setPanel(panel: OverlayPanel | null, ms = 0, count = true): void {
-    if (panel?.kind === 'clipboard' && count) {
-      this.noticesRaised.push(
-        clipboardProblemMessage(panel.problem, panel.missing, panel.reason, panel.delivered)
-      )
+  /**
+   * Round 28: every change to the notice slot goes through the reducer (dictation-notice.ts). A notice it sets is
+   * counted once, gets its own timer (by id: an older timer never ends a newer notice), and is rendered.
+   */
+  private notice(event: NoticeEvent): NoticeStep {
+    const before = this.noticeState.current
+    const step = reduceNotice(this.noticeState, event)
+    this.noticeState = step.state
+    if (step.shown) {
+      const n = step.shown.notice
+      this.noticesRaised.push(clipboardProblemMessage(n.problem, n.missing, n.reason, n.delivered))
       if (this.noticesRaised.length > 20) this.noticesRaised.shift()
+      if (this.noticeTimer) clearTimeout(this.noticeTimer)
+      const id = step.shown.id
+      this.noticeTimer = setTimeout(() => this.notice({ type: 'expire', id }), NOTICE_MS)
+      this.noticeTimer.unref?.()
     }
+    if (this.noticeState.current !== before) this.render()
+    return step
+  }
+
+  /** Rule (b): a user interaction ends the current notice for good. */
+  private supersedeNotice(): void {
+    this.notice({ type: 'supersede' })
+  }
+
+  private setPanel(panel: OverlayPanel | null, ms = 0): void {
+    // Round 28 (rule b): a panel of the user's own (a transform, a learned word) supersedes the clipboard notice.
+    if (panel && panel.kind !== 'clipboard-offer' && panel.kind !== 'clipboard')
+      this.supersedeNotice()
     if (this.panelTimer) clearTimeout(this.panelTimer)
     this.panelTimer = null
     // A standing clipboard offer comes back whenever no other panel is shown (it never times out).
@@ -2159,16 +2174,16 @@ export class DictationService {
       outcome.reason === 'typing-stopped-secure'
     const message = clipboardProblemMessage(problem, missing, reason, mayBeIn)
     if (delivered) {
-      this.setPanel(
-        {
+      this.notice({
+        type: 'report',
+        notice: {
           kind: 'clipboard',
           problem,
           ...(missing ? { missing } : {}),
           ...(reason ? { reason } : {}),
           delivered: true
-        },
-        NOTICE_MS
-      )
+        }
+      })
       return null
     }
     const resting = this.state.resting
@@ -2190,22 +2205,21 @@ export class DictationService {
     missing?: string[],
     record?: string
   ): void {
-    // Round 26 (Astra): a user's Restore request is completed exactly once, by this event or by its reply, whichever
-    // comes first (also one that timed out); a repeated event, or one after the reply, is consumed silently.
-    const request = record ? this.restoreRequests.get(record) : undefined
-    if (request) {
-      if (request.completed) {
-        this.deps.log(`clipboard: a Restore result already reported (${clipboard}); consumed`)
+    // Rule (a): a user's Restore request completes exactly once, by this event or by its reply, whichever comes
+    // first (also one that timed out); a repeated event, or one after the reply, is consumed.
+    if (record) {
+      const late = clipboardProblem(clipboard, undefined)
+      const step = this.notice({
+        type: 'recovered',
+        record,
+        notice: late ? { kind: 'clipboard', problem: late, ...(missing ? { missing } : {}) } : null
+      })
+      if (step.handled) {
+        this.deps.log(
+          `clipboard: a Restore result by its event: ${clipboard}${step.shown ? '' : ' (consumed)'}`
+        )
         return
       }
-      request.completed = true
-      const late = clipboardProblem(clipboard, undefined)
-      this.deps.log(`clipboard: a Restore result by its event: ${clipboard}`)
-      if (late) {
-        request.notice = { kind: 'clipboard', problem: late, ...(missing ? { missing } : {}) }
-        this.setPanel(request.notice, NOTICE_MS)
-      }
-      return
     }
     // Round 26 (Astra): an event that names neither a record nor a delivery (an older helper) never changes a
     // notice, whether or not a delivery has happened yet.
@@ -2229,11 +2243,15 @@ export class DictationService {
         : null
       this.render()
     }
-    if (this.panel?.kind === 'clipboard')
-      this.setPanel(
-        problem ? { kind: 'clipboard', problem, ...(missing ? { missing } : {}) } : null,
-        problem ? NOTICE_MS : 0
-      )
+    // A delivery's own notice still showing says what actually happened now (a new report, or none).
+    if (this.noticeState.current && this.noticeState.current.record === null) {
+      if (problem)
+        this.notice({
+          type: 'report',
+          notice: { kind: 'clipboard', problem, ...(missing ? { missing } : {}) }
+        })
+      else this.notice({ type: 'withdraw-report' })
+    }
     // A problem nobody was told about yet (a kept transaction left pending, a rollback that failed later):
     // the recovery card's warning line when that card shows, else the clipboard panel.
     else if (problem && !this.clipboardWarning) {
@@ -2245,7 +2263,10 @@ export class DictationService {
         }
         this.render()
       } else
-        this.setPanel({ kind: 'clipboard', problem, ...(missing ? { missing } : {}) }, NOTICE_MS)
+        this.notice({
+          type: 'report',
+          notice: { kind: 'clipboard', problem, ...(missing ? { missing } : {}) }
+        })
     }
   }
 

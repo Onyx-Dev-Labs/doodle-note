@@ -14,6 +14,8 @@ export interface OverlayView {
    * the user saw (absent on every other view).
    */
   offerRecord?: string
+  /** Windows (round 28): the offer's Restore is outstanding: its button reads "Restoring…" and cannot be clicked. */
+  restoring?: boolean
   mode: OverlayMode
   /** The dock edge, so the page can lay the resting and live pills out along it. */
   edge: PillEdge
@@ -528,6 +530,8 @@ export type OverlayPanel =
       confirmDelete?: boolean
       /** The helper could not delete the saved copy: the card stays, with a line saying so. */
       deleteFailed?: boolean
+      /** Round 28: its Restore is outstanding (Restore shows "Restoring…", disabled; Dismiss stays). */
+      pending?: boolean
     }
 
 /** "2 formats, 1.2 KB": an offer describes formats and size only, never content. */
@@ -615,7 +619,10 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
     case 'clipboard-offer': {
       const saved = describeClipboardSize(panel.offer.formats, panel.offer.bytes)
       // Round 24 (Opus): the buttons name the record this card shows (a click acts on no other).
-      const record = { offerRecord: panel.offer.record }
+      const record = {
+        offerRecord: panel.offer.record,
+        ...(panel.pending ? { restoring: true } : {})
+      }
       // Round 24 (Opus, the one rule at Restore): an incomplete offer with no user content cannot put anything back.
       const nothing = panel.offer.incomplete && panel.offer.content === 0
       if (panel.confirmDelete)
