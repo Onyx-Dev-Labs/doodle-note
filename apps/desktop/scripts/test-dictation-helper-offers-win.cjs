@@ -4009,6 +4009,102 @@ async function main() {
     )
   }
 
+  // 54. Round 36 (Astra P2): a PRIVACY-MARKED (memory-only) transaction whose deadline is found passed right after Begin
+  // (test hook) is refused at once while a recovery retry holds the recovery lock stalled inside it: its settlement takes
+  // no lock. ("deadline", nothing emptied; until round 35 Finish waited on that lock.)
+  {
+    await begin('54')
+    copyMulti(user)
+    await keptRecord('dictated text PV0')
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_EXPIRE_AFTER_BEGIN: '1' },
+      { gates: ['RETRY', 'SWEEP_RETRY', 'AFTER_BEGIN'] }
+    )
+    await a.ready
+    await atLine(a, 'the retry held before the lock', /test-trace: gate RETRY#1 waiting/)
+    const words = 'privacy marked ' + identity
+    const seeded = await a.req('__seed', {
+      items: [`#13|${u16(words)}`, 'Clipboard Viewer Ignore|-']
+    })
+    const before = contentSnapshot()
+    const reply = a.req('__clipboard-txn', { text: 'dictated text PV', holdMs: 300 })
+    await atLine(a, 'held right after Begin', /test-trace: gate AFTER_BEGIN#1 waiting/)
+    a.open('RETRY')
+    const inside = await atLine(
+      a,
+      'the retry stalled inside the lock',
+      /test-trace: gate SWEEP_RETRY#1 waiting/
+    )
+    const t1 = Date.now()
+    a.open('AFTER_BEGIN')
+    const live = await reply
+    const took = Date.now() - t1
+    const after = contentSnapshot()
+    a.open('SWEEP_RETRY')
+    await a.stop()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    for (const o of (listed && listed.offers) || [])
+      await h.req('clipboard-dismiss', { record: o.record })
+    await h.stop()
+    check(
+      'a privacy-marked transaction whose deadline passed after Begin is refused at once ("deadline") while a retry holds the recovery lock; nothing emptied (bytes and sequence)',
+      !!seeded &&
+        !!inside &&
+        !!live &&
+        live.result === 'deadline' &&
+        took < 2000 &&
+        JSON.stringify(after) === JSON.stringify(before) &&
+        a.logs.some((l) => /kept in memory only/.test(l)),
+      `${JSON.stringify(live)} ${took} ms after the gate; inside ${!!inside}`
+    )
+  }
+
+  // 55. Round 36 (Astra P3): the delivery's own kept-records check is BOUNDED. A retry holds the recovery lock, stalled
+  // inside it, before the delivery starts: the check cannot finish, so the paste is refused ("clipboard-busy") after the
+  // 5 s cap, nothing emptied.
+  {
+    await begin('55')
+    copyMulti(user)
+    await keptRecord('dictated text DB0')
+    copyMulti('the copy for case 55 ' + identity)
+    const before = contentSnapshot()
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['RETRY', 'SWEEP_RETRY'] })
+    await a.ready
+    await atLine(a, 'the retry held before the lock', /test-trace: gate RETRY#1 waiting/)
+    a.open('RETRY')
+    const inside = await atLine(
+      a,
+      'the retry stalled inside the lock',
+      /test-trace: gate SWEEP_RETRY#1 waiting/
+    )
+    const t0 = Date.now()
+    const live = await a.req('__clipboard-txn', { text: 'dictated text DB', holdMs: 300 })
+    const took = Date.now() - t0
+    const after = contentSnapshot()
+    a.open('SWEEP_RETRY')
+    await a.stop()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    for (const o of (listed && listed.offers) || [])
+      await h.req('clipboard-dismiss', { record: o.record })
+    await h.stop()
+    check(
+      'the delivery\'s kept-records check is bounded: the recovery lock held by a stalled retry, the paste is refused ("clipboard-busy") after about 5 s, nothing emptied (bytes and sequence)',
+      !!inside &&
+        !!live &&
+        live.result === 'clipboard-busy' &&
+        took >= 4500 &&
+        took < 8000 &&
+        JSON.stringify(after) === JSON.stringify(before) &&
+        a.logs.some((l) => /the kept-records check before the paste did not finish/.test(l)),
+      `${JSON.stringify(live)} in ${took} ms; inside ${!!inside}`
+    )
+  }
+
   // 47. Round 33 (b, f): the payload not on disk in time: the write is NOT established (no record, no paste: "no-record")
   // within the total bound (BeginDeadlineMs, 2 s), the clipboard untouched (bytes and sequence); the late payload
   // writer publishes nothing.
