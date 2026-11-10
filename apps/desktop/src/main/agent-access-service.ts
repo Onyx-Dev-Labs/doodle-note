@@ -196,12 +196,13 @@ export function createTemporaryBeside(target: string, mode: number): { path: str
 /**
  * Removes the temporary file at `path`, a name this write created itself with an
  * exclusive create (createTemporaryBeside), by that name: one attempt (round 14:
- * no retry), and the file is not identified again first. So a same-user process
- * that replaces the file under that random name in the interval (moves ours
- * aside and creates its own there) would have its file removed, and before the
- * rename, its file would be the one renamed over the config: a disclosed
- * residual. A failure is not reported (the write's own result stands): the file
- * then remains, `.dn-<8 hex>.tmp` in the config's folder.
+ * no retry), and the file is not identified again first. So a process that can
+ * write to the config's folder (normally only the same user) and replaces the
+ * file under that random name in the interval (moves ours aside and creates its
+ * own there) would have its file removed, and before the rename, its file would
+ * be the one renamed over (for a new macOS config, linked as) the config: a
+ * disclosed residual. A failure is not reported (the write's own result
+ * stands): the file then remains, `.dn-<8 hex>.tmp` in the config's folder.
  */
 function removeOwnTemporary(path: string): void {
   try {
@@ -275,9 +276,11 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
 /**
  * Every other platform (macOS): the base's write (win/bark 9355b87 wrote in
  * place with writeFileSync) with one change, the one disclosed for macOS: the
- * text goes to a temporary file beside the target and is renamed over it, so an
- * app crash never leaves a half-written config (there is no fsync before the
- * rename, so a power loss or a kernel panic still can). Everything else is the base's: no
+ * text goes to a temporary file beside the target and is renamed over it, so on
+ * the atomic path an app crash never leaves a half-written config (the retained
+ * in-place fallback below, the base's write, can still leave it empty or cut
+ * short if the app is killed mid-write; and there is no fsync before the rename,
+ * so a power loss or a kernel panic still can). Everything else is the base's: no
  * re-read before the write (the base wrote blind), the original's permission
  * bits kept (writeFileSync kept them), a new file created with the default mode
  * (0666 less the umask, as writeFileSync did), and a symbolic link followed, even
@@ -314,8 +317,9 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * is retried with a fresh one, then the base's write decides), and only a name
  * this write created is removed, never one that was taken (round 12); the removal
  * is by name, one attempt, without identifying the file again (removeOwnTemporary:
- * a same-user process that replaces the file under that name meanwhile is the
- * disclosed residual, round 14).
+ * a process that can write to the config's folder (normally only the same user)
+ * and replaces the file under that name meanwhile is the disclosed residual,
+ * round 14).
  *
  * What remains (the concurrency contract, tested where it can be): a change to
  * the file's mode bits made in the interval between the last fstat (the

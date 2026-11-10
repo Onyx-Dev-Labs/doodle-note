@@ -648,9 +648,10 @@ one attempt (round 14: round 13's retry of a refused removal is reverted, since 
 removed the same name again without knowing it still held our file). It removes
 the temporary file by its name, a name this write created itself with an
 exclusive create, and does not identify the file again first. **Residual
-(disclosed):** a same-user process that replaces the file under that random name
-in the interval (moves ours aside and creates its own there) would have its file
-removed, or, before the rename, renamed over the config.
+(disclosed):** a process that can write to the config's folder (normally only
+the same user) and replaces the file under that random name in the interval
+(moves ours aside and creates its own there) would have its file removed, or,
+before the rename, renamed over (for a new macOS config, linked as) the config.
 
 Those rules, and the strict Codex reading (a `config.toml` the TOML 1.0 statement
 scanner cannot read is refused and left unchanged; every definition of our server
@@ -661,8 +662,10 @@ Windows) keeps the code of win/bark 9355b87 (`src/main/mcp-clients-logic-base.ts
 pinned by SHA-256) with one change: the write is a temporary file renamed over
 the config, in the file the base's `writeFileSync` wrote (the same resolution;
 where it cannot be determined, or the place holds no file, the base's in-place
-write). So an app crash never leaves a half-written config; there is no `fsync`
-before the rename, so a power loss or a kernel panic still can. Kept from the
+write). So on the atomic path an app crash never leaves a half-written config
+(the retained in-place fallback, the base's write, can still leave it empty or
+cut short if the app is killed mid-write); there is no `fsync` before the
+rename, so a power loss or a kernel panic still can. Kept from the
 base on purpose (for the owner to decide, a separate change): an existing config
 that cannot be read (mode 0200, or `EIO` on the read) is taken for no config,
 and Connect rewrites it with only our server (its other entries are lost);
@@ -713,7 +716,7 @@ one reported and classified; before, the close's error replaced it, and a close
 reporting a code of the fallback's kind (`EACCES` or `EPERM`, possible only as a
 deferred error on a network volume) sent a full disk to the in-place write,
 which emptied the config. A close that fails with no earlier error is reported
-as itself and classified like any other failure (both writers). It fails, for example, when the
+as itself (darwin: classified like any other failure; Windows: thrown). It fails, for example, when the
 folder is made read-only between the temporary file and the rename (the in-place
 write still succeeds) or, for a new file, the link (`EACCES`, as the base's
 create). `src/main/agent-access-darwin.test.ts` compares a darwin service
