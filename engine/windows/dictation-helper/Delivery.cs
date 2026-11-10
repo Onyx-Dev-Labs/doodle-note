@@ -491,6 +491,8 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>Wall-clock bound for our clipboard write (open, empty, set, close) on its own thread.</summary>
         const int WriteBudgetMs = 1000;
+        /// <summary>Round 36: the most a delivery waits for its own kept-records check (when its deadline allows that long).</summary>
+        const int DeliveryRecoveryCapMs = 5000;
 
         static DeliveryResult Paste(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, Func<bool> stillInTime, out string clipboardAfterFailedWrite, out string holdsAfterFailedWrite, out ClipboardText.LateWrite lateWrite)
         {
@@ -545,8 +547,16 @@ namespace DoodleNote.DictationHelper
             saved = null;
             // Round 22: without the helper's own window nothing is opened at all (no save, no write): not pasting.
             if (Ui.ClipboardWindow == IntPtr.Zero) { Wire.Log("the helper has no clipboard window; not pasting (nothing opened)"); deliveryNoSave = "no-window"; return "no-save"; }
-            // An earlier transaction that could not be put back gets its chance first (before our write).
-            PendingClipboard.RecoverLeftover("delivery");
+            // An earlier transaction that could not be put back gets its chance first (before our write). Round 36 (Astra
+            // P3): bounded (the recovery lock and its file work cannot be bounded in place): not done while the delivery
+            // still fits (and at most 5 s), the paste is refused with nothing emptied.
+            if (!PendingClipboard.RecoverLeftoverBounded("delivery", stillInTime, DeliveryRecoveryCapMs))
+            {
+                bool pastDeadline = stillInTime != null && !stillInTime();
+                Wire.Log("the kept-records check before the paste did not finish " + (pastDeadline ? "within the delivery's deadline" : "within " + DeliveryRecoveryCapMs + " ms") + " (the recovery lock busy, or a slow disk); not pasting (nothing emptied)");
+                deliveryNoSave = pastDeadline ? "deadline" : "clipboard-busy";
+                return deliveryNoSave;
+            }
             // That check can take a while with several kept records (each opens the clipboard): the paste starts only if it
             // still fits the delivery's deadline (otherwise nothing of the user's is touched; the typing fallback decides).
             if (stillInTime != null && !stillInTime()) { Wire.Log("the paste no longer fits the deadline after the kept-records check; not pasting"); deliveryNoSave = "deadline"; return "deadline"; }
@@ -603,7 +613,10 @@ namespace DoodleNote.DictationHelper
                 deliveryNoSave = PendingClipboard.LastBeginFailure == "deadline" ? "deadline" : "no-record";
                 return deliveryNoSave;
             }
-            if (stillInTime != null && !stillInTime())
+            // Test build only (round 36): held right after Begin, and the deadline taken as passed (the privacy-marked,
+            // memory-only path's refusal must not wait on the recovery lock).
+            TestMode.Gate("AFTER_BEGIN");
+            if ((stillInTime != null && !stillInTime()) || TestMode.Env("DICTATION_HELPER_TEST_EXPIRE_AFTER_BEGIN") == "1")
             {
                 Wire.Log("the paste no longer fits the deadline after its record was written down; not pasting (nothing emptied)");
                 PendingClipboard.Finish(record, "untouched");

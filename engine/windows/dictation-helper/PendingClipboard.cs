@@ -232,7 +232,11 @@ namespace DoodleNote.DictationHelper
                     using (other)
                     {
                         string name;
-                        try { name = other.ProcessName; } catch (Exception) { continue; }
+                        // Round 36 (Astra P3): a process that exited meanwhile is not running; any other failure is unknown,
+                        // and unknown keeps the leftovers (the sweep is skipped).
+                        try { name = other.ProcessName; }
+                        catch (InvalidOperationException) { continue; }
+                        catch (Exception) { return true; }
                         if (other.Id != self && name.StartsWith("dictation-helper", StringComparison.OrdinalIgnoreCase)) return true;
                     }
                 }
@@ -671,7 +675,7 @@ namespace DoodleNote.DictationHelper
                 // on the journal writer, after the clipboard is closed (never inside an open, never holding up the reply);
                 // the record stays in flight until then. A crash in that wider interval leaves a record judged by content
                 // (already there: deleted; else a spurious offer, never a loss). It leaves in-flight whatever happens.
-                if (!record.Persisted) { lock (gate) inFlight.Remove(record.Id); return; }
+                if (!record.Persisted) { inFlight.Remove(record.Id); return; } // round 36: no lock (a memory-only record)
                 record.Stage = "settled";
                 string json = StateJson(record);
                 EnqueueJournal(delegate
@@ -683,7 +687,7 @@ namespace DoodleNote.DictationHelper
                         if (!settledBefore && !WriteSnapshot(record.Id, json, "settled", true)) Wire.Log("the settled stage could not be journaled; deleting anyway");
                         Delete(record, "restore ran (" + restoreResult + ")");
                     }
-                    finally { lock (gate) inFlight.Remove(record.Id); }
+                    finally { inFlight.Remove(record.Id); }
                 });
                 return;
             }
@@ -695,7 +699,7 @@ namespace DoodleNote.DictationHelper
             if (record.Persisted) QueueSnapshot(record, true, delegate { lock (gate) { inFlight.Remove(record.Id); ScheduleRetry(record.Id, RetryKind.Failed); } });
             else
             {
-                lock (gate) inFlight.Remove(record.Id);
+                inFlight.Remove(record.Id); // round 36 (Astra P2): no lock on a memory-only record's path
                 Wire.Log("the restore failed and the saved clipboard was memory-only (privacy marker): it cannot be retried later");
             }
         }
@@ -1801,10 +1805,36 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         internal static bool UnchangedSinceCapture(RecordFacts facts, ClipboardView view, LogonMatch match)
         {
-            return facts.Stage == "emptying" && facts.SequenceAtStage != 0 && view != null && !view.Incomplete
+            return UnchangedSinceCapture(facts, view, match, bootId, windowStation);
+        }
+
+        /// <summary>The same rule with this boot's id and window station given (the logic tests isolate every guard).</summary>
+        internal static bool UnchangedSinceCapture(RecordFacts facts, ClipboardView view, LogonMatch match, string currentBoot, string currentStation)
+        {
+            return facts != null && facts.Stage == "emptying" && facts.SequenceAtStage != 0 && view != null && !view.Incomplete
                 && view.Sequence != 0 && view.Sequence == facts.SequenceAtStage
-                && match == LogonMatch.Same && facts.BootId.Length > 0 && facts.BootId == bootId
-                && facts.WindowStation.Length > 0 && facts.WindowStation == windowStation;
+                && match == LogonMatch.Same && facts.BootId.Length > 0 && facts.BootId == currentBoot
+                && facts.WindowStation.Length > 0 && facts.WindowStation == currentStation;
+        }
+
+        /// <summary>
+        /// Round 36 (Astra P3): the delivery's own kept-records check, BOUNDED. It runs on its own thread (it takes the
+        /// recovery lock and does file and clipboard work, neither of which can be bounded in place); the delivery waits for
+        /// it while `stillInTime` holds and at most capMs. Not done by then: false, and the paste is refused (nothing
+        /// emptied); the check finishes on its own (it never writes the clipboard: round 18).
+        /// </summary>
+        public static bool RecoverLeftoverBounded(string why, Func<bool> stillInTime, int capMs)
+        {
+            Thread check = new Thread(delegate () { try { RecoverLeftover(why); } catch (Exception) { } });
+            check.IsBackground = true;
+            check.Name = "kept-records-check";
+            check.Start();
+            Stopwatch waited = Stopwatch.StartNew();
+            for (;;)
+            {
+                if (check.Join(50)) return true;
+                if ((stillInTime != null && !stillInTime()) || waited.ElapsedMilliseconds >= capMs) return false;
+            }
         }
 
         /// <summary>This boot's id (the logic tests).</summary>
