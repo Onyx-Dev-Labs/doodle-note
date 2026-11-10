@@ -270,7 +270,9 @@ namespace DoodleNote.DictationHelper
                 }
                 byte[] sealedBytes = ProtectedData.Protect(plain.ToArray(), Entropy, DataProtectionScope.CurrentUser);
                 File.WriteAllBytes(tmp, sealedBytes);
-                TestMode.Stall("PAYLOAD_DELAY_MS", TestPayloadDelayMs); // test build only: a slow disk / AV scan
+                // A slow disk / AV scan: set by the test build's hook, or directly by the logic tests (which are not a
+                // DICTATION_TEST build, so not through TestMode.Stall); always 0 in a release build.
+                if (TestPayloadDelayMs > 0) { TestMode.Trace("stall PAYLOAD_DELAY_MS " + TestPayloadDelayMs + " ms"); Thread.Sleep(TestPayloadDelayMs); }
                 // Publication and settlement exclude each other: a settled record is never published.
                 lock (record.Gate)
                 {
@@ -664,6 +666,8 @@ namespace DoodleNote.DictationHelper
 
         static void RetryOne(string id)
         {
+            // Test build only (round 31): a retry can be held until the harness has made its change (the order fixed).
+            TestMode.Gate("RETRY");
             lock (gate)
             {
                 // Never while a delivery of ours is in flight (our write may be on the clipboard): wait, not consumed.

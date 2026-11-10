@@ -51,13 +51,16 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>
         /// Round 30: a test-hook stall, announced first ("test-trace: stall NAME"), so the harness kills or acts once the
-        /// helper is inside it. A no-op for 0 (always in a release build: Int answers the fallback there).
+        /// helper is inside it. A no-op for 0. Round 31: the body is compiled into the test build only, so a release build
+        /// cannot stall here whatever its callers pass (they pass 0 there anyway: Int answers the fallback).
         /// </summary>
         public static void Stall(string hook, int ms)
         {
+#if DICTATION_TEST
             if (ms <= 0) return;
             Trace("stall " + hook + " " + ms + " ms");
             Thread.Sleep(ms);
+#endif
         }
 
 #if DICTATION_TEST
