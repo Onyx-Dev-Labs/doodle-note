@@ -3,7 +3,10 @@
 // clipboard-restore and clipboard-dismiss (round 12 compiled them out), and a kept record must round-trip
 // through them. Kept records are made the way a crash makes them: the test-ops build (same sources, with
 // test hooks) runs one clipboard transaction (the __clipboard-txn op) and is ended at a journaled stage.
-// No window, no input: only the clipboard, through user32 (koffi). Run on Windows (CI):
+// No window, no input: only the clipboard, through user32 (koffi). Round 30: every case starts from a verified clean
+// state, acts on what the helper says it reached (test-build trace lines and gates, holders and file locks that signal
+// when they hold), never on a timed guess, and a failed check prints its case's helper logs and every record file.
+// Run on Windows (CI):
 //   node scripts/test-dictation-helper-offers-win.cjs <release dictation-helper.exe> <dictation-helper-testops.exe>
 const { spawn } = require('node:child_process')
 const crypto = require('node:crypto')
@@ -326,8 +329,118 @@ function replayAll() {
   return items.length
 }
 
-/** Another process adds a format WITHOUT emptying and then keeps the clipboard open for ms (a monitor holding it). */
-function holdAfterAdding(ms) {
+// ---- round 30: every process this harness starts, the case frame, and what a failed check prints ----
+// CI run 42842819157 (attempt 1) failed 11 checks that the log could not explain: no helper log, no record listing, and
+// waits that guessed how long the helper needed. Now: every child is tracked; every case starts from a verified clean
+// state (every earlier process exited, no record file left) and waits for what the helper REACHED (its own lines, the
+// record files, a signal from a holder), with a deadline; a failed check prints the case's helper logs and every file.
+const spawned = []
+const tracked = (child, label) => {
+  spawned.push({ child, label })
+  return child
+}
+const alive = (child) => child.exitCode === null && child.signalCode === null
+const running = () => spawned.filter((s) => alive(s.child))
+const until = async (predicate, ms = 15000, step = 25) => {
+  const end = Date.now() + ms
+  for (;;) {
+    if (predicate()) return true
+    if (Date.now() >= end) return false
+    await sleep(step)
+  }
+}
+const gateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-ci-gates-'))
+let gateFolders = 0
+let helperCount = 0
+let frame = { label: '(before the first case)', helpers: [], dumped: false }
+const dirtyAfter = []
+let casesBegun = 0
+/** Every file of this run's identity in %TEMP% (any suffix: .bin, .state and their .tmp). */
+const prefixFiles = () => fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith(recordPrefix))
+const listing = () =>
+  prefixFiles()
+    .map((f) => {
+      const full = path.join(os.tmpdir(), f)
+      let facts = ''
+      try {
+        const st = fs.statSync(full)
+        facts = `${st.size} bytes, written ${(Date.now() - st.mtimeMs) | 0} ms ago`
+        if (f.endsWith('.state')) {
+          const state = JSON.parse(fs.readFileSync(full, 'utf8'))
+          facts += `, stage ${state.stage}, offerOnly ${state.offerOnly}, session ${state.session}`
+        }
+      } catch (error) {
+        facts += ` (${error.code || error.message})`
+      }
+      return `${f.slice(recordPrefix.length)} [${facts}]`
+    })
+    .join('; ') || '(none)'
+function diagnose(name) {
+  console.log(`# --- diagnostics for "${name}" (case ${frame.label}) ---`)
+  console.log(`# record files now: ${listing()}`)
+  if (frame.dumped) {
+    console.log('# (the helper logs of this case are printed above)')
+    return
+  }
+  frame.dumped = true
+  for (const h of frame.helpers) {
+    const state = alive(h.child)
+      ? 'running'
+      : `exited (code ${h.child.exitCode}, signal ${h.child.signalCode})`
+    console.log(
+      `# helper ${h.n} ${h.kind}${h.hooks ? ` [${h.hooks}]` : ''} pid ${h.child.pid}, ${state}: ${h.logs.length} log line(s), ${h.events.length} event(s)`
+    )
+    const lines =
+      h.logs.length > 90
+        ? [...h.logs.slice(0, 30), `(${h.logs.length - 90} lines omitted)`, ...h.logs.slice(-60)]
+        : h.logs
+    for (const l of lines) console.log(`#   | ${l}`)
+    for (const e of h.events.slice(-12)) console.log(`#   event ${JSON.stringify(e)}`)
+  }
+}
+/**
+ * A case begins: everything the cases before it started has exited (within 20 s), and no file of this identity is
+ * left. Anything else is a failed check of THE CASE BEFORE (its logs and the files printed), then cleared so one
+ * leftover can never fail the cases after it (run 42842819157: one stray .state.tmp failed five later checks).
+ */
+async function begin(label) {
+  const before = frame.label
+  await until(() => running().length === 0, 20000, 50)
+  const still = running()
+  const left = prefixFiles()
+  if (still.length || left.length) {
+    dirtyAfter.push(before)
+    check(
+      `the case before "${label}" (${before}) ended clean: every process it started exited, no record file left`,
+      false,
+      `still running: ${still.map((s) => `${s.label} pid ${s.child.pid}`).join(', ') || 'none'}; files: ${listing()}`
+    )
+    for (const s of still) s.child.kill()
+    await until(() => running().length === 0, 10000, 50)
+    for (const f of left) fs.rmSync(path.join(os.tmpdir(), f), { force: true })
+  }
+  casesBegun++
+  frame = { label, helpers: [], dumped: false }
+}
+/** A precondition the case needs: reached within its deadline, or a failed check that says which (with diagnostics). */
+async function reach(what, predicate, ms = 15000) {
+  const ok = await until(predicate, ms)
+  if (!ok) check(`${frame.label}: reached ${what}`, false, `not within ${ms} ms`)
+  return ok
+}
+
+/**
+ * Another process adds a format WITHOUT emptying and then keeps the clipboard open (a monitor holding it) until it is
+ * told to close. Round 30: it SAYS when it holds (no timed guess) and closes on request.
+ */
+function holdAfterAdding() {
+  return holder(true)
+}
+/** Another process opens the clipboard (no change) and holds it until told; it then adds a format and closes. */
+function holdThenAdd() {
+  return holder(false)
+}
+function holder(addFirst) {
   const code = `
 const koffi = require(${JSON.stringify(require.resolve('koffi'))})
 const user32 = koffi.load('user32.dll'), kernel32 = koffi.load('kernel32.dll')
@@ -343,59 +456,84 @@ const block = (t) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0
 // Round 22 (Opus): this process opens with a window of its own too (a NULL-window open can be taken over).
 const CreateWindowExW = user32.func('void* __stdcall CreateWindowExW(uint32 ex, str16 cls, str16 name, uint32 style, int x, int y, int w, int h, void* parent, void* menu, void* inst, void* param)')
 const own = CreateWindowExW(0, 'STATIC', 'DoodleNote CI holder', 0, 0, 0, 0, 0, null, null, null, null)
-if (!own) { console.error('the holder window could not be created'); process.exit(3) } // round 23: never a NULL open
-let opened = false
-for (let i = 0; i < 150 && !(opened = OpenClipboard(own)); i++) block(20)
-if (opened) {
+if (!own) { console.log('the holder window could not be created'); process.exit(3) } // round 23: never a NULL open
+const add = () => {
   const bytes = Buffer.from('held')
   const g = GlobalAlloc(2, bytes.length); const p = GlobalLock(g); RtlMoveMemory(p, bytes, bytes.length); GlobalUnlock(g)
-  SetClipboardData(RegisterClipboardFormatW('DoodleNote.CI.Held'), g)
-  block(${ms})
+  return SetClipboardData(RegisterClipboardFormatW('DoodleNote.CI.Held'), g) !== null
+}
+let opened = false
+for (let i = 0; i < 150 && !(opened = OpenClipboard(own)); i++) block(20)
+if (!opened) { console.log('not opened'); process.exit(4) }
+const added = ${addFirst ? 'add()' : 'true'}
+console.log(added ? 'held' : 'held, but the format was not added')
+process.stdin.once('data', () => {
+  const late = ${addFirst ? 'true' : 'add()'}
   CloseClipboard()
-}
+  console.log(late ? 'closed' : 'closed, but the format was not added')
+  process.exit(0)
+})
 `
-  return spawn(process.execPath, ['-e', code], { stdio: 'ignore' })
+  const child = tracked(
+    spawn(process.execPath, ['-e', code], { stdio: ['pipe', 'pipe', 'ignore'] }),
+    'a clipboard holder'
+  )
+  let out = ''
+  child.stdout.setEncoding('utf8')
+  child.stdout.on('data', (c) => (out += c))
+  return {
+    child,
+    /** True once it holds the clipboard (with its format added first, for holdAfterAdding). */
+    held: until(() => /^held$/m.test(out) || !alive(child), 20000).then(() => /^held$/m.test(out)),
+    /** Close it (adding its format first, for holdThenAdd), and wait for its exit. */
+    release: async () => {
+      if (alive(child)) child.stdin.write('go\n')
+      await waitExit(child)
+      return /^closed$/m.test(out)
+    },
+    output: () => out.trim()
+  }
 }
-/** Another process opens the clipboard (no change), holds it ms, then adds a format and closes. */
-function holdThenAdd(ms) {
+/**
+ * Another process holds a file open (as an AV scan or an indexer can): by default with no sharing; `share: 'read'`
+ * lets others read it (not delete it). Round 30: through CreateFileW in a child that SAYS when it holds the handle
+ * (run 42842819157: the PowerShell lock was not up after a fixed 900 ms), released on request.
+ */
+function lockFile(file, { share = 'none' } = {}) {
   const code = `
 const koffi = require(${JSON.stringify(require.resolve('koffi'))})
-const user32 = koffi.load('user32.dll'), kernel32 = koffi.load('kernel32.dll')
-const OpenClipboard = user32.func('bool __stdcall OpenClipboard(void* h)')
-const CloseClipboard = user32.func('bool __stdcall CloseClipboard()')
-const SetClipboardData = user32.func('void* __stdcall SetClipboardData(uint32 f, void* h)')
-const RegisterClipboardFormatW = user32.func('uint32 __stdcall RegisterClipboardFormatW(str16 n)')
-const GlobalAlloc = kernel32.func('void* __stdcall GlobalAlloc(uint32 f, uintptr n)')
-const GlobalLock = kernel32.func('void* __stdcall GlobalLock(void* h)')
-const GlobalUnlock = kernel32.func('bool __stdcall GlobalUnlock(void* h)')
-const RtlMoveMemory = kernel32.func('void __stdcall RtlMoveMemory(void* dst, const uint8_t* src, uintptr n)')
-const block = (t) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, t)
-// Round 22 (Opus): this process opens with a window of its own too (a NULL-window open can be taken over).
-const CreateWindowExW = user32.func('void* __stdcall CreateWindowExW(uint32 ex, str16 cls, str16 name, uint32 style, int x, int y, int w, int h, void* parent, void* menu, void* inst, void* param)')
-const own = CreateWindowExW(0, 'STATIC', 'DoodleNote CI holder', 0, 0, 0, 0, 0, null, null, null, null)
-if (!own) { console.error('the holder window could not be created'); process.exit(3) } // round 23: never a NULL open
-let opened = false
-for (let i = 0; i < 150 && !(opened = OpenClipboard(own)); i++) block(20)
-if (opened) {
-  block(${ms})
-  const bytes = Buffer.from('held')
-  const g = GlobalAlloc(2, bytes.length); const p = GlobalLock(g); RtlMoveMemory(p, bytes, bytes.length); GlobalUnlock(g)
-  SetClipboardData(RegisterClipboardFormatW('DoodleNote.CI.Held'), g)
-  CloseClipboard()
-}
+const kernel32 = koffi.load('kernel32.dll')
+const CreateFileW = kernel32.func('intptr __stdcall CreateFileW(str16 name, uint32 access, uint32 share, void* sa, uint32 disposition, uint32 flags, void* template)')
+const CloseHandle = kernel32.func('bool __stdcall CloseHandle(intptr h)')
+const GetLastError = kernel32.func('uint32 __stdcall GetLastError()')
+const h = CreateFileW(process.env.DN_LOCK, ${share === 'read' ? '0x80000000' : '0xC0000000'}, ${share === 'read' ? 1 : 0}, null, 3, 0x80, null)
+if (Number(h) === -1 || Number(h) === 0) { console.log('lock failed: error ' + GetLastError()); process.exit(3) }
+console.log('locked')
+process.stdin.once('data', () => { CloseHandle(h); console.log('released'); process.exit(0) })
 `
-  return spawn(process.execPath, ['-e', code], { stdio: 'ignore' })
+  const child = tracked(
+    spawn(process.execPath, ['-e', code], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+      env: { ...process.env, DN_LOCK: file }
+    }),
+    `a file lock on ${path.basename(file).slice(recordPrefix.length)}`
+  )
+  let out = ''
+  child.stdout.setEncoding('utf8')
+  child.stdout.on('data', (c) => (out += c))
+  return {
+    child,
+    locked: until(() => /^locked$/m.test(out) || !alive(child), 20000).then(() =>
+      /^locked$/m.test(out)
+    ),
+    release: async () => {
+      if (alive(child)) child.stdin.write('go\n')
+      await waitExit(child)
+    },
+    output: () => out.trim()
+  }
 }
-/** Another process holds a file open with no sharing for ms (as an AV scan or an indexer can). */
-function lockFile(file, ms) {
-  const script = `$f = [System.IO.File]::Open($env:DN_LOCK, 'Open', 'ReadWrite', 'None'); Start-Sleep -Milliseconds ${ms}; $f.Close()`
-  return spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    stdio: 'ignore',
-    env: { ...process.env, DN_LOCK: file }
-  })
-}
-const waitExit = (child) =>
-  new Promise((r) => (child.exitCode !== null ? r() : child.on('exit', r)))
+const waitExit = (child) => new Promise((r) => (!alive(child) ? r() : child.once('exit', r)))
 
 // ---- helpers ----
 const identity = `qa.ci-offers-${crypto.randomBytes(4).toString('hex')}`
@@ -409,30 +547,56 @@ const recordFiles = () =>
         f.startsWith(recordPrefix) &&
         /^[0-9a-f]{32}\.(bin|state)$/.test(f.slice(recordPrefix.length))
     )
-const stages = () =>
-  recordFiles()
-    .filter((f) => f.endsWith('.state'))
-    .map((f) => {
-      try {
-        return JSON.parse(fs.readFileSync(path.join(os.tmpdir(), f), 'utf8')).stage
-      } catch {
-        return '?'
-      }
-    })
-function start(exe, env = {}) {
+const recordIds = () => [
+  ...new Set(recordFiles().map((f) => f.slice(recordPrefix.length, recordPrefix.length + 32)))
+]
+/** The journaled stage of ONE record (round 30: never "some record's", see keptRecord). */
+const stageOf = (id) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(os.tmpdir(), `${recordPrefix}${id}.state`), 'utf8'))
+      .stage
+  } catch {
+    return null
+  }
+}
+/**
+ * A helper process. Round 30: a test-ops helper gets a write budget of 60 s unless the case asks for the real one
+ * (`realBudget`): only the late-path cases are about the budget, and they force it (gates), so no other case's outcome
+ * depends on how fast the runner is (attempt 1 of run 42842819157: a write past 1 s turned two cases into the late
+ * path). `gates` enables named gates (TestMode.Gate): h.open(name) lets the helper pass the next one.
+ */
+function start(exe, env = {}, { gates = [], realBudget = false } = {}) {
+  const extra = {}
+  if (exe === testops && !realBudget && env.DICTATION_HELPER_TEST_WRITE_BUDGET_MS === undefined)
+    extra.DICTATION_HELPER_TEST_WRITE_BUDGET_MS = '60000'
+  let gateDir = null
+  if (gates.length) {
+    gateDir = path.join(gateRoot, String(++gateFolders))
+    fs.mkdirSync(gateDir)
+    extra.DICTATION_HELPER_TEST_GATE_DIR = gateDir
+    extra.DICTATION_HELPER_TEST_GATES = gates.join(',')
+  }
   const child = spawn(exe, [], {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
-    env: { ...process.env, DICTATION_HELPER_IDENTITY: identity, ...env }
+    env: { ...process.env, DICTATION_HELPER_IDENTITY: identity, ...env, ...extra }
   })
+  const kind = exe === testops ? 'test-ops' : 'release'
+  tracked(child, `${kind} helper ${helperCount + 1}`)
   const events = []
   const logs = []
   const waiting = new Map()
   let buffer = ''
+  let errBuffer = ''
   let seq = 1
   child.stdout.setEncoding('utf8')
   child.stderr.setEncoding('utf8')
-  child.stderr.on('data', (c) => logs.push(...c.split('\n').filter((l) => l.trim())))
+  child.stderr.on('data', (c) => {
+    errBuffer += c
+    const lines = errBuffer.split('\n')
+    errBuffer = lines.pop()
+    logs.push(...lines.map((l) => l.replace(/\r$/, '')).filter((l) => l.trim()))
+  })
   child.stdout.on('data', (c) => {
     buffer += c
     for (let i = buffer.indexOf('\n'); i !== -1; i = buffer.indexOf('\n')) {
@@ -455,64 +619,125 @@ function start(exe, env = {}) {
       })
     })
   }
-  const ready = new Promise((resolve) => {
-    const t = setInterval(() => {
-      if (events.some((e) => e.event === 'ready')) {
-        clearInterval(t)
-        resolve(true)
-      }
-    }, 20)
-    setTimeout(() => {
-      clearInterval(t)
-      resolve(false)
-    }, 15000)
-  })
-  return {
+  const ready = until(
+    () => events.some((e) => e.event === 'ready') || !alive(child),
+    15000,
+    20
+  ).then(() => events.some((e) => e.event === 'ready'))
+  const uses = {}
+  const open = (name) => {
+    if (!gateDir) throw new Error(`no gates on this helper (${name})`)
+    uses[name] = (uses[name] || 0) + 1
+    fs.writeFileSync(path.join(gateDir, `${name}-${uses[name]}`), '')
+  }
+  /** Every gate passable from here on (a helper that is stopped never waits at one). */
+  const openAll = () => {
+    if (!gateDir) return
+    for (const name of gates)
+      for (let n = (uses[name] || 0) + 1; n <= (uses[name] || 0) + 50; n++)
+        fs.writeFileSync(path.join(gateDir, `${name}-${n}`), '')
+  }
+  const h = {
+    n: ++helperCount,
+    kind,
+    hooks: [
+      ...Object.entries(env)
+        .filter(([k]) => k !== 'DICTATION_HELPER_TEST')
+        .map(([k, v]) => `${k.replace(/^DICTATION_HELPER_TEST_/, '')}=${v}`),
+      ...(gates.length ? [`gates ${gates.join(',')}`] : []),
+      ...(extra.DICTATION_HELPER_TEST_WRITE_BUDGET_MS ? ['write budget 60 s'] : [])
+    ].join(', '),
     child,
     events,
     logs,
     req,
     ready,
+    open,
+    /**
+     * The first log line from index `since` on that matches, within the deadline (null if none: the helper never got
+     * there, or exited first). Test-ops lines "test-trace: ..." mark where it is (TestMode.Trace, Stall, Gate).
+     */
+    waitLog: async (re, { since = 0, ms = 20000 } = {}) => {
+      const find = () => logs.slice(since).find((l) => re.test(l))
+      await until(() => !!find() || !alive(child), ms)
+      return find() || null
+    },
+    waitEvent: async (predicate, ms = 20000) => {
+      await until(() => events.some(predicate) || !alive(child), ms)
+      return events.find(predicate) || null
+    },
     // Killed and its exit OBSERVED (round 19): a restarted helper never runs beside it.
+    // Never opens a gate first: a crash case kills it exactly where it waits.
     kill: async () => {
       child.kill()
-      const exited = await new Promise((r) => {
-        if (child.exitCode !== null || child.signalCode !== null) return r(true)
-        const t = setTimeout(() => r(false), 10000)
-        child.once('exit', () => {
-          clearTimeout(t)
-          r(true)
-        })
-      })
-      if (!exited) console.log('# a helper did not exit within 10 s of its kill')
+      const exited = await until(() => !alive(child), 10000)
+      if (!exited) console.log(`# helper ${h.n} did not exit within 10 s of its kill`)
       return exited
     },
     stop: async () => {
+      openAll()
       child.stdin.end()
-      await new Promise((r) => {
-        child.on('exit', r)
-        setTimeout(r, 8000)
-      })
+      const exited = await until(() => !alive(child), 20000)
+      if (!exited) console.log(`# helper ${h.n} did not exit within 20 s of its input closing`)
+      return exited
     }
   }
+  frame.helpers.push(h)
+  return h
 }
-async function waitStage(name) {
-  for (let i = 0; i < 200 && !stages().includes(name); i++) await sleep(50)
-  return stages().includes(name)
+/** Round 30: the helper reached a point (its line, within the deadline), or a failed check says it did not. */
+async function atLine(h, what, re, opts = {}) {
+  const line = await h.waitLog(re, opts)
+  if (!line)
+    check(
+      `${frame.label}: reached ${what}`,
+      false,
+      `no line matching ${re} within ${opts.ms || 20000} ms`
+    )
+  return line
 }
-/** A kept, not provably ours record: the test-ops transaction ended inside its put-back. */
+const HOLDING = /test-trace: txn holding \S+ confirmed=True rejected=False/
+const PAYLOAD = /the saved clipboard was written down \(/
+/**
+ * A kept, not provably ours record: the test-ops transaction is killed inside its put-back (after the first format
+ * set back). Round 30: it waits for THIS helper's own stall line and its payload being on disk, and returns the id of
+ * the record it made (null, with a failed check, if it did not get there). Until round 29 it waited for ANY record's
+ * "restore-emptied" stage: in case 5 the first record already had it, so the second helper was killed after 600 ms
+ * wherever it was (attempt 1 of run 42842819157: inside its first state write, a lone .state.tmp left).
+ */
 async function keptRecord(dictated) {
+  const before = new Set(recordIds())
   const h = start(testops, {
     DICTATION_HELPER_TEST: '1',
     DICTATION_HELPER_TEST_PUTBACK_STALL_AFTER: '1',
-    DICTATION_HELPER_TEST_PUTBACK_STALL_MS: '15000'
+    DICTATION_HELPER_TEST_PUTBACK_STALL_MS: '60000'
   })
   await h.ready
-  void h.req('__clipboard-txn', { text: dictated, holdMs: 200 })
-  const reached = await waitStage('restore-emptied')
-  await sleep(600)
-  await h.kill()
-  return reached
+  const reply = h.req('__clipboard-txn', { text: dictated, holdMs: 200 })
+  const stalled = await h.waitLog(/test-trace: stall PUTBACK_STALL_MS/)
+  const payload = await h.waitLog(
+    /the saved clipboard was written down|could not be written down|was not published/
+  )
+  const exited = await h.kill()
+  const made = recordIds().filter((id) => !before.has(id))
+  const id = made.length === 1 ? made[0] : null
+  const ok =
+    !!stalled &&
+    !!payload &&
+    /written down \(/.test(payload) &&
+    exited &&
+    !!id &&
+    stageOf(id) === 'restore-emptied' &&
+    fs.existsSync(path.join(os.tmpdir(), `${recordPrefix}${id}.bin`))
+  if (!ok)
+    check(
+      `${frame.label}: a kept record was made (killed inside its put-back, its payload on disk)`,
+      false,
+      `stall line ${!!stalled}; payload ${payload}; exited ${exited}; new records ${made}; stage ${id && stageOf(id)}; reply so far ${JSON.stringify(
+        await Promise.race([reply, sleep(0).then(() => '(none)')])
+      )}`
+    )
+  return ok ? id : null
 }
 
 /**
@@ -529,9 +754,12 @@ const results = []
 const check = (name, ok, detail = '') => {
   results.push(ok)
   console.log(`${ok ? 'ok' : 'not ok'} - ${name}${ok || !detail ? '' : ` (${detail})`}`)
+  // Round 30: a failed check prints what the helpers of its case said and every file of this identity.
+  if (!ok) diagnose(name)
 }
+/** Only at the very end (round 30: never between cases, where begin() verifies instead of clearing silently). */
 const cleanup = () => {
-  for (const f of recordFiles()) fs.rmSync(path.join(os.tmpdir(), f), { force: true })
+  for (const f of prefixFiles()) fs.rmSync(path.join(os.tmpdir(), f), { force: true })
 }
 
 async function main() {
@@ -546,6 +774,7 @@ async function main() {
 
   // 1. The release helper dispatches the production offer ops (round 12 answered unknown-op).
   {
+    await begin('1')
     const h = start(release)
     check('the release helper starts', await h.ready)
     const offers = await h.req('clipboard-offers')
@@ -571,9 +800,10 @@ async function main() {
 
   // 2. A kept record round-trips through the RELEASE helper: offered, "changed" after a small copy, restored.
   {
+    await begin('2')
     check(
       'a kept record is made (test-ops transaction ended inside its put-back)',
-      await keptRecord('dictated text one')
+      !!(await keptRecord('dictated text one'))
     )
     const partial = names()
     const h = start(release)
@@ -626,6 +856,7 @@ async function main() {
 
   // 3. Dismiss on the RELEASE helper deletes the record (the real deletion result).
   {
+    await begin('3')
     copyMulti(user)
     await keptRecord('dictated text two')
     const h = start(release)
@@ -647,6 +878,7 @@ async function main() {
 
   // 4. Pending, then another delivery: our own later transaction never deletes the older backup.
   {
+    await begin('4')
     copyMulti(user)
     await keptRecord('dictated text A')
     const b = start(testops, { DICTATION_HELPER_TEST: '1' })
@@ -678,6 +910,7 @@ async function main() {
 
   // 5. Two kept records: restoring one never deletes the other.
   {
+    await begin('5')
     copyMulti(user)
     await keptRecord('dictated text C')
     // A second private format, so the second transaction saves more than what its cut-short put-back leaves
@@ -714,12 +947,16 @@ async function main() {
 
   // 6. A clipboard manager replays every format of our write (sentinel too) after a crash: offered, not restored.
   {
+    await begin('6')
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    // Round 30: killed once its write is confirmed and held (the HOLD gate is the "paste" window) and its payload is
+    // on disk; until round 29 it waited up to 10 s for our text to show and never checked it did (attempt 1 of run
+    // 42842819157: it never showed, and the case went on over the user's own clipboard).
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD'] })
     await a.ready
-    void a.req('__clipboard-txn', { text: 'dictated text E', holdMs: 8000 })
-    for (let i = 0; i < 200 && text() !== 'dictated text E'; i++) await sleep(50)
-    await sleep(300)
+    void a.req('__clipboard-txn', { text: 'dictated text E' })
+    await atLine(a, 'our write confirmed and held', HOLDING)
+    await atLine(a, 'the payload on disk', PAYLOAD)
     await a.kill()
     const replayed = replayAll()
     const h = start(release)
@@ -745,15 +982,19 @@ async function main() {
   // 8. A crash after journaling "restoring" but before its empty, then a replay of every format: offered. A restore
   // that was only about to run establishes no continuity (Beyond counts only operations performed).
   {
+    await begin('8')
     copyMulti(user)
     const a = start(testops, {
       DICTATION_HELPER_TEST: '1',
-      DICTATION_HELPER_TEST_RESTORE_STALL_BEFORE_EMPTY_MS: '15000'
+      DICTATION_HELPER_TEST_RESTORE_STALL_BEFORE_EMPTY_MS: '60000'
     })
     await a.ready
     void a.req('__clipboard-txn', { text: 'dictated text G', holdMs: 200 })
-    const reached = await waitStage('restoring')
-    await sleep(500)
+    const reached = !!(await atLine(
+      a,
+      'the restore stalled before its empty',
+      /test-trace: stall RESTORE_STALL_BEFORE_EMPTY_MS/
+    ))
     await a.kill()
     const replayed = replayAll()
     const h = start(release)
@@ -781,14 +1022,19 @@ async function main() {
   // 9. Right before Ctrl+V the clipboard moved under our ownership and cannot be opened (another app holds it):
   // no proof either way, so nothing is settled; the record is kept and offered (never "user-changed").
   {
+    await begin('9')
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    // Round 30: the holder adds and holds BEFORE the restore runs (HOLD gate), and closes only after its result.
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD'] })
     await a.ready
-    const reply = a.req('__clipboard-txn', { text: 'dictated text H', holdMs: 2500 })
-    for (let i = 0; i < 200 && text() !== 'dictated text H'; i++) await sleep(50)
-    const holder = holdAfterAdding(4000)
+    const reply = a.req('__clipboard-txn', { text: 'dictated text H' })
+    await atLine(a, 'our write confirmed and held', HOLDING)
+    const holder = holdAfterAdding()
+    if (!(await holder.held))
+      check(`${frame.label}: reached the holder holding the clipboard`, false, holder.output())
+    a.open('HOLD')
     const result = await reply
-    await waitExit(holder)
+    await holder.release()
     await a.stop()
     check(
       'an uninspectable clipboard keeps the record (not user-changed)',
@@ -813,14 +1059,15 @@ async function main() {
   // 10. Our window still owns the clipboard, but an app added a format without emptying AFTER our write's
   // confirmation: kept as an offer.
   {
+    await begin('10')
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD'] })
     await a.ready
-    const reply = a.req('__clipboard-txn', { text: 'dictated text I', holdMs: 2500 })
-    for (let i = 0; i < 200 && text() !== 'dictated text I'; i++) await sleep(50)
-    // After our write's confirmation (it re-reads the clipboard right after the write): the change comes later.
-    await sleep(700)
+    const reply = a.req('__clipboard-txn', { text: 'dictated text I' })
+    // After our write's confirmation (round 30: its own line, not 700 ms): the change comes later.
+    await atLine(a, 'our write confirmed and held', HOLDING)
     addFormat()
+    a.open('HOLD')
     const result = await reply
     await a.stop()
     check(
@@ -847,11 +1094,13 @@ async function main() {
   // write is being confirmed or right after). Whichever comes first, the product must keep the record and the
   // addition (round 14's run 42505251118 reproduced the defect: restored, no record, the addition gone).
   {
+    await begin('10b')
     copyMulti(user)
     const a = start(testops, { DICTATION_HELPER_TEST: '1' })
     await a.ready
     const reply = a.req('__clipboard-txn', { text: 'dictated text I2', holdMs: 2500 })
-    for (let i = 0; i < 200 && text() !== 'dictated text I2'; i++) await sleep(50)
+    // The race is the point of this case (no gate); that our text reached the clipboard is checked (round 30).
+    await reach('our text on the clipboard', () => text() === 'dictated text I2')
     addFormat()
     const result = await reply
     await a.stop()
@@ -874,14 +1123,15 @@ async function main() {
   // 10c. Another process copies over our write (the owner changes) right before the keys: their content is left
   // alone, and the user's saved clipboard is kept as an offer, never deleted on that guess.
   {
+    await begin('10c')
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD'] })
     await a.ready
-    const reply = a.req('__clipboard-txn', { text: 'dictated text I3', holdMs: 2500 })
-    for (let i = 0; i < 200 && text() !== 'dictated text I3'; i++) await sleep(50)
-    await sleep(700)
+    const reply = a.req('__clipboard-txn', { text: 'dictated text I3' })
+    await atLine(a, 'our write confirmed and held', HOLDING)
     copyMulti('a copy by another app')
     const theirs = names()
+    a.open('HOLD')
     const result = await reply
     await a.stop()
     check(
@@ -901,18 +1151,18 @@ async function main() {
     await h.stop()
   }
 
-  // 11. The same addition BEFORE our write's confirmation (the confirmation is held open by a test hook, so the
-  // order is fixed, not timed): the confirmation must not adopt it. Kept as an offer, the addition stays.
+  // 11. The same addition BEFORE our write's confirmation (round 30: the confirmation waits at its gate until the
+  // addition is made, so the order is fixed, not timed): the confirmation must not adopt it. Kept as an offer, the
+  // addition stays. (The same addition on the late path: case 41.)
   {
+    await begin('11')
     copyMulti(user)
-    const a = start(testops, {
-      DICTATION_HELPER_TEST: '1',
-      DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500'
-    })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['CONFIRM'] })
     await a.ready
     const reply = a.req('__clipboard-txn', { text: 'dictated text J', holdMs: 300 })
-    for (let i = 0; i < 200 && text() !== 'dictated text J'; i++) await sleep(50)
-    addFormat() // inside the confirmation's delay
+    await atLine(a, 'the confirmation at its gate', /test-trace: gate CONFIRM#1 waiting/)
+    addFormat() // before the confirmation
+    a.open('CONFIRM')
     const result = await reply
     await a.stop()
     check(
@@ -940,16 +1190,27 @@ async function main() {
   // that app then adds a format while our window still owns the clipboard: the retry must not restore on
   // ownership alone. Offered, the addition stays.
   {
+    await begin('12')
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD'] })
     await a.ready
-    const reply = a.req('__clipboard-txn', { text: 'dictated text K', holdMs: 2500 })
-    for (let i = 0; i < 200 && text() !== 'dictated text K'; i++) await sleep(50)
-    await sleep(1500)
-    const holder = holdThenAdd(1800) // opens now, holds through the restore attempt, then adds and closes
+    const reply = a.req('__clipboard-txn', { text: 'dictated text K' })
+    await atLine(a, 'our write confirmed and held', HOLDING)
+    // Round 30: the holder holds BEFORE the restore runs and through its result, then adds and closes; the helper's
+    // own retry is awaited by its line, and must come after the addition.
+    const holder = holdThenAdd()
+    if (!(await holder.held))
+      check(`${frame.label}: reached the holder holding the clipboard`, false, holder.output())
+    a.open('HOLD')
     const result = await reply
-    await waitExit(holder)
-    await sleep(4500) // the helper's own retry (3 s) runs on the changed clipboard
+    const beforeAdd = a.logs.length
+    await holder.release()
+    const early = a.logs.slice(beforeAdd).find((l) => /\(retry\)/.test(l))
+    const afterAdd = a.logs.length
+    if (early) check(`${frame.label}: the retry ran after the addition`, false, early)
+    await atLine(a, 'its own retry, after the addition', /clipboard record \w+ \(retry\)/, {
+      since: afterAdd
+    })
     const kept = recordFiles().length
     await a.stop()
     check(
@@ -974,6 +1235,7 @@ async function main() {
   // 13. Dismiss while ONE record file is held by another process (each of the four in turn): failure is reported and
   // the record stays whole (nothing deleted); once released, Dismiss deletes every file.
   for (const suffix of ['.state', '.state.tmp', '.bin', '.bin.tmp']) {
+    await begin(`13 ${suffix}`)
     copyMulti(user)
     await keptRecord('dictated text L' + suffix)
     const h = start(release)
@@ -986,11 +1248,14 @@ async function main() {
     if (offer) {
       const base = path.join(os.tmpdir(), `${recordPrefix}${offer.record}`)
       if (suffix.endsWith('.tmp')) fs.writeFileSync(base + suffix, '{}')
-      const lock = lockFile(base + suffix, 4000)
-      await sleep(900)
+      // Round 30: Dismiss only once the other process SAYS it holds the file (attempt 1 of run 42842819157: the lock
+      // was not up after a fixed 900 ms, and Dismiss deleted the record), released on request.
+      const lock = lockFile(base + suffix)
+      if (!(await lock.locked))
+        check(`${frame.label}: reached the lock held by another process`, false, lock.output())
       first = await h.req('clipboard-dismiss', { record: offer.record })
       whole = recordFiles().length
-      await waitExit(lock)
+      await lock.release()
       second = await h.req('clipboard-dismiss', { record: offer.record })
     }
     check(
@@ -1003,8 +1268,8 @@ async function main() {
       !!second &&
         second.dismissed === true &&
         recordFiles().length === 0 &&
-        fs.readdirSync(os.tmpdir()).every((f) => !f.startsWith(recordPrefix)),
-      `${JSON.stringify(second)}; ${recordFiles()}`
+        prefixFiles().length === 0,
+      `${JSON.stringify(second)}; ${listing()}`
     )
     await h.stop()
   }
@@ -1013,6 +1278,7 @@ async function main() {
   // the close removes them. When the SECOND mark fails (test hook), the first is cleared again: nothing deleted,
   // both files byte-identical, Dismiss reports it; the release helper then deletes both.
   {
+    await begin('13b')
     copyMulti(user)
     await keptRecord('dictated text L2')
     const snapshot = () =>
@@ -1051,6 +1317,7 @@ async function main() {
   // 14. A payload left complete under its temporary name (a crash between the writer's write and its move): adopted
   // and offered, never deleted as missing.
   {
+    await begin('14')
     copyMulti(user)
     await keptRecord('dictated text M')
     const bin = recordFiles().find((f) => f.endsWith('.bin'))
@@ -1083,18 +1350,21 @@ async function main() {
     [16, 'CF_LOCALE', Buffer.from([0x07, 0x04, 0x00, 0x00])]
   ]) {
     for (const when of ['before the confirmation', 'after the confirmation']) {
+      await begin(`15 ${name} ${when}`)
       copyMulti(user)
       const before = when.startsWith('before')
-      const a = start(testops, {
-        DICTATION_HELPER_TEST: '1',
-        ...(before ? { DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500' } : {})
-      })
+      // Round 30: before = at the confirmation's gate; after = once the confirmation passed (its line), the hold
+      // gate open only after the change. (Round 29's attempt-1 run of this case took the late path: case 41.)
+      const gate = before ? 'CONFIRM' : 'HOLD'
+      const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: [gate] })
       await a.ready
       const dictated = `dictated text N ${name} ${when}`
-      const reply = a.req('__clipboard-txn', { text: dictated, holdMs: before ? 300 : 2500 })
-      for (let i = 0; i < 200 && text() !== dictated; i++) await sleep(50)
-      if (!before) await sleep(700)
+      const reply = a.req('__clipboard-txn', { text: dictated, holdMs: 300 })
+      if (before)
+        await atLine(a, 'the confirmation at its gate', /test-trace: gate CONFIRM#1 waiting/)
+      else await atLine(a, 'our write confirmed and held', HOLDING)
       replaceFormat(format, bytes)
+      a.open(gate)
       const result = await reply
       await a.stop()
       const kept = recordFiles().length
@@ -1128,15 +1398,14 @@ async function main() {
   // like ours; the rejection is final: the later look before the keys must not upgrade it. Kept, and OFFERED after a
   // restart (asserted since round 17).
   {
+    await begin('16')
     copyMulti(user)
-    const a = start(testops, {
-      DICTATION_HELPER_TEST: '1',
-      DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500'
-    })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['CONFIRM'] })
     await a.ready
     const reply = a.req('__clipboard-txn', { text: 'dictated text O', holdMs: 300 })
-    for (let i = 0; i < 200 && text() !== 'dictated text O'; i++) await sleep(50)
+    await atLine(a, 'the confirmation at its gate', /test-trace: gate CONFIRM#1 waiting/)
     replaceFormat(1, Buffer.from('dictated text O\0', 'latin1'), 8)
+    a.open('CONFIRM')
     const result = await reply
     await a.stop()
     check(
@@ -1162,6 +1431,7 @@ async function main() {
   // 17. A state file that does not parse (zeroed, as after a crash mid-write on some file systems) next to a whole
   // payload: the record is rebuilt (no stage authority) and OFFERED, never deleted; Restore gives the user's back.
   {
+    await begin('17')
     copyMulti(user)
     await keptRecord('dictated text P')
     const st = recordFiles().find((f) => f.endsWith('.state'))
@@ -1193,6 +1463,7 @@ async function main() {
   // 18. Another session's record (same user, shared %TEMP%): not offered here, and Dismiss with its id refuses it
   // (nothing deleted); back in this session it is offered and Dismiss deletes it.
   {
+    await begin('18')
     copyMulti(user)
     await keptRecord('dictated text Q')
     const st = recordFiles().find((f) => f.endsWith('.state'))
@@ -1239,6 +1510,7 @@ async function main() {
   // (its timer, 3 s) and a restarted release helper then find our complete write within the bound: neither may
   // restore on its own (the rejection is persisted as offer-only); the record is offered.
   {
+    await begin('19')
     copyMulti(user)
     const a = start(testops, {
       DICTATION_HELPER_TEST: '1',
@@ -1246,7 +1518,8 @@ async function main() {
     })
     await a.ready
     const result = await a.req('__clipboard-txn', { text: 'dictated text R', holdMs: 300 })
-    await sleep(5000) // past the first retry (3 s)
+    // Round 30: its own first retry, by its line (not 5 s).
+    await atLine(a, 'its own first retry', /clipboard record \w+ \(retry\)/)
     const st = recordFiles().find((f) => f.endsWith('.state'))
     const offerOnly = st
       ? JSON.parse(fs.readFileSync(path.join(os.tmpdir(), st), 'utf8')).offerOnly
@@ -1264,9 +1537,10 @@ async function main() {
         .join(' / ')}`
     )
     await a.stop()
+    // Round 30: no timed wait after ready: the start-up check of every record runs before the helper says ready
+    // (Program.cs), and the listing runs its own.
     const h = start(release)
     await h.ready
-    await sleep(1500)
     const listed = await h.req('clipboard-offers')
     check(
       'and a restarted release helper offers it, never restores it on its own',
@@ -1284,20 +1558,25 @@ async function main() {
   // are now offered too, the clipboard untouched (sequence unchanged).
   for (const stage of ['emptied', 'written']) {
     for (const rename of [false, true]) {
+      await begin(`20 ${stage} ${rename}`)
       copyMulti(user)
       const env =
         stage === 'emptied'
-          ? { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_STALL_AFTER_EMPTY_MS: '15000' }
+          ? { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_STALL_AFTER_EMPTY_MS: '60000' }
           : { DICTATION_HELPER_TEST: '1' }
-      const a = start(testops, env)
+      const a = start(testops, env, { gates: stage === 'emptied' ? [] : ['HOLD'] })
       await a.ready
       const dictated = `dictated text S ${stage} ${rename}`
-      void a.req('__clipboard-txn', { text: dictated, holdMs: 8000 })
-      if (stage === 'emptied') await waitStage('emptied')
-      else for (let i = 0; i < 200 && text() !== dictated; i++) await sleep(50)
-      for (let i = 0; i < 100 && !recordFiles().some((f) => f.endsWith('.bin')); i++)
-        await sleep(50)
-      await sleep(400)
+      void a.req('__clipboard-txn', { text: dictated })
+      // Round 30: killed where it says it is (and with its payload on disk), not after timed waits.
+      if (stage === 'emptied')
+        await atLine(
+          a,
+          'the write stalled with the clipboard emptied',
+          /test-trace: stall STALL_AFTER_EMPTY_MS/
+        )
+      else await atLine(a, 'our write confirmed and held', HOLDING)
+      await atLine(a, 'the payload on disk', PAYLOAD)
       await a.kill()
       const bin = recordFiles().find((f) => f.endsWith('.bin'))
       if (rename && bin)
@@ -1306,7 +1585,6 @@ async function main() {
       const sequence = GetClipboardSequenceNumber()
       const h = start(release)
       await h.ready
-      await sleep(1500)
       const listed = await h.req('clipboard-offers')
       check(
         rename
@@ -1323,7 +1601,6 @@ async function main() {
       const offer = listed && listed.offers[0]
       if (offer) await h.req('clipboard-dismiss', { record: offer.record })
       await h.stop()
-      cleanup()
     }
   }
 
@@ -1331,6 +1608,7 @@ async function main() {
   // Windows makes of the same Unicode text under the same CF_LOCALE (non-ASCII, best-fit, unmappable, a surrogate
   // pair; a Western, a Cyrillic, a Polish and a Japanese locale), not with the helper's own encoder.
   {
+    await begin('21')
     const a = start(testops, { DICTATION_HELPER_TEST: '1' })
     await a.ready
     const samples = ['Жж café €', 'āćęłóśźż', '中文 あ', '😀 x', 'Grüße – “q”']
@@ -1375,17 +1653,18 @@ async function main() {
   // route inside our own open is reported, and a passive reader in another process after the confirmation leaves the
   // sequence unchanged (the confirmation materialized the forms), so the paste gate still sees our write.
   {
+    await begin('22')
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD'] })
     await a.ready
     const dictated = 'Grüße Ж 中 😀 café'
-    const reply = a.req('__clipboard-txn', { text: dictated, holdMs: 2500 })
-    for (let i = 0; i < 200 && text() !== dictated; i++) await sleep(50)
-    await sleep(700)
+    const reply = a.req('__clipboard-txn', { text: dictated })
+    await atLine(a, 'our write confirmed and held', HOLDING)
     const before = GetClipboardSequenceNumber()
     const ansi = readFormat(1)
     const oem = readFormat(7)
     const after = GetClipboardSequenceNumber()
+    a.open('HOLD')
     const result = await reply
     const route = await a.req('__text-forms', { text: dictated, locale: 0 })
     console.log(`# input locale 0x${route && route.inputLocale.toString(16)}`)
@@ -1421,6 +1700,7 @@ async function main() {
     ['an unknown stage', (st) => JSON.stringify({ ...st, stage: 'restored-ish' })],
     ['extra junk', (st) => JSON.stringify({ ...st, junk: [1, 2] })]
   ]) {
+    await begin(`23 ${label}`)
     copyMulti(user)
     await keptRecord('dictated text T ' + label)
     const st = recordFiles().find((f) => f.endsWith('.state'))
@@ -1452,6 +1732,7 @@ async function main() {
   // 13c. A mark fails AND clearing the marks already set fails (test hooks): the deletion is completed instead and
   // reported truthfully (Dismiss true, nothing left), never "kept whole".
   {
+    await begin('13c')
     copyMulti(user)
     await keptRecord('dictated text L3')
     const a = start(testops, {
@@ -1475,6 +1756,7 @@ async function main() {
   // at the termination and the payload is left WITHOUT a state: not offered (never "offered again after Dismiss"),
   // and swept as an orphan once older than 10 minutes.
   {
+    await begin('24')
     copyMulti(user)
     await keptRecord('dictated text U')
     const a = start(testops, {
@@ -1485,7 +1767,11 @@ async function main() {
     const listed = await a.req('clipboard-offers')
     const offer = listed && listed.offers[0]
     if (offer) void a.req('clipboard-dismiss', { record: offer.record })
-    await sleep(1500)
+    await atLine(
+      a,
+      'the deletion stalled between its marks',
+      /test-trace: stall DELETE_STALL_AFTER_MARK/
+    )
     await a.kill()
     const left = recordFiles()
     const h = start(release)
@@ -1518,17 +1804,18 @@ async function main() {
   // helper; the saved clipboard is OFFERED. 7 (round 17: "our own complete write is put back on its own") is (a) below.
   // (a) killed after our write, before the paste; (b) after the paste, before the restore; (c) inside the restore,
   // after its EmptyClipboard. A restarted RELEASE helper offers each and leaves the clipboard sequence unchanged.
+  // Round 30: each is killed where its own line says it is (and with its payload on disk), never after a timed wait.
   for (const [label, env, wait] of [
-    ['(a) after the write, before the paste (round 17 case 7: restored on its own)', {}, 'text'],
+    ['(a) after the write, before the paste (round 17 case 7: restored on its own)', {}, HOLDING],
     [
       '(b) after the paste, before the restore',
-      { DICTATION_HELPER_TEST_STALL_BEFORE_RESTORE_MS: '15000' },
-      'text'
+      { DICTATION_HELPER_TEST_STALL_BEFORE_RESTORE_MS: '60000' },
+      /test-trace: stall STALL_BEFORE_RESTORE_MS/
     ],
     [
       '(c) inside the restore, after its EmptyClipboard',
-      { DICTATION_HELPER_TEST_RESTORE_STALL_MS: '15000' },
-      'restore-emptied'
+      { DICTATION_HELPER_TEST_RESTORE_STALL_MS: '60000' },
+      /test-trace: stall RESTORE_STALL_MS/
     ],
     // (a) 25 more times (round 19): one CI run (42662110137) saw the user's Restore reply "restored" and then a format
     // enumeration with no entries. Diagnosed, not guarded: content checked under one open, the helper's put-back
@@ -1536,26 +1823,27 @@ async function main() {
     ...Array.from({ length: 25 }, (_, n) => [
       `(a) after the write, before the paste, repeat ${n + 1}`,
       {},
-      'text'
+      HOLDING
     ])
   ]) {
+    await begin(`25 ${label.replace(/^(\(.\)).*?(, repeat \d+)?$/, '$1$2')}`)
     const seeded = copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1', ...env },
+      {
+        gates: label.startsWith('(a)') ? ['HOLD'] : []
+      }
+    )
     await a.ready
-    void a.req('__clipboard-txn', {
-      text: 'dictated text F',
-      holdMs: label.startsWith('(a)') ? 8000 : 300
-    })
-    if (wait === 'text')
-      for (let i = 0; i < 200 && text() !== 'dictated text F'; i++) await sleep(50)
-    else await waitStage(wait)
-    await sleep(label.startsWith('(a)') ? 300 : 1200)
+    void a.req('__clipboard-txn', { text: 'dictated text F', holdMs: 300 })
+    await atLine(a, label.startsWith('(a)') ? 'our write confirmed and held' : 'its stall', wait)
+    await atLine(a, 'the payload on disk', PAYLOAD)
     const exited = await a.kill()
     const before = names()
     const sequence = GetClipboardSequenceNumber()
     const h = start(release)
     await h.ready
-    await sleep(1500)
     const listed = await h.req('clipboard-offers')
     check(
       `killed ${label}: a restarted release helper offers it and never writes the clipboard`,
@@ -1581,7 +1869,7 @@ async function main() {
     check(
       `and the user's Restore of it gives back the user clipboard (${label.replace(/^(\(.\)).*?(, repeat \d+)?$/, '$1$2')})`,
       ok,
-      `${JSON.stringify(restored)}; observed ${JSON.stringify({ ...after, text: after.text === user ? '(the user text)' : after.text, extra: after.extra === 'extra bytes for ' + user ? '(the user bytes)' : after.extra })}; records [${fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith(recordPrefix))}]; release log: ${h.logs
+      `${JSON.stringify(restored)}; observed ${JSON.stringify({ ...after, text: after.text === user ? '(the user text)' : after.text, extra: after.extra === 'extra bytes for ' + user ? '(the user bytes)' : after.extra })}; records [${prefixFiles()}]; release log: ${h.logs
         .filter((l) => /put-back trace|restore|record/.test(l))
         .slice(-12)
         .join(' / ')}`
@@ -1602,7 +1890,6 @@ async function main() {
       `# 25 ${label.replace(/^(\(.\)).*?(, repeat \d+)?$/, '$1$2')}: seed ${seeded ? 'held' : 'FAILED'}; save: ${saving ? saving.replace(/^.*?(saving the clipboard |test: )/, '') : '(no line)'}; offer ${offer ? offer.formats + ' formats, ' + offer.bytes + ' bytes' : 'none'}; ${trace ? trace.replace(/^.*put-back trace: /, 'trace: ') : '(no put-back trace line)'}`
     )
     await h.stop()
-    cleanup()
   }
 
   // 32. Round 20, the capture rule: a save that is not POSITIVELY established never lets the helper touch the clipboard.
@@ -1640,6 +1927,7 @@ async function main() {
     'write-open-fails',
     'empty-fails'
   ]) {
+    await begin(`32 ${fault}`)
     const seeded = copyMulti(user)
     const before = observe()
     const env =
@@ -1705,7 +1993,6 @@ async function main() {
     console.log(
       `# 32 ${fault}: ${lines[0] || '(no save line)'}${/zero-sequence|no-window/.test(fault) ? ' | ' + (a.logs.find((l) => /not usable evidence|no clipboard window/.test(l)) || '(no refusal line)') : ''}`
     )
-    cleanup()
   }
 
   // 35. Round 22, the owner decision for formats a save cannot read (three classes). The clipboard is seeded by a
@@ -1727,6 +2014,7 @@ async function main() {
     return { h, ok: !!(s && s.seeded), seed: s }
   }
   {
+    await begin('35 class 1')
     const PRESENCE = [
       'Clipboard Viewer Ignore',
       'MSDEVColumnSelect',
@@ -1759,9 +2047,9 @@ async function main() {
       `${JSON.stringify(s)}; before ${before}; ${JSON.stringify(live)}; after ${after}; text ${now}; ${saving.join(' / ')}`
     )
     console.log(`# 35 class 1: ${saving[0] || '(no save line)'}`)
-    cleanup()
   }
   {
+    await begin('35 class 2')
     const words = 'marker unread ' + identity
     const { h, ok, seed: s } = await seededBy({}, [`#13|${u16(words)}`, `${MARKERS[0]}|-`])
     let everRecord = false
@@ -1788,9 +2076,9 @@ async function main() {
       `${JSON.stringify(s)}; ${JSON.stringify(live)}; markers ${markers}; exclude ${exclude && exclude.toString('hex')}; text ${now}; a record seen: ${everRecord}; ${saving.join(' / ')}`
     )
     console.log(`# 35 class 2: ${saving.join(' / ') || '(no save line)'}`)
-    cleanup()
   }
   {
+    await begin('35 B3')
     // B3: a privacy marker over its cap (64 bytes) is skipped, and forces the conservative markers on the put-back.
     const words = 'oversize marker ' + identity
     const seededOk = seed('an oversize privacy marker', [
@@ -1817,9 +2105,9 @@ async function main() {
         now === words,
       `${JSON.stringify(live)}; markers ${markers}; exclude ${exclude && exclude.toString('hex').slice(0, 16)}; text ${now}; ${saving.join(' / ')}`
     )
-    cleanup()
   }
   for (const name of ['FileContents', 'DoodleNote.CI.Unrendered']) {
+    await begin(`35 class 3 ${name}`)
     const words = 'owner-unrendered ' + identity
     const {
       h,
@@ -1853,9 +2141,9 @@ async function main() {
     console.log(
       `# 35 class 3 ${name}: ${saving.join(' / ') || '(no save line)'} -> ${live && live.result}`
     )
-    cleanup()
   }
   {
+    await begin('35 class 3 limit')
     const { h, ok, seed: s } = await seededBy({}, ['FileContents|-'])
     const live = await h.req('__clipboard-txn', { text: 'dictated text L', holdMs: 300 })
     const still = available('FileContents')
@@ -1867,7 +2155,6 @@ async function main() {
       `${JSON.stringify(s)}; ${JSON.stringify(live)}; still offered ${still}; ${saving.join(' / ')}`
     )
     console.log(`# 35 class 3 limit: ${saving.join(' / ') || '(no save line)'}`)
-    cleanup()
   }
 
   // 36. Round 22 (S2/F8): a zero sequence at each proof site. Never a match: a zero inside the write or at the
@@ -1880,6 +2167,7 @@ async function main() {
     ['still-ours', /^restored\|/, false],
     ['still-ours,still-there', /^unrestored\|/, true]
   ]) {
+    await begin(`36 ${sites}`)
     copyMulti(user)
     const a = start(testops, {
       DICTATION_HELPER_TEST: '1',
@@ -1893,7 +2181,6 @@ async function main() {
     if (kept) {
       const r = start(release)
       await r.ready
-      await sleep(1000)
       const listed = await r.req('clipboard-offers')
       const offer = listed && listed.offers[0]
       done = offer ? await restoreConfirming(r, offer) : null
@@ -1910,17 +2197,16 @@ async function main() {
         recordFiles().length === 0,
       `${JSON.stringify(live)}; ${files} files; ${JSON.stringify(done)}; text ${back.text}`
     )
-    cleanup()
   }
   {
+    await begin('36 view')
     copyMulti(user)
-    const kept = await keptRecord('dictated text Z')
+    const kept = !!(await keptRecord('dictated text Z'))
     const z = start(testops, {
       DICTATION_HELPER_TEST: '1',
       DICTATION_HELPER_TEST_ZERO_SEQUENCE: 'view'
     })
     await z.ready
-    await sleep(1000)
     const listed = await z.req('clipboard-offers')
     const offer = listed && listed.offers[0]
     const before = observe()
@@ -1932,7 +2218,6 @@ async function main() {
     const files = recordFiles().length
     const r = start(release)
     await r.ready
-    await sleep(1000)
     const again = await r.req('clipboard-offers')
     const o2 = again && again.offers[0]
     const done = o2 ? await restoreConfirming(r, o2) : null
@@ -1950,12 +2235,12 @@ async function main() {
         text() === user,
       `${JSON.stringify(offer)}; ${JSON.stringify(answer)}; sequence ${before.sequence} -> ${after.sequence}; ${files} files; ${JSON.stringify(done)}`
     )
-    cleanup()
   }
 
   // 37. Round 22 (Opus S2): the write throws right after EmptyClipboard. Its ownership survives the throw: never
   // "untouched"; the transaction loses its authority and its record is kept and offered; the user's Restore puts it back.
   {
+    await begin('37')
     copyMulti(user)
     const a = start(testops, {
       DICTATION_HELPER_TEST: '1',
@@ -1967,7 +2252,6 @@ async function main() {
     await a.stop()
     const r = start(release)
     await r.ready
-    await sleep(1000)
     const listed = await r.req('clipboard-offers')
     const offer = listed && listed.offers[0]
     const done = offer ? await restoreConfirming(r, offer) : null
@@ -1986,12 +2270,12 @@ async function main() {
         recordFiles().length === 0,
       `${JSON.stringify(live)}; ${threw}; ${JSON.stringify(offer)}; ${JSON.stringify(done)}; text ${back.text}`
     )
-    cleanup()
   }
 
   // 35b. Round 23 (Opus S-D): a copy carrying "Clipboard Viewer Ignore" is never written to disk (in memory only),
   // and still goes back whole (the flag as presence only).
   {
+    await begin('35b')
     const words = 'viewer ignore ' + identity
     const {
       h,
@@ -2017,12 +2301,12 @@ async function main() {
         !everRecord,
       `${JSON.stringify(s)}; ${JSON.stringify(live)}; flag ${flag}; text ${now}; a record seen: ${everRecord}`
     )
-    cleanup()
   }
 
   // 35c. Round 23, the one rule (Opus S-B): a delayed-render text owner that renders nothing for its text while its
   // CF_LOCALE reads: nothing with the user's content would go back, so no paste and the clipboard is left alone.
   {
+    await begin('35c')
     const {
       h,
       ok,
@@ -2046,7 +2330,6 @@ async function main() {
       `${JSON.stringify(s)}; ${JSON.stringify(live)}; sequence ${before.sequence} -> ${after.sequence}; ${saving.join(' / ')}; ${why}`
     )
     console.log(`# 35c: ${saving.join(' / ') || '(no save line)'}`)
-    cleanup()
   }
 
   // 36b. Round 23 (Opus SF3): the incomplete-enumeration hook at the two call sites the unit test cannot reach: the
@@ -2062,6 +2345,7 @@ async function main() {
       /^unrestored\|/
     ]
   ]) {
+    await begin(`36b ${env.DICTATION_HELPER_TEST_ENUM_INCOMPLETE}`)
     copyMulti(user)
     const a = start(testops, { DICTATION_HELPER_TEST: '1', ...env })
     await a.ready
@@ -2070,7 +2354,6 @@ async function main() {
     const files = recordFiles().length
     const r = start(release)
     await r.ready
-    await sleep(1000)
     const listed = await r.req('clipboard-offers')
     const offer = listed && listed.offers[0]
     const done = offer ? await restoreConfirming(r, offer) : null
@@ -2087,13 +2370,13 @@ async function main() {
         recordFiles().length === 0,
       `${JSON.stringify(live)}; ${files} files; ${JSON.stringify(done)}; text ${back.text}`
     )
-    cleanup()
   }
 
   // 37b. Round 23 (Astra B1): the write's own rollback (its emptied stage not journaled: test hook) throws before its
   // put-back, or after it but before its result is assigned. Emptied is recorded first: never "untouched"; the record
   // is kept (offered and put back by the user's Restore, or found already whole on the clipboard and deleted).
   for (const where of ['before-set', 'after-set']) {
+    await begin(`37b ${where}`)
     copyMulti(user)
     const a = start(testops, {
       DICTATION_HELPER_TEST: '1',
@@ -2109,7 +2392,6 @@ async function main() {
     const files = recordFiles().length
     const r = start(release)
     await r.ready
-    await sleep(1000)
     const listed = await r.req('clipboard-offers')
     const offer = listed && listed.offers[0]
     const done = offer ? await restoreConfirming(r, offer) : null
@@ -2127,7 +2409,6 @@ async function main() {
         recordFiles().length === 0,
       `${JSON.stringify(live)}; ${threw}; ${files} files; ${JSON.stringify(listed)}; ${JSON.stringify(done)}; text ${back.text}`
     )
-    cleanup()
   }
 
   // 39. Round 23 (Astra B2, Opus SF2): an INCOMPLETE record (a class-3 skip of FileContents) whose retained part is back on
@@ -2136,11 +2417,12 @@ async function main() {
   // incomplete; a Restore without acceptIncomplete empties nothing ("incomplete"); with it, "restored-partially"
   // names FileContents and the record is settled and deleted.
   for (const path of ['journal failed', 'killed after the put-back']) {
+    await begin(`39 ${path}`)
     const words = 'incomplete record ' + identity
     const { h, ok } = await seededBy(
       path === 'journal failed'
         ? { DICTATION_HELPER_TEST_FAIL_JOURNAL: 'restore-emptied' }
-        : { DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS: '15000' },
+        : { DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS: '60000' },
       [`#13|${u16(words)}`, `${EXTRA}|${b64('extra bytes for ' + words)}`, 'FileContents|-']
     )
     const reply = h.req('__clipboard-txn', { text: 'dictated text IR', holdMs: 300 })
@@ -2149,8 +2431,12 @@ async function main() {
       live = await reply
       await h.stop()
     } else {
-      const reached = await waitStage('restore-emptied')
-      await sleep(800)
+      // Round 30: killed at its own stall line (every retained format set back), not by any record's stage.
+      const reached = await atLine(
+        h,
+        'the end of its put-back',
+        /test-trace: stall PUTBACK_STALL_END_MS/
+      )
       await h.kill()
       live = { result: reached ? 'killed in its put-back' : 'did not reach its put-back' }
     }
@@ -2158,7 +2444,6 @@ async function main() {
     const there = observe()
     const r = start(release)
     await r.ready
-    await sleep(1000)
     const listed = await r.req('clipboard-offers')
     const offer = listed && listed.offers[0]
     const before = observe()
@@ -2174,7 +2459,7 @@ async function main() {
           acceptIncomplete: true
         })
       : null
-    await sleep(300)
+    await until(() => recordFiles().length === 0, 5000) // the settled record's deletion (polled, with a deadline)
     const left = recordFiles().length
     const listedAfter = await r.req('clipboard-offers')
     await r.stop()
@@ -2201,7 +2486,6 @@ async function main() {
         back.extra === 'extra bytes for ' + words,
       `${JSON.stringify(live)}; ${files} files; text there ${there.text}; ${JSON.stringify(offer)}; ${JSON.stringify(refused)}; ${JSON.stringify(accepted)}; ${left} left; ${JSON.stringify(listedAfter)}`
     )
-    cleanup()
   }
 
   // 40. Round 24 (Opus, the one rule at the user's Restore): a record whose only content format is lost on read-back
@@ -2209,18 +2493,22 @@ async function main() {
   // content; the user's Restore is refused before emptying ("nothing-to-restore"), the clipboard unchanged; the
   // record stays for Dismiss.
   {
+    await begin('40')
     const only = 'only custom content ' + identity
     const seeded = seed('only a custom format', [
       [RegisterClipboardFormatW(EXTRA), Buffer.from(only)]
     ])
     const k = start(testops, {
       DICTATION_HELPER_TEST: '1',
-      DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS: '15000'
+      DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS: '60000'
     })
     await k.ready
     void k.req('__clipboard-txn', { text: 'dictated text NR', holdMs: 200 })
-    const reached = await waitStage('restore-emptied')
-    await sleep(800)
+    const reached = !!(await atLine(
+      k,
+      'the end of its put-back',
+      /test-trace: stall PUTBACK_STALL_END_MS/
+    ))
     await k.kill()
     const files = recordFiles().length
     const z = start(testops, {
@@ -2228,7 +2516,6 @@ async function main() {
       DICTATION_HELPER_TEST_RECORD_LOSES_NAME: '1'
     })
     await z.ready
-    await sleep(1000)
     const listed = await z.req('clipboard-offers')
     const offer = listed && listed.offers[0]
     const before = observe()
@@ -2256,21 +2543,20 @@ async function main() {
         left === files,
       `${JSON.stringify(offer)}; ${JSON.stringify(answer)}; sequence ${before.sequence} -> ${after.sequence}; ${files} -> ${left} files`
     )
-    cleanup()
   }
 
   // 38. Round 22 (F7): whether a record's helper still runs cannot be told (test hook): nothing is judged or deleted on
   // that unknown (not offered, the dismiss refused, every file kept); a helper that can tell offers and restores it.
   {
+    await begin('38')
     copyMulti(user)
-    const kept = await keptRecord('dictated text U')
+    const kept = !!(await keptRecord('dictated text U'))
     const files = recordFiles().length
     const u = start(testops, {
       DICTATION_HELPER_TEST: '1',
       DICTATION_HELPER_TEST_LIVENESS_UNKNOWN: '1'
     })
     await u.ready
-    await sleep(1000)
     const listed = await u.req('clipboard-offers')
     const state = recordFiles().find((f) => f.endsWith('.state'))
     const dismissed = state
@@ -2282,7 +2568,6 @@ async function main() {
     await u.stop()
     const r = start(release)
     await r.ready
-    await sleep(1000)
     const again = await r.req('clipboard-offers')
     const offer = again && again.offers[0]
     const done = offer ? await restoreConfirming(r, offer) : null
@@ -2301,13 +2586,13 @@ async function main() {
         text() === user,
       `${files} files; ${JSON.stringify(listed)}; ${JSON.stringify(dismissed)}; ${left} left; ${JSON.stringify(done)}`
     )
-    cleanup()
   }
 
   // 33b. Round 21: the same stress WITH a concurrent NULL-window poller in another process (the suspected trigger):
   // it hammers OpenClipboard(NULL)/CloseClipboard. Every save must be either established with exactly the seeded
   // shape, or not established ("no-save") with the clipboard intact. Counted and quoted.
   {
+    await begin('33b')
     const poller = spawn(
       process.execPath,
       [
@@ -2316,6 +2601,7 @@ async function main() {
       ],
       { stdio: ['ignore', 'pipe', 'ignore'] }
     )
+    tracked(poller, 'the NULL-window poller')
     let polls = ''
     poller.stdout.on('data', (c) => (polls += c))
     const a = start(testops, { DICTATION_HELPER_TEST: '1' })
@@ -2354,6 +2640,7 @@ async function main() {
     }
     await a.stop()
     poller.kill()
+    await waitExit(poller)
     tallySaves('33b stress with a NULL-window poller', a.logs)
     console.log(
       `# 33b stress with a NULL-window poller: ${runs} saves in ${Date.now() - started} ms; ${good} established with the seeded shape, ${noSave} not established with the clipboard intact, ${bad} bad; poller opens: ${polls.trim() || '(still running)'}`
@@ -2369,6 +2656,7 @@ async function main() {
   // 33. Round 20 stress: the save alone, several hundred times (seeded and read back each time); every save must hold
   // exactly what was seeded (item count and lengths). Any mismatch prints its save line and fails.
   {
+    await begin('33')
     const a = start(testops, { DICTATION_HELPER_TEST: '1' })
     await a.ready
     const runs = 400
@@ -2409,14 +2697,15 @@ async function main() {
   // reports "restored" (nothing to set back), no offer, the record gone; and the same after a kill: the restarted
   // release helper offers it (0 formats) and the user's Restore reports "restored", the clipboard empty, record gone.
   for (const killed of [false, true]) {
+    await begin(`25d ${killed ? 'killed' : 'live'}`)
     const seeded = seed('an empty clipboard', [])
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: killed ? ['HOLD'] : [] })
     await a.ready
-    const reply = a.req('__clipboard-txn', { text: 'dictated text E', holdMs: killed ? 8000 : 300 })
-    for (let i = 0; i < 200 && text() !== 'dictated text E'; i++) await sleep(50)
+    const reply = a.req('__clipboard-txn', { text: 'dictated text E', holdMs: 300 })
     let live = null
     if (killed) {
-      await sleep(300)
+      await atLine(a, 'our write confirmed and held', HOLDING)
+      await atLine(a, 'the payload on disk', PAYLOAD)
       await a.kill()
     } else {
       live = await reply
@@ -2424,7 +2713,6 @@ async function main() {
     }
     const h = start(release)
     await h.ready
-    await sleep(1000)
     const listed = await h.req('clipboard-offers')
     if (!killed) {
       check(
@@ -2454,12 +2742,12 @@ async function main() {
       )
     }
     await h.stop()
-    cleanup()
   }
 
   // 25e'. Round 21: a seed of ONLY an oversize custom format (no text, so nothing synthesized). Round 23 (the one rule):
   // nothing with the user's content would go back, so the save is not established and nothing is pasted.
   {
+    await begin("25e'")
     const seeded = seed('only an oversize custom format', [
       [RegisterClipboardFormatW(EXTRA), Buffer.from('y'.repeat(200))]
     ])
@@ -2484,13 +2772,13 @@ async function main() {
         recordFiles().length === 0,
       `${JSON.stringify(live)}; sequence ${before.sequence} -> ${after.sequence}; ${recordFiles()}; ${saving}; ${why}`
     )
-    cleanup()
   }
 
   // 25e. Opus round 18 B1: a save in which EVERY format is over the cap (the test-build cap hook stands in for the
   // real 16 MiB per transaction, as a 4K screenshot's DIB exceeds it). Round 23 (the one rule): only CF_LOCALE fits,
   // which is no user content, so the save is not established and the clipboard is left as it was.
   {
+    await begin('25e')
     const big = 'x'.repeat(200)
     const seeded = seed('an all-oversize copy', [
       [13, Buffer.from(big + '\0', 'utf16le')],
@@ -2515,12 +2803,12 @@ async function main() {
         recordFiles().length === 0,
       `${JSON.stringify(live)}; sequence ${before.sequence} -> ${after.sequence}; ${recordFiles()}; ${why}`
     )
-    cleanup()
   }
 
   // 26. Astra round-17 P2-2: a failed restore that already emptied the clipboard (the user's Restore, every set-back
   // failing by a test hook) -> unrestored; the same helper's retry (3 s) and a restarted release helper never write.
   {
+    await begin('26')
     copyMulti(user)
     await keptRecord('dictated text V')
     const a = start(testops, {
@@ -2532,12 +2820,13 @@ async function main() {
     const offer = listed && listed.offers[0]
     const failed = offer ? await restoreConfirming(a, offer) : null
     const sequence = GetClipboardSequenceNumber()
-    await sleep(5000)
+    // Round 30: the same helper's own retry, by its line (not 5 s), and only then is the clipboard looked at.
+    const afterFailure = a.logs.length
+    await atLine(a, 'its own retry', /clipboard record \w+ \(retry\)/, { since: afterFailure })
     const quiet = GetClipboardSequenceNumber() === sequence
     await a.stop()
     const h = start(release)
     await h.ready
-    await sleep(1500)
     const again = await h.req('clipboard-offers')
     check(
       'a failed restore (every set-back failed): unrestored, no retry or restart writes, offered again',
@@ -2557,20 +2846,20 @@ async function main() {
   // 27. Astra round-17 P2-3: killed during adoption (after its offer-only fact is persisted, before the .bin.tmp move;
   // round 17 moved first): the restarted release helper adopts and offers it, our write left on the clipboard.
   {
+    await begin('27')
     copyMulti(user)
-    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD'] })
     await a.ready
-    void a.req('__clipboard-txn', { text: 'dictated text W', holdMs: 8000 })
-    for (let i = 0; i < 200 && text() !== 'dictated text W'; i++) await sleep(50)
-    for (let i = 0; i < 100 && !recordFiles().some((f) => f.endsWith('.bin')); i++) await sleep(50)
-    await sleep(300)
+    void a.req('__clipboard-txn', { text: 'dictated text W' })
+    await atLine(a, 'our write confirmed and held', HOLDING)
+    await atLine(a, 'the payload on disk', PAYLOAD)
     await a.kill()
     const bin = recordFiles().find((f) => f.endsWith('.bin'))
     if (bin) fs.renameSync(path.join(os.tmpdir(), bin), path.join(os.tmpdir(), bin + '.tmp'))
     // Its start-up check runs the adoption: kill it once the offer-only fact is on disk (the move waits 15 s).
     const b = start(testops, {
       DICTATION_HELPER_TEST: '1',
-      DICTATION_HELPER_TEST_STALL_IN_ADOPT_MS: '15000'
+      DICTATION_HELPER_TEST_STALL_IN_ADOPT_MS: '60000'
     })
     const marked = () => {
       const f = recordFiles().find((x) => x.endsWith('.state'))
@@ -2582,8 +2871,9 @@ async function main() {
         return false
       }
     }
-    for (let i = 0; i < 200 && !marked(); i++) await sleep(50)
-    await sleep(300)
+    // Round 30: killed at its own stall line (after the persist, before the move); marked() is checked below.
+    await atLine(b, 'the adoption stalled before its move', /test-trace: stall STALL_IN_ADOPT_MS/)
+    const persisted = marked()
     await b.kill()
     const st = recordFiles().find((f) => f.endsWith('.state'))
     const quarantined = st
@@ -2593,11 +2883,11 @@ async function main() {
     const sequence = GetClipboardSequenceNumber()
     const h = start(release)
     await h.ready
-    await sleep(1500)
     const listed = await h.req('clipboard-offers')
     check(
       "killed between the adoption's persist and its move: persisted first, then adopted and offered, never restored",
-      quarantined === true &&
+      persisted &&
+        quarantined === true &&
         tmpLeft &&
         !!listed &&
         listed.offers.length === 1 &&
@@ -2614,6 +2904,7 @@ async function main() {
   // "missing": next to an invalid state, and next to a valid one, both files are kept; once it can be looked at, the
   // release helper offers it. And a state whose payload is POSITIVELY absent is deleted (nothing to restore from).
   for (const invalidState of [true, false]) {
+    await begin(`28 ${invalidState ? 'invalid' : 'valid'} state`)
     copyMulti(user)
     await keptRecord('dictated text X ' + invalidState)
     const st = recordFiles().find((f) => f.endsWith('.state'))
@@ -2639,6 +2930,7 @@ async function main() {
     await h.stop()
   }
   {
+    await begin('28 payload absent')
     copyMulti(user)
     await keptRecord('dictated text X2')
     const bin = recordFiles().find((f) => f.endsWith('.bin'))
@@ -2658,6 +2950,7 @@ async function main() {
   // allows reading, not deletion): restored, the offer withdrawn at once and the state journaled "settled"; never
   // offered again; deleted once released.
   {
+    await begin('29')
     copyMulti(user)
     await keptRecord('dictated text Y')
     const h = start(release)
@@ -2666,14 +2959,10 @@ async function main() {
     const offer = listed && listed.offers[0]
     const bin = recordFiles().find((f) => f.endsWith('.bin'))
     const st = recordFiles().find((f) => f.endsWith('.state'))
-    const script = `$f = [System.IO.File]::Open($env:DN_LOCK, 'Open', 'Read', 'Read'); Start-Sleep -Milliseconds 6000; $f.Close()`
-    const lock = bin
-      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-          stdio: 'ignore',
-          env: { ...process.env, DN_LOCK: path.join(os.tmpdir(), bin) }
-        })
-      : null
-    await sleep(1200)
+    // Round 30: the payload held with read sharing by another process that SAYS it holds it (not 1.2 s).
+    const lock = bin ? lockFile(path.join(os.tmpdir(), bin), { share: 'read' }) : null
+    if (lock && !(await lock.locked))
+      check(`${frame.label}: reached the lock held by another process`, false, lock.output())
     const restored = offer ? await restoreConfirming(h, offer) : null
     const left = recordFiles().length
     const stage =
@@ -2696,7 +2985,7 @@ async function main() {
         again.offers.length === 0,
       `${JSON.stringify(restored)}; left ${left}; stage ${stage}; gone ${gone}; ${JSON.stringify(again)}`
     )
-    if (lock) await waitExit(lock)
+    if (lock) await lock.release()
     await h.req('clipboard-offers')
     check(
       'and the settled record is deleted once the payload is released',
@@ -2709,6 +2998,7 @@ async function main() {
   // 30. Round 18 item 3: an older-build (invalid: no offerOnly) state from an EARLIER boot naming another session is
   // rebuilt and offered here (the boot is checked before the session), not left to a session that no longer exists.
   {
+    await begin('30')
     copyMulti(user)
     await keptRecord('dictated text Z')
     const st = recordFiles().find((f) => f.endsWith('.state'))
@@ -2739,6 +3029,7 @@ async function main() {
   // clearing the payload .tmp's mark fails, the others clear): the deletion is completed from the beginning, never a
   // state left without its payload.
   {
+    await begin('13d')
     copyMulti(user)
     await keptRecord('dictated text L4')
     const a = start(testops, {
@@ -2764,13 +3055,159 @@ async function main() {
     )
   }
 
+  // 41. Round 30, the late path made deterministic: our write runs past its budget (WriteBounded, the real 1 s: no
+  // override here), forced by a gate. Attempt 1 of CI run 42842819157 took this path by chance in case 11 (and round
+  // 29's attempt 1 in case 15): the product was right both times; the cases did not account for it. Each outcome:
+  // (a) past the budget before emptying (an owner stalling in WM_DESTROYCLIPBOARD): nothing of ours is ever on the
+  // clipboard, the user's content goes back, the record is settled; (b) past it after our write closed (a slow journal):
+  // the late thread confirms and restores; (c)-(e) a change before that late confirmation (an addition, CF_TEXT replaced,
+  // another app's copy): kept as an offer, the change untouched, and the user's Restore gives the clipboard back.
+  for (const [label, gates, change, expect] of [
+    ['(a) before emptying', ['EMPTY'], null, 'restored'],
+    ['(b) after our write closed', ['WRITTEN'], null, 'restored'],
+    ['(c) an addition before the late confirmation', ['WRITTEN', 'CONFIRM'], 'add', 'unrestored'],
+    [
+      '(d) CF_TEXT replaced before the late confirmation',
+      ['WRITTEN', 'CONFIRM'],
+      'replace',
+      'unrestored'
+    ],
+    [
+      '(e) another app copies before the late confirmation',
+      ['WRITTEN', 'CONFIRM'],
+      'copy',
+      'user-changed'
+    ]
+  ]) {
+    await begin(`41 ${label.slice(0, 3)}`)
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates, realBudget: true })
+    await a.ready
+    const dictated = `dictated text LT ${label.slice(1, 2)}`
+    // The write waits at its gate: the transaction answers once the budget is over (the late path).
+    const result = await a.req('__clipboard-txn', { text: dictated, holdMs: 300 })
+    const budgetLine =
+      a.logs.find((l) => /the clipboard write ran past its 1000 ms budget/.test(l)) || null
+    // Before emptying the stalled write holds the clipboard open (nothing to read); after its close our text is there.
+    const during = gates[0] === 'WRITTEN' ? text() : null
+    a.open(gates[0])
+    let theirs = null
+    if (change) {
+      await atLine(a, 'the late confirmation at its gate', /test-trace: gate CONFIRM#1 waiting/)
+      if (change === 'add') addFormat()
+      if (change === 'replace') replaceFormat(1, Buffer.from('replaced ANSI\0', 'latin1'))
+      if (change === 'copy') copyMulti('a copy by another app')
+      theirs = names()
+      a.open('CONFIRM')
+    }
+    const ended = await a.waitEvent((e) => e.event === 'clipboard' && e.phase === 'late-restore')
+    const endLine = await a.waitLog(/the late clipboard write ended \(/)
+    await a.stop()
+    const after = observe()
+    const files = recordFiles().length
+    const userBack = after.text === user && after.extra === 'extra bytes for ' + user
+    const where =
+      gates[0] === 'EMPTY'
+        ? !!budgetLine &&
+          /journaled emptying at \d+ ms; now/.test(budgetLine) &&
+          !/emptied at/.test(budgetLine)
+        : !!budgetLine && /closed at \d+ ms; now/.test(budgetLine)
+    check(
+      `the late path, forced ${label}: answered late (no paste), the log names where the write was, the late result "${expect}"${expect === 'restored' ? ', the user clipboard back, the record settled' : ', kept as an offer, the change untouched'}`,
+      !!result &&
+        /^late\|/.test(String(result.result)) &&
+        where &&
+        (gates[0] === 'WRITTEN' ? during === dictated : true) &&
+        !!ended &&
+        ended.clipboard === expect &&
+        ended.id === result.id &&
+        !!endLine &&
+        endLine.endsWith(': ' + expect) &&
+        (expect === 'restored' ? userBack && files === 0 : files === 2) &&
+        (change === null || names() === theirs),
+      `${JSON.stringify(result)}; ${budgetLine}; during ${during}; ${JSON.stringify(ended)}; ${endLine}; ${files} files; ${names()}`
+    )
+    if (expect !== 'restored') {
+      const h = start(release)
+      await h.ready
+      const listed = await h.req('clipboard-offers')
+      const offer = listed && listed.offers[0]
+      const restored = offer ? await restoreConfirming(h, offer) : null
+      check(
+        `the late path ${label}: offered by the release helper; the user's Restore gives back the user clipboard`,
+        !!offer &&
+          listed.offers.length === 1 &&
+          !!restored &&
+          restored.result === 'restored' &&
+          names() === userFormats &&
+          recordFiles().length === 0,
+        `${JSON.stringify(listed)}; ${JSON.stringify(restored)}; ${names()}`
+      )
+      await h.stop()
+    }
+  }
+
+  // 42. Round 30, the crash point behind attempt 1's cascade (run 42842819157, case 5): a helper killed inside its
+  // FIRST state write, the .tmp written and not yet in place (test hook). Nothing of the clipboard was touched: only a
+  // lone .state.tmp is left; no offer; a young .tmp is left alone (it may be another helper's write in progress), and
+  // once older than 10 minutes the next look deletes it (a stray: no payload depends on it).
+  {
+    await begin('42')
+    copyMulti(user)
+    const before = observe()
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_STATE_TMP_STALL_MS: '60000'
+    })
+    await a.ready
+    void a.req('__clipboard-txn', { text: 'dictated text ST', holdMs: 300 })
+    const stalled = await atLine(
+      a,
+      'its first state write stalled with its .tmp written',
+      /test-trace: stall STATE_TMP_STALL_MS/
+    )
+    await a.kill()
+    const left = prefixFiles()
+    const after = observe()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check(
+      'killed inside its first state write: only a .state.tmp is left, the clipboard untouched (sequence too), nothing offered, the young .tmp left alone',
+      !!stalled &&
+        left.length === 1 &&
+        left[0].endsWith('.state.tmp') &&
+        after.text === user &&
+        after.extra === 'extra bytes for ' + user &&
+        after.sequence === before.sequence &&
+        !!listed &&
+        listed.offers.length === 0 &&
+        prefixFiles().length === 1,
+      `${left}; text ${after.text}; sequence ${before.sequence} -> ${after.sequence}; ${JSON.stringify(listed)}; ${listing()}`
+    )
+    for (const f of prefixFiles()) {
+      const old = new Date(Date.now() - 60 * 60 * 1000)
+      fs.utimesSync(path.join(os.tmpdir(), f), old, old)
+    }
+    await h.req('clipboard-offers')
+    check(
+      'and once older than 10 minutes the stray .state.tmp is deleted by the next look',
+      prefixFiles().length === 0 &&
+        h.logs.some((l) => /a stray state \.tmp .* was deleted/.test(l)),
+      `${listing()}; ${h.logs.filter((l) => /stray/.test(l)).join(' / ')}`
+    )
+    await h.stop()
+  }
+
   // 34. Round 21, the NULL-window open experiment (decides Opus's lead on the runner's Windows build): process A opens
   // the clipboard with NULL (then with its own message-only window) and holds it; process B calls OpenClipboard(NULL)
   // once, enumerates, and closes at once (or holds); A enumerates again while B acts. One table row per combination.
   {
+    await begin('34')
     copyMulti(user)
-    const A = start(testops, { DICTATION_HELPER_TEST: '1' })
-    const B = start(testops, { DICTATION_HELPER_TEST: '1' })
+    // Round 30: A holds at its gate until B has probed (or, holding, sits at its own gate); no timed waits.
+    const A = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['CLIPHOLD'] })
+    const B = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['CLIPPROBE'] })
     await A.ready
     await B.ready
     console.log(
@@ -2779,14 +3216,29 @@ async function main() {
     const rows = []
     for (const owner of ['null', 'window']) {
       for (const mode of ['closes at once', 'holds']) {
+        const markA = A.logs.length
+        const markB = B.logs.length
         const holding = A.req('__clip-hold', { owner, waitMs: 1500, holdMs: 1000 })
-        await sleep(500)
-        const probe = await B.req('__clip-probe', {
+        await atLine(A, 'A holding the clipboard', /test-trace: clip-hold opened/, { since: markA })
+        let probeReply = null
+        const probing = B.req('__clip-probe', {
           owner: 'null',
           waitMs: mode === 'holds' ? 1500 : 0,
           holdMs: 0
-        })
+        }).then((r) => (probeReply = r))
+        // B either closed at once (its reply), failed to open (its reply), or holds at its gate.
+        await until(
+          () =>
+            !!probeReply ||
+            B.logs.slice(markB).some((l) => /test-trace: gate CLIPPROBE#\d+ waiting/.test(l)),
+          20000
+        )
+        const bHolds = !probeReply
+        A.open('CLIPHOLD')
         const held = await holding
+        if (bHolds) B.open('CLIPPROBE')
+        await probing
+        const probe = probeReply
         const stillOpen = held && held.openWindowSecond === held.ownWindow
         const row = `# 34 | ${owner} | ${mode} | ${probe && probe.opened} (${probe && probe.openError}) | ${probe && probe.first} | ${held && held.first} | ${held && held.second} | ${held ? (owner === 'window' ? stillOpen : 'open window ' + held.openWindowSecond) : '?'} | ${held && held.closed} (${held && held.closeError})`
         rows.push({ owner, mode, probe, held })
@@ -2848,17 +3300,22 @@ async function main() {
     )
     try {
       for (const layout of ['00000419', '00000415', '']) {
+        await begin(`31 ${layout || 'default'}`)
         copyMulti(user)
-        const a = start(testops, {
-          DICTATION_HELPER_TEST: '1',
-          ...(layout ? { DICTATION_HELPER_TEST_KEYBOARD_LAYOUT: layout } : {})
-        })
+        const a = start(
+          testops,
+          {
+            DICTATION_HELPER_TEST: '1',
+            ...(layout ? { DICTATION_HELPER_TEST_KEYBOARD_LAYOUT: layout } : {})
+          },
+          { gates: ['HOLD'] }
+        )
         await a.ready
         const dictated = 'dictated text Ж ' + (layout || 'default')
-        const reply = a.req('__clipboard-txn', { text: dictated, holdMs: 1500 })
-        for (let i = 0; i < 200 && text() !== dictated; i++) await sleep(50)
-        await sleep(500)
+        const reply = a.req('__clipboard-txn', { text: dictated })
+        await atLine(a, 'our write confirmed and held', HOLDING)
         const stamped = readFormat(16)
+        a.open('HOLD')
         const result = await reply
         const forms = await a.req('__text-forms', { text: 'x', locale: 0 })
         const pinned = forms && forms.lastWriteLocale
@@ -2880,6 +3337,14 @@ async function main() {
       if (previousLayout) ActivateKeyboardLayout(previousLayout, 0)
     }
   }
+
+  // Round 30: the last case is verified like every other (its processes exited, nothing of this identity left).
+  await begin('(the end of the run)')
+  check(
+    `every one of ${casesBegun - 1} cases started from a verified clean state`,
+    dirtyAfter.length === 0,
+    dirtyAfter.join('; ')
+  )
 }
 
 main()
@@ -2889,6 +3354,7 @@ main()
   })
   .finally(() => {
     cleanup()
+    fs.rmSync(gateRoot, { recursive: true, force: true })
     console.log(`# seeds: ${seeds.ok} held, ${seeds.failed} failed`)
     for (const [group, t] of Object.entries(saveTally)) {
       console.log(
