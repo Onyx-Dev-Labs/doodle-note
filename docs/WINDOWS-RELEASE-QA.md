@@ -472,7 +472,20 @@ deadline is checked again right after them. The delivery's own kept-records chec
 and does file and clipboard work, which cannot be bounded in place (until round 35 its wait was therefore UNBOUNDED;
 the deadline check after it only prevented a late paste). Round 36: it runs on its own thread, and the delivery waits
 for it only while its deadline allows and at most 5 s; not done by then, the paste is refused ("clipboard-busy", or
-"deadline") with nothing emptied, and the check finishes on its own (it never writes the clipboard: CI case 55) (a paste that no longer fits empties nothing). The queued steps run before the helper exits, inside
+"deadline") with nothing emptied, and the check finishes on its own (it never writes the clipboard: CI case 55) (a paste that no longer fits empties nothing).
+Round 37 caveat (Opus, Astra P2), as round 36 shipped it: a check its delivery gave up on still ran once it got the
+lock, and a LATER delivery could be writing by then; it, like the 30-minute retention check (pre-existing), opens the
+clipboard with the helper's SAME window, which takes a running write's open over (the write fails, the record is kept
+as an offer: a spurious offer, not a loss); and every delivery during one stall started another check, so waiting
+checks accumulated without a bound. Round 37 fix: recovery never opens the clipboard while a delivery is in flight.
+Every automatic look (a delivery's check, a retry, the retention check) holds a look lock from before it reads the
+in-flight set to its close, and skips ("a delivery is in flight: no clipboard look now"; kept, checked again later)
+when a delivery is in flight; a delivery, once its record is in flight, waits for a look already inside (at most 1 s;
+past it, "clipboard-busy", nothing emptied). There is ONE delivery check at a time, shared: a delivery joins the
+outstanding check while it still waits for the lock, or waits (within its own allowance) for a running one before
+starting the next; a check that no delivery waits for any more does nothing once it gets the lock, and stops between
+records (CI case 56: three deliveries during one stall, one check thread; case 57: the retention check during a held
+write). The queued steps run before the helper exits, inside
 its usual exit wait; past it, a record left behind is judged by content at the next start. The background writer
 serializes every write (one queue, in order) on immutable snapshots, and a record settled meanwhile is never written
 again, so an older queued write can never overwrite the settlement or recreate a deleted state. Every state write goes
