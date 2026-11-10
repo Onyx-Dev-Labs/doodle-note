@@ -497,10 +497,21 @@ gives it, checks that exactly the buttons the view asked for are shown and in vi
 clicks each button through the overlay window's own URL pattern. An offer card's buttons name the record the page
 shows, and the app acts only on that record (a click never reaches an offer that became current since). A Restore
 that got no answer in time is matched to its later result by its record (round 25: a rebuilt record has no
-delivery). Round 26: each user's Restore request completes EXACTLY ONCE, by whichever of its recovered event or its
-reply comes first (the helper sends the event first; a request that timed out completes by its event); the other,
-and any repeated event, is consumed silently. An event that names neither a delivery nor a record never changes a
-notice, whether or not a delivery has happened yet.
+delivery). An event that names neither a delivery nor a record never changes a notice.
+
+The clipboard notice model (round 28; dictation-notice.ts, a pure reducer with its own tests). The app keeps ONE notice
+slot, separate from the offer card and from every other panel; the overlay shows the slot's notice while one is
+current. (a) A Restore request completes exactly once, by whichever of its recovered event or its reply comes first
+(the other is consumed; a request whose reply was "no answer in time" completes by its later event), and a completion
+with something to say sets the slot. While a record's Restore is outstanding its card reads "Restoring…" (not
+clickable; Dismiss stays) and a further click is ignored; after the reply a retry works. (b) A later user
+interaction (Dismiss of any card, a click on a card, a new dictation, a transform) supersedes the notice for good:
+no path shows it again. (c) Offer-gone, offer-added and offer-list refreshes never change the slot. (d) A newer
+completion or delivery report replaces an older notice. (e) A notice ends only by (b), (d) or its own timer. A
+permutation test runs every ordering of scripts of these events (6,480 orderings, one and two records) through the
+production client and the service and checks: never two notices for one completion, a superseded notice never
+returns, a completion not superseded since is visible at the end, and the notice shown is always the one raised
+last.
 
 | Class | What | The save | The put-back | What the user is told |
 | --- | --- | --- | --- | --- |
