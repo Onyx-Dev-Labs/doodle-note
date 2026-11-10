@@ -43,6 +43,9 @@ const IsClipboardFormatAvailable = user32.func(
   'bool __stdcall IsClipboardFormatAvailable(uint32 f)'
 )
 const GetLastError = kernel32.func('uint32 __stdcall GetLastError()')
+const ProcessIdToSessionId = kernel32.func(
+  'bool __stdcall ProcessIdToSessionId(uint32 pid, _Out_ uint32 *session)'
+)
 const GlobalAlloc = kernel32.func('void* __stdcall GlobalAlloc(uint32 f, uintptr n)')
 const GlobalLock = kernel32.func('void* __stdcall GlobalLock(void* h)')
 const GlobalUnlock = kernel32.func('bool __stdcall GlobalUnlock(void* h)')
@@ -3642,8 +3645,9 @@ async function main() {
       const after = contentSnapshot()
       await h.stop()
       check(
-        `${tag}46(a) killed before its EmptyClipboard (the durable state "emptying" and the payload on disk): deleted by the content proof, nothing offered, the clipboard unchanged (bytes and sequence)`,
-        c.at &&
+        `${tag}46(a) killed before its EmptyClipboard (the durable state "emptying" and the payload on disk): deleted (round 34: by the unchanged-since-capture proof; the content proof would too), nothing offered, the clipboard unchanged (bytes and sequence)`,
+        (!mutant || h.logs.some((l) => /MUTANT \(test\): stage emptying/.test(l))) &&
+          c.at &&
           c.stage === 'emptying' &&
           c.bin &&
           !!listed &&
@@ -3681,8 +3685,13 @@ async function main() {
         )
       else
         check(
-          `${tag}46(b) is CAUGHT: the record is deleted by its stage instead of offered (the check above would fail)`,
-          c.at && !ok && !!listed && listed.offers.length === 0 && prefixFiles().length === 0,
+          `${tag}46(b) is CAUGHT: the record is deleted by its stage instead of offered (the check above would fail); the mutant branch ran`,
+          h.logs.some((l) => /MUTANT \(test\): stage emptying/.test(l)) &&
+            c.at &&
+            !ok &&
+            !!listed &&
+            listed.offers.length === 0 &&
+            prefixFiles().length === 0,
           `${JSON.stringify(listed)}; ${listing()}`
         )
       if (mutant) cleanup() // the mutant may have left nothing or something; the next case starts clean either way
@@ -3719,8 +3728,9 @@ async function main() {
         )
       else
         check(
-          `${tag}46(c) is CAUGHT: the record of an EMPTIED clipboard is deleted by its stage (the user's content lost; the check above would fail)`,
-          c.at &&
+          `${tag}46(c) is CAUGHT: the record of an EMPTIED clipboard is deleted by its stage (the user's content lost; the check above would fail); the mutant branch ran`,
+          h.logs.some((l) => /MUTANT \(test\): stage emptying/.test(l)) &&
+            c.at &&
             !ok &&
             !!listed &&
             listed.offers.length === 0 &&
@@ -3729,6 +3739,158 @@ async function main() {
           `${JSON.stringify(listed)}; ${listing()}; text ${back.text}`
         )
     }
+  }
+
+  // 46d. Round 34 (Opus): an INCOMPLETE save (a format over the cap: test hook) whose helper ends before its EmptyClipboard.
+  // The content proof cannot delete it (only a whole save is ever "already there"); the clipboard unchanged since the
+  // capture (the sequence in the first durable state, the same logon and boot) proves nothing was emptied: deleted,
+  // never offered, nothing written. If the user copied something since, it is offered as incomplete (the residual: the
+  // card says the clipboard may still hold all of it).
+  for (const copies of [false, true]) {
+    await begin(`46d ${copies ? 'copied since' : 'unchanged'}`)
+    const short = 'short ' + identity.slice(-4)
+    seed('an incomplete save', [
+      [13, Buffer.from(short + '\0', 'utf16le')],
+      [RegisterClipboardFormatW(EXTRA), Buffer.alloc(200, 0x7a)]
+    ])
+    const before = contentSnapshot()
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_CLIP_MAXBYTES: '64' },
+      { gates: ['EMPTY'] }
+    )
+    await a.ready
+    void a.req('__clipboard-txn', { text: 'dictated text IC', holdMs: 300 })
+    const at = await atLine(a, 'held before its EmptyClipboard', /test-trace: gate EMPTY#1 waiting/)
+    await a.kill()
+    if (copies) copyMulti(theirCopy)
+    const mid = contentSnapshot()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    const now = contentSnapshot()
+    const gone = offer ? await h.req('clipboard-dismiss', { record: offer.record }) : null
+    await h.stop()
+    const proof = h.logs.some((l) => /unchanged since its capture/.test(l))
+    if (!copies)
+      check(
+        '46(d) an incomplete save, killed before its EmptyClipboard: deleted by the unchanged-since-capture proof, never offered, the clipboard unchanged (bytes and sequence)',
+        !!at &&
+          proof &&
+          !!listed &&
+          listed.offers.length === 0 &&
+          prefixFiles().length === 0 &&
+          JSON.stringify(now) === JSON.stringify(before),
+        `${JSON.stringify(listed)}; proof line ${proof}; ${listing()}; ${JSON.stringify(now)} vs ${JSON.stringify(before)}`
+      )
+    else
+      check(
+        '46(d) the same, then the user copies: offered as incomplete (the documented residual), their copy untouched; Dismiss deletes it',
+        !!at &&
+          !proof &&
+          !!offer &&
+          offer.incomplete === true &&
+          JSON.stringify(now) === JSON.stringify(mid) &&
+          !!gone &&
+          gone.dismissed === true,
+        `${JSON.stringify(listed)}; ${JSON.stringify(gone)}; ${JSON.stringify(now)} vs ${JSON.stringify(mid)}`
+      )
+  }
+
+  // 50. Round 34 (Astra P2): Begin's 2 s is not held by a stalled RENAME. The writer holds the record's lock across its
+  // renames (the state's, then the payload's); a gate inside that lock, right before the rename, stalls it. Begin gives
+  // up by a compare-and-swap (no lock): "no-record" within the bound, nothing emptied; the writer, once released,
+  // publishes nothing more and removes what it had published.
+  for (const [what, gate] of [
+    ['the first state', 'PUBLISH'],
+    ['the payload', 'PUBLISH_PAYLOAD']
+  ]) {
+    await begin(`50 ${what}`)
+    copyMulti(user)
+    const before = contentSnapshot()
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: [gate] })
+    await a.ready
+    const t0 = Date.now()
+    const live = await a.req('__clipboard-txn', { text: 'dictated text RN', holdMs: 300 })
+    const took = Date.now() - t0
+    const held = await a.waitLog(new RegExp(`test-trace: gate ${gate}#1 waiting`), { ms: 1000 })
+    const after = contentSnapshot()
+    a.open(gate)
+    const removed = await a.waitLog(/not established; its files removed/, { ms: 15000 })
+    await a.stop()
+    check(
+      `a stalled rename of ${what} inside the record's lock: Begin answers "no-record" within the bound (it does not wait on the lock), nothing emptied (bytes and sequence); released, the writer removes what it published`,
+      !!live &&
+        live.result === 'no-record' &&
+        took < 4500 &&
+        !!held &&
+        JSON.stringify(after) === JSON.stringify(before) &&
+        !!removed &&
+        prefixFiles().length === 0,
+      `${JSON.stringify(live)} in ${took} ms; held ${!!held}; ${removed}; ${listing()}`
+    )
+  }
+
+  // 51. Round 34 (Astra, Opus): a kill DURING an asynchronous journal write. The "written" snapshot's .tmp is written and
+  // its rename held at a gate (PUBLISH#2; #1 is Begin's own state): killed there (between the .tmp and the rename), or
+  // released and killed 0-10 ms later (around the rename). Every time the record survives whole (its state valid, its
+  // payload there, no "~RF" temporary), is offered, and Dismiss removes every file (the .tmp too). Under File.Replace a
+  // kill inside the rename could leave the state missing; this case is the one that would notice (by chance, not by
+  // construction: a rename cannot be stopped half-way).
+  {
+    await begin('51')
+    const bad = []
+    let beforeRename = 0
+    let afterRename = 0
+    for (let n = 0; n < 12; n++) {
+      copyMulti(user)
+      const a = start(testops, { DICTATION_HELPER_TEST: '1' }, { gates: ['HOLD', 'PUBLISH'] })
+      await a.ready
+      a.open('PUBLISH') // Begin's own state passes
+      void a.req('__clipboard-txn', { text: `dictated text KR ${n}` })
+      const at = await atLine(
+        a,
+        'the "written" journal held before its rename',
+        /test-trace: gate PUBLISH#2 waiting/
+      )
+      if (n > 0) {
+        a.open('PUBLISH')
+        if (n > 1) await sleep(n - 2)
+      }
+      await a.kill()
+      const files = prefixFiles()
+      const st = recordFiles().find((f) => f.endsWith('.state'))
+      const id = st ? st.slice(recordPrefix.length, recordPrefix.length + 32) : null
+      const stage = id ? stageOf(id) : null
+      if (stage === 'emptying') beforeRename++
+      if (stage === 'written') afterRename++
+      const whole =
+        !!at &&
+        !!id &&
+        ['emptying', 'written'].includes(stage) &&
+        recordFiles().some((f) => f.endsWith('.bin')) &&
+        !files.some((f) => /~RF/i.test(f))
+      const h = start(release)
+      await h.ready
+      const listed = await h.req('clipboard-offers')
+      const offer = listed && listed.offers[0]
+      const gone = offer ? await h.req('clipboard-dismiss', { record: offer.record }) : null
+      await h.stop()
+      if (!whole || !offer || !gone || gone.dismissed !== true || prefixFiles().length !== 0)
+        bad.push(
+          `#${n}: files ${files.join(',')}; stage ${stage}; ${JSON.stringify(listed)}; ${JSON.stringify(gone)}; left ${listing()}`
+        )
+      cleanup()
+    }
+    console.log(
+      `# 51 kills around an asynchronous journal rename: ${beforeRename} before it (the .tmp written, the state not yet replaced), ${afterRename} after it`
+    )
+    check(
+      "killed between an asynchronous journal write's .tmp and its rename, and around the rename (12 kills): the record always survives whole (valid state, payload, no ~RF), is offered, and Dismiss removes every file",
+      bad.length === 0 && beforeRename >= 1,
+      bad.join(' / ')
+    )
   }
 
   // 47. Round 33 (b, f): the payload not on disk in time: the write is NOT established (no record, no paste: "no-record")
@@ -3809,28 +3971,64 @@ async function main() {
     )
   }
 
-  // 49. Round 33: earlier builds' File.Replace leftovers ("<state>~RF<hex>.TMP": a copy of an old state, no user content)
-  // are deleted once older than 10 minutes; a fresh one is left alone (it may be another helper's replace in progress).
+  // 49. Round 33, round 34 (Astra P2, Opus 5): earlier builds' File.Replace leftovers ("<state>~RF<hex>.TMP": a copy of an
+  // old state, no user content) are deleted only when nothing can still be replacing through them: older than 10
+  // minutes AND the copy names this session AND a helper proven not running (and the record's own state, if present,
+  // too). Kept: a fresh one, one naming a RUNNING helper, one of another session, an unreadable one, one whose record's
+  // state names a running helper; never touched: another identity's, a payload's, and a foreign ~RF file.
   {
     await begin('49')
-    const id = crypto.randomBytes(16).toString('hex')
-    const stale = path.join(os.tmpdir(), `${recordPrefix}${id}.state~RF1a2b3.TMP`)
-    const fresh = path.join(os.tmpdir(), `${recordPrefix}${id}.state~RF4c5d6.TMP`)
-    fs.writeFileSync(stale, '{}')
-    fs.writeFileSync(fresh, '{}')
+    const sessionOut = [0]
+    ProcessIdToSessionId(process.pid, sessionOut)
+    const session = sessionOut[0]
+    const live = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await live.ready
     const old = new Date(Date.now() - 11 * 60 * 1000)
-    fs.utimesSync(stale, old, old)
+    const make = (name, body, aged = true) => {
+      const full = path.join(os.tmpdir(), name)
+      fs.writeFileSync(full, body)
+      if (aged) fs.utimesSync(full, old, old)
+      return full
+    }
+    const hex = () => crypto.randomBytes(16).toString('hex')
+    const dead = (s) => JSON.stringify({ session: s, pid: 0, pidStart: 0 })
+    const idLiveState = hex()
+    const files = {
+      deleted: make(`${recordPrefix}${hex()}.state~RF1a2b3.TMP`, dead(session)),
+      fresh: make(`${recordPrefix}${hex()}.state~RF4c5d6.TMP`, dead(session), false),
+      running: make(
+        `${recordPrefix}${hex()}.state~RF7e8f9.TMP`,
+        JSON.stringify({ session, pid: live.child.pid, pidStart: 0 })
+      ),
+      otherSession: make(`${recordPrefix}${hex()}.state~RFa1b2c.TMP`, dead(session + 1)),
+      unreadable: make(`${recordPrefix}${hex()}.state~RFd3e4f.TMP`, '{'),
+      liveRecord: make(`${recordPrefix}${idLiveState}.state~RF5a6b7.TMP`, dead(session)),
+      otherIdentity: make(
+        `DoodleNote-Bark-clipboard-${identity}-foo-${hex()}.state~RF8c9d0.TMP`,
+        dead(session)
+      ),
+      payload: make(`${recordPrefix}${hex()}.bin~RFe1f2a.TMP`, dead(session)),
+      foreign: make(`dn-ci-foreign-${identity}.docx~RFb3c4d.TMP`, 'x')
+    }
+    // The record whose own state names the running helper (an invalid state: left to its helper, never judged).
+    const liveState = make(
+      `${recordPrefix}${idLiveState}.state`,
+      JSON.stringify({ session, pid: live.child.pid, pidStart: 0 }),
+      false
+    )
     const h = start(release)
     await h.ready
     await h.req('clipboard-offers')
-    const swept = !fs.existsSync(stale)
-    const kept = fs.existsSync(fresh)
     await h.stop()
-    fs.rmSync(fresh, { force: true })
+    await live.stop()
+    const exists = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, fs.existsSync(f)]))
+    for (const f of [...Object.values(files), liveState]) fs.rmSync(f, { force: true })
     check(
-      "an earlier build's replace leftover older than 10 minutes is deleted; a fresh one is left alone",
-      swept && kept && h.logs.some((l) => /a stray replace leftover .* was deleted/.test(l)),
-      `swept ${swept}; fresh kept ${kept}; ${listing()}`
+      "earlier builds' replace leftovers: deleted only when old, of this session and naming no running helper; kept otherwise; another identity's, a payload's and a foreign ~RF file untouched",
+      !exists.deleted &&
+        Object.entries(exists).every(([k, there]) => k === 'deleted' || there) &&
+        h.logs.some((l) => /a stray replace leftover .* was deleted/.test(l)),
+      JSON.stringify(exists)
     )
   }
 
