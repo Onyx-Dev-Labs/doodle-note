@@ -270,7 +270,7 @@ namespace DoodleNote.DictationHelper
                 }
                 byte[] sealedBytes = ProtectedData.Protect(plain.ToArray(), Entropy, DataProtectionScope.CurrentUser);
                 File.WriteAllBytes(tmp, sealedBytes);
-                if (TestPayloadDelayMs > 0) Thread.Sleep(TestPayloadDelayMs); // test build only: a slow disk / AV scan
+                TestMode.Stall("PAYLOAD_DELAY_MS", TestPayloadDelayMs); // test build only: a slow disk / AV scan
                 // Publication and settlement exclude each other: a settled record is never published.
                 lock (record.Gate)
                 {
@@ -459,6 +459,8 @@ namespace DoodleNote.DictationHelper
                 stream.Write(bytes, 0, bytes.Length);
                 stream.Flush(true);
             }
+            // Test build only (round 30): killed with the state's .tmp written and not yet in place (CI run 42842819157).
+            TestMode.Stall("STATE_TMP_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_STATE_TMP_STALL_MS", 0));
             if (Probe(path) != Presence.Absent) File.Replace(tmp, path, null); // atomic replacement (throws if it is not there after all)
             else File.Move(tmp, path);
         }
@@ -569,7 +571,7 @@ namespace DoodleNote.DictationHelper
                     if (!hook && Native.SetFileInformationByHandle(held[i], Native.FileDispositionInfo, ref mark, 1))
                     {
                         // Test build only: be killed between two marks (the marks set so far are honoured at termination).
-                        if (TestMode.Int("DICTATION_HELPER_TEST_DELETE_STALL_AFTER_MARK", 0) == i + 1) Thread.Sleep(15000);
+                        if (TestMode.Int("DICTATION_HELPER_TEST_DELETE_STALL_AFTER_MARK", 0) == i + 1) TestMode.Stall("DELETE_STALL_AFTER_MARK", 15000);
                         continue;
                     }
                     Wire.Log("a record file could not be marked for deletion (" + (hook ? "test hook" : "error " + Marshal.GetLastWin32Error()) + ")");
@@ -671,7 +673,8 @@ namespace DoodleNote.DictationHelper
                 string verdict;
                 try { verdict = RecoverOne(id, out result, false, 0); }
                 catch (Exception error) { verdict = "ERROR: " + error.GetType().Name + "; kept"; result = RecoverResult.Failed; }
-                if (verdict != null) Wire.Log("clipboard record " + id.Substring(0, 8) + " (retry): " + verdict);
+                // Round 30: every retry says it ran (a check with nothing to report too), so its effect can be awaited.
+                Wire.Log("clipboard record " + id.Substring(0, 8) + " (retry): " + (verdict ?? "checked (" + result.ToString().ToLowerInvariant() + ")"));
                 AfterCheck(id, result, true);
             }
         }
@@ -1089,8 +1092,8 @@ namespace DoodleNote.DictationHelper
                     return "the clipboard could not be emptied; kept for a retry";
                 }
                 bool journaled = Stage(journal, "recovering-emptied", Native.GetClipboardSequenceNumber());
-                int stall = TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_MS", 0);
-                if (stall > 0) Thread.Sleep(stall); // test build only: die with the clipboard emptied by the user's Restore
+                // Test build only: die with the clipboard emptied by the user's Restore.
+                TestMode.Stall("RECOVERY_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_RECOVERY_STALL_MS", 0));
                 bool setOk = saved.PutBackOpen(trace);
                 string restored = saved.PutBackResult(setOk);
                 // Round 22 (S3): an incomplete record's put-back of everything that survived answers exactly that.
@@ -1216,8 +1219,7 @@ namespace DoodleNote.DictationHelper
             catch (EndOfStreamException) { return "corrupt"; }
             // Persisted before it is published (hygiene: nothing on disk grants authority since round 18 either way).
             if (beforeMove != null) beforeMove();
-            int stallAdopt = TestMode.Int("DICTATION_HELPER_TEST_STALL_IN_ADOPT_MS", 0); // test build only: killed before the move
-            if (stallAdopt > 0) Thread.Sleep(stallAdopt);
+            TestMode.Stall("STALL_IN_ADOPT_MS", TestMode.Int("DICTATION_HELPER_TEST_STALL_IN_ADOPT_MS", 0)); // test build only: killed before the move
             try { File.Move(tmp, PayloadPath(id)); return "adopted"; }
             catch (Exception error) { if (error is IOException || error is UnauthorizedAccessException) return "busy"; throw; }
         }

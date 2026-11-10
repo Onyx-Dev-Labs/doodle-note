@@ -417,7 +417,10 @@ namespace DoodleNote.DictationHelper
                     return "thrown/" + clip + "|" + savedFormats;
                 }
             }
-            if (holdMs > 0) Thread.Sleep(holdMs);
+            // Round 30: the harness acts once our write is written and judged (never after a timed guess); with the HOLD
+            // gate the "paste" window lasts until the harness opens it.
+            TestMode.Trace("txn holding " + (saved.Record != null ? saved.Record.Id.Substring(0, 8) : "(no record)") + " confirmed=" + ours.Confirmed + " rejected=" + ours.Rejected + " foreign=" + ours.ForeignAtConfirm);
+            if (!TestMode.Gate("HOLD") && holdMs > 0) Thread.Sleep(holdMs);
             // As before Ctrl+V (the real check): a clipboard that changed hands meanwhile is left alone; one that could
             // not be looked at keeps its record (the restore below then runs only on proof, or is kept for a retry).
             if (!ours.LooksOurs())
@@ -429,8 +432,7 @@ namespace DoodleNote.DictationHelper
                 if (look == SavedClipboard.Inspection.OwnedButChanged) { saved.KeepAsOffer("owned but not exactly our write"); return "owned-but-changed/unrestored|" + savedFormats; }
             }
             // Test build only: be killed after the "paste" and before the restore.
-            int beforeRestore = TestMode.Int("DICTATION_HELPER_TEST_STALL_BEFORE_RESTORE_MS", 0);
-            if (beforeRestore > 0) Thread.Sleep(beforeRestore);
+            TestMode.Stall("STALL_BEFORE_RESTORE_MS", TestMode.Int("DICTATION_HELPER_TEST_STALL_BEFORE_RESTORE_MS", 0));
             // Test build only: a target that pastes by reading the synthesized ANSI text formats (an ANSI or
             // RichEdit app does), on another thread right after "Ctrl+V", as a real target would.
             if (TestMode.Env("DICTATION_HELPER_TEST_TARGET_READ") == "ansi") SimulateAnsiTargetRead();
@@ -504,11 +506,11 @@ namespace DoodleNote.DictationHelper
             lateWrite = late;
             if (late != null)
             {
-                // Our write is still waiting inside EmptyClipboard on the owner. When that returns, the
-                // write puts the user's saved content back instead of ours (and finishes the record, and
-                // tells the app); until then nobody can say what the clipboard will hold, so the result
-                // says so (and nothing is pasted).
-                Wire.Log("emptying the clipboard is waiting on its owner; not pasting (the saved content goes back when it returns)");
+                // Our write ran past its budget (WriteBounded logged where it was: emptying on a slow owner, a journal on a
+                // slow disk, ...). When it ends, the write puts the user's saved content back instead of ours (and
+                // finishes the record, and tells the app); until then nobody can say what the clipboard will hold, so the
+                // result says so (and nothing is pasted). Round 30: no cause is named here that was not measured.
+                Wire.Log("our clipboard write ran past its budget; not pasting (the saved content goes back when it ends)");
                 clipboardAfterFailedWrite = "unrestored";
                 holdsAfterFailedWrite = "unknown";
                 return null;
@@ -593,7 +595,9 @@ namespace DoodleNote.DictationHelper
             PendingRecord record = PendingClipboard.Begin(saved, text);
             if (record == null) { deliveryNoSave = "no-record"; return "no-record"; }
             saved.Record = record;
-            written = ClipboardText.WriteBounded(text, out ours, saved, WriteBudgetMs, out late);
+            // Test build only (round 30): a case that is not about the budget sets a generous one, so its outcome is the path it
+            // tests (the late path has its own cases, forced by gates; see the offers end-to-end check).
+            written = ClipboardText.WriteBounded(text, out ours, saved, TestMode.Int("DICTATION_HELPER_TEST_WRITE_BUDGET_MS", WriteBudgetMs), out late);
             return null;
         }
 
@@ -1182,6 +1186,19 @@ namespace DoodleNote.DictationHelper
             /// <summary>The rollback's result once done (null while it still runs), and what the clipboard then holds.</summary>
             public volatile string Outcome;
             public string Holds;
+
+            // Round 30: each step of the write and when it was reached, so a write that runs past its budget is
+            // logged with where it was (CI run 42842819157 could only infer it).
+            readonly Stopwatch clock = Stopwatch.StartNew();
+            readonly System.Text.StringBuilder steps = new System.Text.StringBuilder();
+            public void Mark(string step)
+            {
+                lock (steps) steps.Append(steps.Length == 0 ? "" : ", ").Append(step).Append(" at ").Append(clock.ElapsedMilliseconds).Append(" ms");
+            }
+            public string Timeline()
+            {
+                lock (steps) return (steps.Length == 0 ? "not opened yet" : steps.ToString()) + "; now " + clock.ElapsedMilliseconds + " ms";
+            }
         }
 
         /// <summary>
@@ -1245,6 +1262,7 @@ namespace DoodleNote.DictationHelper
                     {
                         job.Holds = outcome == "unrestored" ? "unknown" : null;
                         job.Outcome = outcome;
+                        Wire.Log("the late clipboard write ended (" + job.Timeline() + "): " + outcome);
                         // Whenever it lands (before or after the reply), the app learns what happened; LateEnd runs whatever.
                         try
                         {
@@ -1269,12 +1287,14 @@ namespace DoodleNote.DictationHelper
             DeliveriesInFlight.LateBegin();
             if (!thread.Join(Math.Max(1, budgetMs)) && Interlocked.CompareExchange(ref job.State, 2, 0) == 0)
             {
+                Wire.Log("the clipboard write ran past its " + budgetMs + " ms budget (" + job.Timeline() + "); not pasting: when it ends, the user's saved content goes back instead of ours");
                 late = job;
                 ownership = new ClipboardOwnership();
                 return false;
             }
             DeliveriesInFlight.LateEnd();
             thread.Join();
+            TestMode.Trace("write " + job.Timeline());
             ownership = job.Ours ?? new ClipboardOwnership();
             // The confirmation re-opens the clipboard while we own it (nothing waits on another app),
             // so it runs here, outside the write's bound ("written" is already journaled inside Write).
@@ -1301,12 +1321,14 @@ namespace DoodleNote.DictationHelper
             PutBackTrace trace = null;
             if (TestMode.Env("DICTATION_HELPER_TEST_WRITE_OPEN_FAILS") == "1" || !Open())
             {
+                if (job != null) job.Mark("open failed");
                 // Round 25 (Astra S3): another app holds the clipboard right after the save: nothing emptied; the reason
                 // reaches the app (the typing fallback may still run).
                 ownership.NotStarted = "clipboard-busy";
                 if (previousLayout != IntPtr.Zero) Native.ActivateKeyboardLayout(previousLayout, 0);
                 return false;
             }
+            if (job != null) job.Mark("opened");
             bool ok = false;
             try
             {
@@ -1330,21 +1352,24 @@ namespace DoodleNote.DictationHelper
                     ownership.NotStarted = "no-record";
                     return false;
                 }
+                if (job != null) job.Mark("journaled emptying");
                 // Test build only: an owner that stalls in WM_DESTROYCLIPBOARD (or a helper that dies before
-                // its EmptyClipboard), without needing one.
-                int stall = TestMode.Int("DICTATION_HELPER_TEST_EMPTY_STALL_MS", 0);
-                if (stall > 0) Thread.Sleep(stall);
+                // its EmptyClipboard), without needing one. Round 30: or held at a gate (the late path, forced).
+                TestMode.Gate("EMPTY");
+                TestMode.Stall("EMPTY_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_EMPTY_STALL_MS", 0));
                 if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_EMPTY") != "1" && Native.EmptyClipboard())
                 {
                     // Round 23 (B1): the irreversible fact FIRST, on the very next statement: whatever throws from here
                     // on (a journal, a rollback, a trace), the user's content is off the clipboard and every caller knows.
                     ownership.Emptied = true;
+                    if (job != null) job.Mark("emptied");
                     // The sequence right after OUR EmptyClipboard, read under the same lock (journaled for diagnostics;
                     // since round 18 no sequence on disk is proof of anything).
                     uint emptiedAt = Native.GetClipboardSequenceNumber();
                     bool journaled = PendingClipboard.Stage(record, "emptied", emptiedAt);
-                    int afterEmpty = TestMode.Int("DICTATION_HELPER_TEST_STALL_AFTER_EMPTY_MS", 0);
-                    if (afterEmpty > 0) Thread.Sleep(afterEmpty); // test build only: die with the clipboard emptied
+                    if (job != null) job.Mark("journaled emptied");
+                    // Test build only: die with the clipboard emptied.
+                    TestMode.Stall("STALL_AFTER_EMPTY_MS", TestMode.Int("DICTATION_HELPER_TEST_STALL_AFTER_EMPTY_MS", 0));
                     bool abandoned = job != null && job.Abandoned;
                     if (saved != null && (abandoned || !journaled))
                     {
@@ -1392,6 +1417,7 @@ namespace DoodleNote.DictationHelper
                     // Sampled INSIDE the same open/close as our SetClipboardData: nobody else can
                     // write while we hold the clipboard.
                     ownership.SequenceInside = Sequence("inside");
+                    if (job != null) job.Mark("set");
                 }
                 else
                 {
@@ -1405,16 +1431,20 @@ namespace DoodleNote.DictationHelper
                 Native.ClearLastError(0); // round 22 (S6): the error read is this close's own
                 bool closed = Native.CloseClipboard();
                 int closeError = closed ? 0 : Marshal.GetLastWin32Error();
+                if (job != null) job.Mark(closed ? "closed" : "close failed");
                 if (trace != null) trace.Closed(closed, closeError);
                 if (previousLayout != IntPtr.Zero) Native.ActivateKeyboardLayout(previousLayout, 0); // test build only (see above)
             }
             if (ownership.Emptied)
             {
                 // Journaled right after the close (before any confirmation), on the normal and the late path.
-                int beforeWritten = TestMode.Int("DICTATION_HELPER_TEST_STALL_BEFORE_WRITTEN_MS", 0);
-                if (beforeWritten > 0) Thread.Sleep(beforeWritten); // test build only: die before "written" is journaled
+                // Test build only: die before "written" is journaled. Round 30: or held at a gate (our text on the clipboard,
+                // the write past its budget: the late path's confirmation and restore, forced).
+                TestMode.Gate("WRITTEN");
+                TestMode.Stall("STALL_BEFORE_WRITTEN_MS", TestMode.Int("DICTATION_HELPER_TEST_STALL_BEFORE_WRITTEN_MS", 0));
                 if (!PendingClipboard.Stage(record, "written", ownership.SequenceInside, ownership.SequenceInside) && saved != null)
                     saved.LoseAuthority("the written stage could not be journaled");
+                if (job != null) job.Mark("journaled written");
             }
             if (confirm && ownership.Emptied) ConfirmWritten(ownership, saved);
             return ok;
@@ -1811,6 +1841,8 @@ namespace DoodleNote.DictationHelper
             // Test build only: widen the moment between our write and its confirmation.
             int confirmDelay = TestMode.Int("DICTATION_HELPER_TEST_CONFIRM_DELAY_MS", 0);
             if (confirmDelay > 0) Thread.Sleep(confirmDelay);
+            // Round 30: or held at a gate until the harness has made its change (the order fixed, not timed).
+            TestMode.Gate("CONFIRM");
             if (Native.GetClipboardOwner() != window) { ForeignAtConfirm = true; return; }
             // Test build only: simulate another reader holding the clipboard through the confirmation.
             if (TestMode.Env("DICTATION_HELPER_TEST_SKIP_CONFIRM") == "1") return;
@@ -2467,7 +2499,7 @@ namespace DoodleNote.DictationHelper
             foreach (KeyValuePair<uint, byte[]> item in items)
             {
                 if (item.Key == sentinel) continue; // never ours as the user's content (an older record may hold one)
-                if (set == stallAfter) Thread.Sleep(TestMode.Int("DICTATION_HELPER_TEST_PUTBACK_STALL_MS", 0)); // test build only: die inside the put-back
+                if (set == stallAfter) TestMode.Stall("PUTBACK_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_PUTBACK_STALL_MS", 0)); // test build only: die inside the put-back
                 bool failNow = TestMode.On && Interlocked.Decrement(ref testFailPutBacks) >= 0; // test build only: a set-back that fails
                 int error = -2; // -2: failed by the test hook
                 bool done = !failNow && ClipboardText.SetBytes(item.Key, item.Value, out error);
@@ -2498,8 +2530,7 @@ namespace DoodleNote.DictationHelper
                 if (!marked) ok = false;
             }
             // Test build only (round 23, B2): die with every retained format set back, before the close.
-            int stallEnd = TestMode.Int("DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS", 0);
-            if (stallEnd > 0) Thread.Sleep(stallEnd);
+            TestMode.Stall("PUTBACK_STALL_END_MS", TestMode.Int("DICTATION_HELPER_TEST_PUTBACK_STALL_END_MS", 0));
             return ok;
         }
 
@@ -2875,8 +2906,8 @@ namespace DoodleNote.DictationHelper
                     Holds = "dictated";
                     return "unrestored";
                 }
-                int beforeEmpty = TestMode.Int("DICTATION_HELPER_TEST_RESTORE_STALL_BEFORE_EMPTY_MS", 0);
-                if (beforeEmpty > 0) Thread.Sleep(beforeEmpty); // test build only: die before the restore empties
+                // Test build only: die before the restore empties.
+                TestMode.Stall("RESTORE_STALL_BEFORE_EMPTY_MS", TestMode.Int("DICTATION_HELPER_TEST_RESTORE_STALL_BEFORE_EMPTY_MS", 0));
                 bool emptied = TestMode.Env("DICTATION_HELPER_TEST_FAIL_RESTORE_EMPTY") != "1" && Native.EmptyClipboard();
                 trace.Emptied(emptied, emptied ? 0 : Marshal.GetLastWin32Error());
                 if (!emptied)
@@ -2890,8 +2921,8 @@ namespace DoodleNote.DictationHelper
                     Wire.Log("the restore's emptied stage could not be journaled: putting back, and keeping the record");
                     keepRecord = true;
                 }
-                int stall = TestMode.Int("DICTATION_HELPER_TEST_RESTORE_STALL_MS", 0);
-                if (stall > 0) Thread.Sleep(stall); // test build only: die in the middle of a restore
+                // Test build only: die in the middle of a restore.
+                TestMode.Stall("RESTORE_STALL_MS", TestMode.Int("DICTATION_HELPER_TEST_RESTORE_STALL_MS", 0));
                 ok = PutBackOpen(trace);
             }
             finally
