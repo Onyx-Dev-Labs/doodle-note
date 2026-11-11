@@ -176,7 +176,10 @@ export class NotesService {
       modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR),
       {
         verdictPath: join(userDataDir, 'model-integrity.json'),
-        receiptStorage: safeStorage,
+        // Windows DPAPI has no authorization UI. macOS/Linux safeStorage calls
+        // can prompt and block the main thread during automatic discovery.
+        // The store accesses this provider lazily, only when loading receipts.
+        receiptStorage: process.platform === 'win32' ? safeStorage : undefined,
         onIntegrityCheck: (event) => this.engineLog.log({ event: 'hash', ...event })
       }
     )

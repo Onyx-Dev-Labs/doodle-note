@@ -29,7 +29,8 @@ interface IntegrityVerdict {
 export interface ModelStoreOptions {
   /** Profile-owned cache; never written beside shared model artifacts. */
   verdictPath?: string
-  /** Electron safeStorage: DPAPI/Keychain (never Linux's plaintext fallback). */
+  /** Optional noninteractive secure storage; desktop supplies Windows DPAPI only.
+   * Called lazily during receipt loading, never by the constructor. */
   receiptStorage?: {
     isEncryptionAvailable(): boolean
     encryptString(value: string): Buffer

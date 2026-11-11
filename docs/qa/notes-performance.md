@@ -49,19 +49,27 @@ reuse only the initial rules, even after warming the complete system prompt.
 Warm-up still avoids the model load, but first-note latency must be measured rather
 than promised. Later identical templates/rosters reuse more of the prefix.
 
-The profile's `model-integrity.json` caches at most 64 successful SHA-256 verdicts
+On Windows only, the profile's `model-integrity.json` caches at most 64 successful SHA-256 verdicts
 (64 KiB maximum). Canonical path, size, mtime, ctime, device and inode must all match.
 A changed stamp rehashes. Corruption or write failure falls back to verification;
 partial-download markers always override cached verdicts. Each versioned receipt
 has an HMAC-SHA256 over the canonical path, complete stamp, catalog digest and
 schema version. A random 256-bit profile key is encrypted by Electron safeStorage
-(DPAPI on Windows, Keychain on macOS), stored separately as
-`model-integrity.json.key`, and never written into the verdict JSON. Unauthenticated
-or mismatched receipts rehash. Unavailable/decryption-failing secure storage
-(including Linux's `basic_text` fallback) disables persisted trust and rehashes on
-launch; in-process verified results still work.
+(Windows DPAPI), stored separately as `model-integrity.json.key`, and never written
+into the verdict JSON. The production service injects secure storage only on
+Windows, where DPAPI requires no authorization UI. The store accesses it lazily
+from the receipt path, never during service construction. Unauthenticated or
+mismatched receipts rehash. Unavailable/decryption-failing secure storage disables
+persisted trust and rehashes on the first find; in-process verified results still work.
 
-Threat model: the HMAC prevents trivially edited cache files from skipping model
+macOS and Linux receive no receipt-storage provider, even if a receipt/key already
+exists. Electron's synchronous safeStorage methods can prompt for Keychain/keyring
+authorization and block the main process on those platforms. Automatic model
+discovery and recording warm-up therefore never call secure storage for receipts
+there: they retain first-find SHA-256 verification per process and the in-memory
+cache. Explicit cloud API-key storage is a separate, unchanged path.
+
+Threat model: Windows-only persisted receipt trust uses HMAC to prevent trivially edited cache files from skipping model
 verification. Same-user code execution is out of scope: it can already alter the
 app's data and invoke the user's secure storage. File stamps remain a metadata
 invalidation heuristic, not a cryptographic identity for arbitrary filesystem
@@ -93,3 +101,14 @@ CPU fallback does zero speculative evaluation then produces a foreground token.
 The synthetic one-token output budget intentionally returns the normal
 output-limit error after real generation. Without a GGUF path, CI skips this
 opt-in test; Linux and native Dev04 evidence runs enable it.
+
+## Round 3 regression checks
+
+`notes-service-receipts.test.ts` runs the production service constructor, models
+IPC and recording warm-up selection with the real model store, a synthetic model,
+and stubbed platform/native boundaries. Six cases cover discovery and warm-up on
+`darwin`, `linux` and `win32`. A prior Windows service writes a valid receipt; new
+macOS/Linux instances ignore it, hash the model and make zero safeStorage calls.
+Windows reuses the receipt. All platforms retain in-process verification, and
+service construction never calls safeStorage. Existing store tests retain
+unavailable-storage, decryption-failure and forged-receipt coverage.
