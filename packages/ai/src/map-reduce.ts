@@ -177,6 +177,7 @@ export async function generateMeetingNotes(
       control?.signal?.throwIfAborted()
       if (err instanceof GenerationError) throw err
       console.error(`[notes] condensing part ${i + 1}/${chunks.length} failed:`, err)
+      control?.onDiagnostic?.({ event: 'failure', stage: 'condensing', error: err })
       failures += 1
       parts.push(
         `--- Part ${i + 1} of ${chunks.length}: condensation failed — treat this stretch of the meeting as unavailable, do not guess its contents ---`

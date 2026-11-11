@@ -36,3 +36,15 @@ The profile's `model-integrity.json` caches at most 64 successful SHA-256 verdic
 (64 KiB maximum). Canonical path, size, mtime, ctime, device and inode must all match.
 A changed stamp rehashes. Corruption or write failure falls back to verification;
 partial-download markers always override cached verdicts.
+
+`<userData>/notes-engine.log` is JSON lines, rotated near 1 MiB with one `.old`
+file. It records timestamps, model/backend/layers, load/hash/context timings,
+prompt/evaluated/skipped tokens, prefill and decode rates, warm-up decisions,
+fallback stages and timeouts. Rates count native tokens, not text chunks. Prefill
+includes the first-token latency; decode rate excludes that first token. Skipped
+tokens come from wrapped prompt length minus the sequence's actual input-token
+meter, not a character estimate. Model load and warm prefill also produce metrics.
+No transcript, notes, prompt, file path, raw stack or raw exception message is
+written. Exception messages are classified into fixed operational messages because
+native/provider exceptions can contain user input; unknown details are omitted.
+Logging is asynchronous, serialized, best-effort, and flushed at service disposal.

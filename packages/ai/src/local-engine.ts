@@ -1,3 +1,4 @@
+import type { NotesDiagnostic, NotesDiagnosticSink } from './notes-log'
 import { assertRequestFits } from './bounded-request'
 import {
   GENERATION_LIMITS,
@@ -55,6 +56,8 @@ export interface LocalEngineOptions {
   /** Tokens of context; transcripts are trimmed upstream to fit. */
   contextSize?: number
   /** Release native model/context memory after inactivity (default ten minutes). */
+  modelId?: string
+  onDiagnostic?: NotesDiagnosticSink
   idleTimeoutMs?: number
 }
 
@@ -84,6 +87,14 @@ export class LocalNotesEngine implements NotesEngine {
     this.label = 'On-device model'
   }
 
+  private diagnostic(event: NotesDiagnostic): void {
+    try {
+      this.options.onDiagnostic?.({ ...event, modelId: this.options.modelId ?? this.id })
+    } catch {
+      /* Observability must never interrupt native work. */
+    }
+  }
+
   /** Download (if needed) and load the model. Safe to call more than once. */
   async prepare(signal?: AbortSignal): Promise<void> {
     return this.exclusive(() => this.prepareModel(signal))
@@ -103,8 +114,29 @@ export class LocalNotesEngine implements NotesEngine {
         })
         try {
           active.throwIfAborted()
+          const before = this.options.onDiagnostic
+            ? this.sequence!.tokenMeter.getState()
+            : undefined
+          const started = Date.now()
           await session.preloadPrompt('', { signal: active, evaluationPriority: 1 })
           active.throwIfAborted()
+          if (before) {
+            const evaluatedTokens = this.sequence!.tokenMeter.diff(before).usedInputTokens
+            const promptTokens = this.sequence!.nextTokenIndex
+            const skippedTokens = Math.max(0, promptTokens - evaluatedTokens)
+            const prefillMs = Date.now() - started
+            this.diagnostic({
+              event: 'prefill',
+              reason: 'start',
+              contextSize: this.context!.contextSize,
+              promptTokens,
+              evaluatedTokens,
+              skippedTokens,
+              prefixReused: skippedTokens > 0,
+              prefillMs,
+              prefillTokensPerSecond: prefillMs > 0 ? (evaluatedTokens * 1000) / prefillMs : 0
+            })
+          }
         } catch (error) {
           await this.disposeContext()
           throw error
@@ -124,6 +156,7 @@ export class LocalNotesEngine implements NotesEngine {
     try {
       const llama = await getLlama({ ...(cpuOnly ? { gpu: false } : {}), build: 'never' })
       signal?.throwIfAborted()
+      this.diagnostic({ event: 'runtime', backend: llama.gpu || 'cpu' })
       return llama
     } catch (error) {
       signal?.throwIfAborted()
@@ -176,9 +209,16 @@ export class LocalNotesEngine implements NotesEngine {
     if (!this.forceCpu) {
       try {
         this.llama = await this.acquireRuntime(false, signal)
+        const loadStarted = Date.now()
         this.model = await this.llama.loadModel({
           modelPath: this.modelPath,
           loadSignal: signal
+        })
+        this.diagnostic({
+          event: 'load',
+          backend: this.llama.gpu || 'cpu',
+          gpuLayers: this.model.gpuLayers,
+          loadMs: Date.now() - loadStarted
         })
         return
       } catch (gpuErr) {
@@ -186,6 +226,7 @@ export class LocalNotesEngine implements NotesEngine {
         this.model = null
         signal?.throwIfAborted()
         console.error('[local-engine] default compute layer failed, retrying CPU-only:', gpuErr)
+        this.diagnostic({ event: 'fallback', stage: 'load', error: gpuErr })
         defaultFailure = gpuErr
         this.forceCpu = true
       }
@@ -195,9 +236,16 @@ export class LocalNotesEngine implements NotesEngine {
     this.llama = null
     this.llama = await this.acquireRuntime(true, signal, defaultFailure)
     try {
+      const loadStarted = Date.now()
       this.model = await this.llama.loadModel({
         modelPath: this.modelPath,
         loadSignal: signal
+      })
+      this.diagnostic({
+        event: 'load',
+        backend: 'cpu',
+        gpuLayers: this.model.gpuLayers,
+        loadMs: Date.now() - loadStarted
       })
     } catch (cpuErr) {
       this.llama = null
@@ -222,7 +270,10 @@ export class LocalNotesEngine implements NotesEngine {
     onProgress?: (progress: NotesProgress) => void,
     control?: GenerationControl
   ): Promise<MergedNotes> {
-    return generateMeetingNotes(this, input, onToken, onProgress, control)
+    return generateMeetingNotes(this, input, onToken, onProgress, {
+      ...control,
+      onDiagnostic: (event) => this.diagnostic(event)
+    })
   }
 
   async askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer> {
@@ -321,11 +372,44 @@ export class LocalNotesEngine implements NotesEngine {
                     .contextText.tokenize(this.model!.tokenizer).length
               })
             signal.throwIfAborted()
+            const sequence = this.sequence!
+            const metrics = this.options.onDiagnostic
+              ? {
+                  promptTokens: session.chatWrapper
+                    .generateContextState({
+                      chatHistory: [
+                        ...session.getChatHistory(),
+                        { type: 'user', text: prompt?.user ?? userMessage },
+                        { type: 'model', response: [] }
+                      ]
+                    })
+                    .contextText.tokenize(this.model!.tokenizer).length,
+                  before: sequence.tokenMeter.getState(),
+                  started: Date.now(),
+                  firstTokenAt: 0
+                }
+              : undefined
             let writing = false
             const firstToken = (): void => {
               if (writing) return
               writing = true
               control?.onPhase?.('writing')
+              if (metrics) {
+                metrics.firstTokenAt = Date.now()
+                const evaluatedTokens = sequence.tokenMeter.diff(metrics.before).usedInputTokens
+                const prefillMs = metrics.firstTokenAt - metrics.started
+                const skippedTokens = Math.max(0, metrics.promptTokens - evaluatedTokens)
+                this.diagnostic({
+                  event: 'prefill',
+                  contextSize: context.contextSize,
+                  promptTokens: metrics.promptTokens,
+                  evaluatedTokens,
+                  skippedTokens,
+                  prefixReused: skippedTokens > 0,
+                  prefillMs,
+                  prefillTokensPerSecond: prefillMs > 0 ? (evaluatedTokens * 1000) / prefillMs : 0
+                })
+              }
             }
             const result = await session.promptWithMeta(prompt?.user ?? userMessage, {
               signal,
@@ -341,6 +425,17 @@ export class LocalNotesEngine implements NotesEngine {
                 onToken?.(text)
               }
             })
+            if (metrics) {
+              const generatedTokens = sequence.tokenMeter.diff(metrics.before).usedOutputTokens
+              const generationMs = metrics.firstTokenAt ? Date.now() - metrics.firstTokenAt : 0
+              this.diagnostic({
+                event: 'generation',
+                generatedTokens,
+                generationMs,
+                generatedTokensPerSecond:
+                  generationMs > 0 ? (Math.max(0, generatedTokens - 1) * 1000) / generationMs : 0
+              })
+            }
             signal.throwIfAborted()
             requireCompleteOutput(result.stopReason, control?.phase ?? 'writing')
             return {
@@ -350,6 +445,11 @@ export class LocalNotesEngine implements NotesEngine {
               elapsedMs: Date.now() - started
             }
           } catch (error) {
+            this.diagnostic({
+              event: 'failure',
+              stage: 'generation',
+              error: signal.aborted ? signal.reason : error
+            })
             // Aborted/failed evaluation may leave partial native state. Drop it.
             await this.disposeContext()
             throw error
@@ -366,7 +466,10 @@ export class LocalNotesEngine implements NotesEngine {
     if (this.idleTimer) clearTimeout(this.idleTimer)
     this.idleTimer = null
     this.pendingOperations++
-    const result = this.operations.then(work)
+    const result = this.operations.then(work).catch((error) => {
+      this.diagnostic({ event: 'failure', error })
+      throw error
+    })
     this.operations = result
       .then(
         () => {},
@@ -378,6 +481,7 @@ export class LocalNotesEngine implements NotesEngine {
           this.idleTimer = setTimeout(
             () => {
               this.idleTimer = null
+              this.diagnostic({ event: 'idle-dispose' })
               void this.dispose().catch(() => {})
             },
             this.options.idleTimeoutMs ?? 10 * 60_000
@@ -391,12 +495,14 @@ export class LocalNotesEngine implements NotesEngine {
   private async obtainContext(contextSize: number, signal: AbortSignal): Promise<LlamaContext> {
     if (this.context && this.requestedContextSize === contextSize) return this.context
     await this.disposeContext()
+    const started = Date.now()
     try {
       this.context = await this.model!.createContext({ contextSize })
     } catch (error) {
       signal.throwIfAborted()
       if (this.forceCpu) throw error
       console.error('[local-engine] default context creation failed, reloading CPU-only:', error)
+      this.diagnostic({ event: 'fallback', stage: 'context', error })
       this.forceCpu = true
       await this.model?.dispose()
       this.model = null
@@ -404,6 +510,11 @@ export class LocalNotesEngine implements NotesEngine {
       await this.prepareModel(signal, error)
       this.context = await this.model!.createContext({ contextSize })
     }
+    this.diagnostic({
+      event: 'context',
+      contextSize: this.context.contextSize,
+      contextCreateMs: Date.now() - started
+    })
     this.requestedContextSize = contextSize
     this.sequence = this.context.getSequence()
     return this.context

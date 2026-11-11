@@ -23,6 +23,7 @@ import {
   DEFAULT_MODELS_DIR,
   LOCAL_MODELS,
   LocalModelStore,
+  NotesEngineLog,
   LocalNotesEngine,
   totalRamGB,
   type AskInput,
@@ -132,6 +133,7 @@ export class NotesService {
     return join(resolveLibraryPath(this.libraryRoot), 'global-chat.json')
   }
   private readonly modelStore: LocalModelStore
+  private readonly engineLog: NotesEngineLog
   private settings: StoredSettings
   /**
    * Dictation's own engine, used only when the quickest installed model is not the
@@ -165,9 +167,13 @@ export class NotesService {
     private readonly assertAvailable: () => void = () => {}
   ) {
     this.settingsPath = join(userDataDir, 'settings.json')
+    this.engineLog = new NotesEngineLog(join(userDataDir, 'notes-engine.log'))
     this.modelStore = new LocalModelStore(
       modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR),
-      { verdictPath: join(userDataDir, 'model-integrity.json') }
+      {
+        verdictPath: join(userDataDir, 'model-integrity.json'),
+        onIntegrityCheck: (event) => this.engineLog.log({ event: 'hash', ...event })
+      }
     )
     this.settings = this.loadSettings()
   }
@@ -243,6 +249,7 @@ export class NotesService {
       // Shutting down anyway.
     }
     await this.disposeDictationEngine()
+    await this.engineLog.flush()
   }
 
   /* ---- models ---- */
@@ -334,6 +341,8 @@ export class NotesService {
     const previous = this.localEngine
     this.localEngine = new LocalNotesEngine({
       modelUri: spec.uri,
+      modelId: spec.id,
+      onDiagnostic: this.engineLog.log,
       modelPath
     })
     this.localEngineModelId = spec.id
@@ -455,6 +464,7 @@ export class NotesService {
         }
       })
     } catch (err) {
+      this.engineLog.log({ event: 'failure', stage: 'generation', error: err })
       return {
         code: err instanceof GenerationError ? err.code : 'model-error',
         error: err instanceof Error ? err.message : String(err)
@@ -636,6 +646,7 @@ export class NotesService {
       writeFileSync(this.globalChatPath, JSON.stringify(entries, null, 2))
     } catch (err) {
       console.error('[notes] failed to save global chat:', err)
+      this.engineLog.log({ event: 'failure', stage: 'global-chat', error: err })
     }
   }
 
@@ -831,7 +842,12 @@ export class NotesService {
     }
     if (!this.dictationEngine || this.dictationEngineModelId !== spec.id) {
       void this.dictationEngine?.dispose().catch(() => {})
-      this.dictationEngine = new LocalNotesEngine({ modelUri: spec.uri, modelPath })
+      this.dictationEngine = new LocalNotesEngine({
+        modelUri: spec.uri,
+        modelId: spec.id,
+        onDiagnostic: this.engineLog.log,
+        modelPath
+      })
       this.dictationEngineModelId = spec.id
     }
     if (this.dictationEngineTimer) clearTimeout(this.dictationEngineTimer)
@@ -881,26 +897,30 @@ export class NotesService {
 
   /** Capture calls this without awaiting it, after the speech engine reports ready. */
   warmNotesModel(meetingId: string): void {
+    const skip = (
+      reason: 'disabled' | 'cloud' | 'busy' | 'battery' | 'memory' | 'no-model' | 'no-meeting'
+    ): void => this.engineLog.log({ event: 'warmup', reason })
+    if (!NOTES_WARMUP_ENABLED) return skip('disabled')
+    if (this.settings.engineChoice !== 'local') return skip('cloud')
     if (
-      !NOTES_WARMUP_ENABLED ||
-      this.settings.engineChoice !== 'local' ||
       this.notesWarm ||
       this.dictationWarm ||
       this.askBusy ||
       this.enhanceBusy ||
       this.activateBusy
     )
-      return
-    if (powerMonitor.isOnBatteryPower()) return
+      return skip('busy')
+    if (powerMonitor.isOnBatteryPower()) return skip('battery')
     const selected = LOCAL_MODELS.find((spec) => spec.id === this.settings.activeLocalModelId)
+    if (!selected) return skip('no-model')
     if (
-      !selected ||
       selected.minRamGB > totalRamGB() ||
       freemem() < selected.sizeGB * 1024 ** 3 + WARMUP_RESERVE_BYTES
     )
-      return
+      return skip('memory')
     const meeting = this.meetings.get(meetingId)
-    if (!meeting) return
+    if (!meeting) return skip('no-meeting')
+    this.engineLog.log({ event: 'warmup', reason: 'start', modelId: selected.id })
     const system = buildMergeSystemPrompt(
       meeting.templateId,
       speakerInfos(
@@ -918,9 +938,15 @@ export class NotesService {
         const engine = await this.pickEngine(true)
         controller.signal.throwIfAborted()
         if (engine instanceof LocalNotesEngine) await engine.warm(system, controller.signal)
+        this.engineLog.log({ event: 'warmup', reason: 'complete', modelId: selected.id })
       })
-      .catch(() => {
-        // The foreground request reports its own actionable error.
+      .catch((error) => {
+        this.engineLog.log({
+          event: controller.signal.aborted ? 'warmup' : 'failure',
+          reason: controller.signal.aborted ? 'cancel' : undefined,
+          error: controller.signal.aborted ? controller.signal.reason : error,
+          modelId: selected.id
+        })
       })
       .finally(() => {
         if (this.notesWarm === job) this.notesWarm = null
@@ -1115,6 +1141,7 @@ export class NotesService {
     } catch (err) {
       // Never log settings content here — it would include the encrypted key.
       console.error('[notes] failed to save settings:', err)
+      this.engineLog.log({ event: 'failure', stage: 'settings', error: err })
       try {
         rmSync(temporaryPath, { force: true })
       } catch {

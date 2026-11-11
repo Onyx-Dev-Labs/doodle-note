@@ -10,6 +10,7 @@ import * as generation from './generation-control'
 import * as ask from './ask-prompt'
 import * as globalAsk from './global-ask-prompt'
 import * as mapReduce from './map-reduce'
+import type { NotesDiagnostic } from './notes-log'
 import type { LocalNotesEngine } from './local-engine'
 
 // Real pinned token alignment, with only native evaluation/erasure replaced.
@@ -22,7 +23,7 @@ assert.ok(
   chatSource.includes('await this.llamaChat.sequence.adaptStateToTokens(this.tokens, false)')
 )
 
-function fixture(idleTimeoutMs = 600_000) {
+function fixture(idleTimeoutMs = 600_000, diagnostics?: NotesDiagnostic[]) {
   const record = {
     loads: 0,
     contexts: [] as number[],
@@ -35,6 +36,14 @@ function fixture(idleTimeoutMs = 600_000) {
   let gate: Promise<void> | undefined
   let fail = false
   class Sequence {
+    counts = { usedInputTokens: 0, usedOutputTokens: 0 }
+    tokenMeter = {
+      getState: () => ({ ...this.counts }),
+      diff: (before: typeof this.counts) => ({
+        usedInputTokens: this.counts.usedInputTokens - before.usedInputTokens,
+        usedOutputTokens: this.counts.usedOutputTokens - before.usedOutputTokens
+      })
+    }
     _contextTokens: number[] = []
     _loadedTokenPredictions: number[] = []
     get _nextTokenIndex() {
@@ -66,16 +75,31 @@ function fixture(idleTimeoutMs = 600_000) {
       assert.equal(options.evaluationPriority, 1)
       await this.promptWithMeta(user, options)
     }
-    async promptWithMeta(user: string, options: { signal: AbortSignal }) {
+    getChatHistory() {
+      return [{ type: 'system', text: this.history[0] }]
+    }
+    chatWrapper = {
+      generateContextState: ({ chatHistory }: { chatHistory: Array<{ text?: string }> }) => ({
+        contextText: {
+          tokenize: () => [
+            ...Buffer.from(`${chatHistory[0]!.text}\n<user>${chatHistory[1]!.text}\n<assistant>`)
+          ]
+        }
+      })
+    }
+    async promptWithMeta(user: string, options: { signal: AbortSignal; onToken?: () => void }) {
       record.histories.push([...this.history])
       const tokens = [...Buffer.from(`${this.history[0]}\n<user>${user}\n<assistant>`)]
       const sequence = this.options.contextSequence
       await sequence.adaptStateToTokens(tokens.slice(0, -1), false)
       record.skipped.push(sequence.nextTokenIndex)
+      sequence.counts.usedInputTokens += tokens.length - sequence.nextTokenIndex
       sequence._contextTokens.push(...tokens.slice(sequence.nextTokenIndex))
       await gate
       options.signal.throwIfAborted()
       if (fail) throw new Error('synthetic evaluation failure')
+      sequence.counts.usedOutputTokens++
+      options.onToken?.()
       const state = Buffer.from(sequence._contextTokens).toString()
       record.states.push(state)
       this.history.push(user, 'response')
@@ -141,7 +165,8 @@ function fixture(idleTimeoutMs = 600_000) {
     engine: new exports.LocalNotesEngine!({
       modelUri: 'fixture',
       modelPath: '/synthetic.gguf',
-      idleTimeoutMs
+      idleTimeoutMs,
+      onDiagnostic: diagnostics ? (event) => diagnostics.push(event) : undefined
     }),
     record,
     block: (promise?: Promise<void>) => {
@@ -241,5 +266,21 @@ test('warm-up preloads at low priority and foreground prepare joins the same mod
   await f.engine.runRaw('Shared template rules', 'Actual transcript')
   assert.ok(f.record.skipped[1]! >= 'Shared template rules'.length)
   assert.equal(f.record.contexts.length, 1)
+  await f.engine.dispose()
+})
+
+test('diagnostics report actual evaluated/skipped tokens and lifecycle timings without text', async () => {
+  const diagnostics: NotesDiagnostic[] = []
+  const f = fixture(600_000, diagnostics)
+  await f.engine.runRaw('Shared system', 'PRIVATE FIRST')
+  await f.engine.runRaw('Shared system', 'Different second')
+  const prefill = diagnostics.filter((event) => event.event === 'prefill')
+  assert.equal(prefill.length, 2)
+  assert.equal(prefill[0]!.skippedTokens, 0)
+  assert.ok(prefill[1]!.skippedTokens! >= 'Shared system'.length)
+  assert.equal(prefill[1]!.promptTokens, prefill[1]!.evaluatedTokens! + prefill[1]!.skippedTokens!)
+  assert.equal(diagnostics.filter((event) => event.event === 'generation')[0]!.generatedTokens, 1)
+  assert.equal(diagnostics.filter((event) => event.event === 'context').length, 1)
+  assert.doesNotMatch(JSON.stringify(diagnostics), /PRIVATE|Different|Shared/)
   await f.engine.dispose()
 })

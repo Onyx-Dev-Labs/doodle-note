@@ -71,6 +71,7 @@ export interface GenerationControl {
   onPhase?: (phase: 'reading' | 'writing') => void
   /** Activity counts only; intermediate text never leaves the engine. */
   onActivity?: () => void
+  onDiagnostic?: import('./notes-log').NotesDiagnosticSink
   /**
    * A short request (dictation cleanup) can say how much room it needs. A small
    * context is created far faster than the default one meant for whole meetings.
