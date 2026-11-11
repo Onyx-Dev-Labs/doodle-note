@@ -35,7 +35,9 @@ import {
   labelSegments,
   sanitizeSpeakerName,
   speakerInfos,
-  speakerLabel
+  speakerLabel,
+  withSelfParticipant,
+  type MeetingTranscriptSegment
 } from '@repo/meetings-store'
 import {
   NOTES_ACTIVATE_MODEL_CHANNEL,
@@ -164,6 +166,16 @@ export class NotesService {
     controller: AbortController
     work: Promise<void>
   } | null = null
+  private notesPrediction: {
+    meetingId: string
+    source: 'mic' | 'system' | 'both'
+    system: string
+    timer: NodeJS.Timeout | null
+  } | null = null
+  private clearNotesPrediction(): void {
+    if (this.notesPrediction?.timer) clearTimeout(this.notesPrediction.timer)
+    this.notesPrediction = null
+  }
   private askBusy = false
   private activateBusy = false
 
@@ -431,6 +443,7 @@ export class NotesService {
               signal,
               'preparing',
               async (preparingSignal) => {
+                this.clearNotesPrediction()
                 const warm = this.notesWarm
                 if (warm) {
                   const cancel = (): void => warm.controller.abort(preparingSignal.reason)
@@ -910,6 +923,69 @@ export class NotesService {
 
   /** Capture calls this without awaiting it, after the speech engine reports ready. */
   warmNotesModel(meetingId: string, source: 'mic' | 'system' | 'both' = 'both'): void {
+    if (this.notesWarm) return
+    this.clearNotesPrediction()
+    const meeting = this.meetings.get(meetingId)
+    if (!meeting) return
+    const prediction = this.predictNotesPrompt(meetingId, meeting.segments, source)
+    if (!prediction) return
+    this.notesPrediction = { meetingId, source, system: prediction.system, timer: null }
+    this.startNotesWarmup(meetingId, prediction, 'start')
+  }
+
+  private predictNotesPrompt(
+    meetingId: string,
+    segments: readonly MeetingTranscriptSegment[],
+    source: 'mic' | 'system' | 'both'
+  ): { system: string; predictedSpeakers: number } | null {
+    const meeting = this.meetings.get(meetingId)
+    if (!meeting) return null
+    const participants = withSelfParticipant(meeting.participants, this.settings.profileName ?? '')
+    const speakers = speakerInfos(
+      segments.filter((segment) => !segment.echo),
+      participants
+    )
+    // Before any speech, the UI's two-channel capture predicts mic-only use.
+    // Once speech exists, use only observed, kept speakers, exactly as Generate does.
+    if (speakers.length === 0) {
+      const channel = source === 'system' ? 'system' : 'mic'
+      speakers.push({
+        label: speakerLabel({ channel, speaker: '' }, participants),
+        isSelf: channel === 'mic'
+      })
+    }
+    return {
+      system: buildMergeSystemPrompt(meeting.templateId, speakers),
+      predictedSpeakers: speakers.length
+    }
+  }
+
+  /** Called with the same committed segments delivered to the renderer. Never awaits inference. */
+  observeNotesTranscript(meetingId: string, segments: readonly MeetingTranscriptSegment[]): void {
+    const current = this.notesPrediction
+    if (!current || current.meetingId !== meetingId) return
+    const prediction = this.predictNotesPrompt(meetingId, segments, current.source)
+    if (!prediction || prediction.system === current.system) return
+    current.system = prediction.system
+    if (current.timer) clearTimeout(current.timer)
+    current.timer = setTimeout(() => {
+      current.timer = null
+      const warm = this.notesWarm
+      // Settle the outstanding bounded batch before reusing its sequence.
+      warm?.controller.abort(new GenerationError('canceled', 'Background roster changed.'))
+      void (warm?.work ?? Promise.resolve()).then(() => {
+        if (this.notesPrediction !== current || current.system !== prediction.system) return
+        this.startNotesWarmup(meetingId, prediction, 'rewarm')
+      })
+    }, 3_000)
+    current.timer.unref?.()
+  }
+
+  private startNotesWarmup(
+    meetingId: string,
+    { system, predictedSpeakers }: { system: string; predictedSpeakers: number },
+    reason: 'start' | 'rewarm'
+  ): void {
     const skip = (
       reason: 'disabled' | 'cloud' | 'busy' | 'battery' | 'memory' | 'no-model' | 'no-meeting',
       onBatteryPower?: boolean
@@ -935,26 +1011,14 @@ export class NotesService {
       freemem() < selected.sizeGB * 1024 ** 3 + WARMUP_RESERVE_BYTES
     )
       return skip('memory')
-    const meeting = this.meetings.get(meetingId)
-    if (!meeting) return skip('no-meeting')
-    this.engineLog.log({ event: 'warmup', reason: 'start', modelId: selected.id, onBatteryPower })
-    const speakers = speakerInfos(
-      meeting.segments.filter((segment) => !segment.echo),
-      meeting.participants
-    )
-    // At ready there are usually no transcript segments yet. Predict the same
-    // channel labels that generation will resolve, including names already known
-    // in the roster. Existing speakers come first for resumed recordings. This is
-    // speculative only: never persist invented segments or change foreground rules.
-    const channels = source === 'both' ? (['mic', 'system'] as const) : [source]
-    for (const channel of channels) {
-      const label = speakerLabel({ channel, speaker: '' }, meeting.participants)
-      const isSelf = channel === 'mic'
-      const seen = speakers.find((speaker) => speaker.label === label)
-      if (seen) seen.isSelf ||= isSelf
-      else speakers.push({ label, isSelf })
-    }
-    const system = buildMergeSystemPrompt(meeting.templateId, speakers)
+    if (!this.meetings.get(meetingId)) return skip('no-meeting')
+    this.engineLog.log({
+      event: 'warmup',
+      reason,
+      predictedSpeakers,
+      modelId: selected.id,
+      onBatteryPower
+    })
     const controller = new AbortController()
     const job = { meetingId, controller, work: Promise.resolve() }
     this.notesWarm = job
@@ -983,6 +1047,8 @@ export class NotesService {
   /** Higher-priority work requests native cancellation; capture never awaits this. */
   cancelNotesWarmup(meetingId?: string): Promise<void> {
     const warm = this.notesWarm
+    if (meetingId === undefined || this.notesPrediction?.meetingId === meetingId)
+      this.clearNotesPrediction()
     if (meetingId !== undefined && warm?.meetingId !== meetingId) return Promise.resolve()
     warm?.controller.abort(new GenerationError('canceled', 'Background notes warm-up canceled.'))
     return warm?.work ?? Promise.resolve()

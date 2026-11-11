@@ -708,7 +708,17 @@ app.whenReady().then(async () => {
   let captureBaseEcho = 0
   let captureId: string | undefined
   const session = new TranscriptSession(
-    broadcastEngineEvent,
+    (event) => {
+      broadcastEngineEvent(event)
+      if ((event.event === 'segments' || event.event === 'capture-finalized') && captureMeetingId) {
+        const snapshot = session.snapshot(captureMeetingId)
+        if (snapshot)
+          notesService?.observeNotesTranscript(captureMeetingId, [
+            ...captureBase,
+            ...snapshot.segments
+          ])
+      }
+    },
     () => join(libraryRoot(), 'sessions'),
     assertLibrary,
     (segments, ended, savedAudioFailures) => {

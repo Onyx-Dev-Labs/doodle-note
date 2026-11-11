@@ -19,6 +19,7 @@ export interface NotesDiagnostic {
   reason?:
     | 'skipped'
     | 'start'
+    | 'rewarm'
     | 'complete'
     | 'cancel'
     | 'disabled'
@@ -31,6 +32,7 @@ export interface NotesDiagnostic {
     | 'cpu-prefill'
   why?: 'disabled' | 'cloud' | 'busy' | 'battery' | 'memory' | 'no-model' | 'no-meeting'
   onBatteryPower?: boolean
+  predictedSpeakers?: number
   runtimeMs?: number
   cached?: boolean
   prefixReused?: boolean
@@ -105,6 +107,7 @@ export class NotesEngineLog {
       if (event[key] !== undefined) record[key] = event[key]
     if (typeof event.onBatteryPower === 'boolean') record.onBatteryPower = event.onBatteryPower
     for (const key of [
+      'predictedSpeakers',
       'runtimeMs',
       'gpuLayers',
       'loadMs',

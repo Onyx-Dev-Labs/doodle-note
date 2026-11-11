@@ -19,6 +19,7 @@ import * as meetingsApi from '../shared/meetings-api'
 import * as meetingOwnership from './meeting-write-ownership'
 import * as engineQuit from './engine-quit'
 import { NotesGenerationJobs } from './notes-generation-job'
+import { TranscriptSession } from './transcript-session'
 
 interface CloudCall {
   options: Record<string, unknown>
@@ -42,6 +43,7 @@ interface LocalRig {
 interface Service {
   warmDictationModel(): void
   warmNotesModel(meetingId: string, source?: 'mic' | 'system' | 'both'): void
+  observeNotesTranscript(meetingId: string, segments: meetings.MeetingTranscriptSegment[]): void
   cancelNotesWarmup(meetingId?: string): Promise<void>
   notesWarm: { work: Promise<void> } | null
   dispose(): Promise<void>
@@ -66,7 +68,8 @@ function createService(
   hold?: { release?: () => void },
   local?: LocalRig,
   power = { battery: false, free: 32 * 1024 ** 3 },
-  actualMeetings?: meetings.MeetingFileStore
+  actualMeetings?: meetings.MeetingFileStore,
+  timers = { setTimeout, clearTimeout }
 ): { service: Service; cloud: CloudCall[] } {
   const cloud: CloudCall[] = []
   class StubCloudEngine {
@@ -189,8 +192,7 @@ function createService(
     console,
     setInterval,
     clearInterval,
-    setTimeout,
-    clearTimeout
+    ...timers
   })
   const service = new exports.NotesService!(
     dir,
@@ -470,10 +472,7 @@ test('recording warm-up is asynchronous, deduplicates and Generate joins it', as
     assert.equal(rig.engines[0]!.warmed.length, 1)
     assert.equal(
       rig.engines[0]!.warmed[0],
-      ai.buildMergeSystemPrompt('general', [
-        { label: 'You', isSelf: true },
-        { label: 'Them', isSelf: false }
-      ])
+      ai.buildMergeSystemPrompt('general', [{ label: 'You', isSelf: true }])
     )
     let done = false
     const result = service
@@ -809,6 +808,355 @@ test('actual recording ready reads current battery state; exit keeps AC warm-up 
   }
 })
 
+for (const profileCase of ['missing', 'stale', 'cleared', 'manual'] as const) {
+  test(`warm roster uses foreground profile helper: ${profileCase}`, async () => {
+    const dir = sandbox()
+    const store = new meetings.MeetingFileStore(path.join(dir, 'meetings'))
+    const participants: meetings.MeetingParticipant[] =
+      profileCase === 'missing'
+        ? []
+        : [
+            {
+              id: 'self',
+              name: 'PrivateOldName',
+              source: profileCase === 'manual' ? 'manual' : 'self',
+              confidence: 1
+            }
+          ]
+    const profileName = profileCase === 'cleared' ? '' : 'PrivateProfileName'
+    store.upsert({ id: 'synthetic', title: 'Planning', templateId: 'general', participants })
+    const spec = ai.LOCAL_MODELS[0]!
+    const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+    const { service } = createService(dir, undefined, rig, undefined, store)
+    try {
+      service.settings = { engineChoice: 'local', activeLocalModelId: spec.id, profileName }
+      service.warmNotesModel('synthetic', 'both')
+      await service.notesWarm!.work
+      await service.enhance(
+        {
+          meetingId: 'synthetic',
+          runId: 'profile',
+          title: 'Planning',
+          rawNotesMarkdown: '',
+          templateId: 'general',
+          participants: meetings.withSelfParticipant(participants, profileName),
+          segments: [
+            {
+              id: '1',
+              channel: 'mic',
+              speaker: 'You',
+              text: 'Hello',
+              startMs: 0,
+              endMs: 1000,
+              confidence: 1
+            }
+          ]
+        },
+        1
+      )
+      const input = rig.engines[0]!.generated[0]!
+      assert.equal(
+        rig.engines[0]!.warmed[0],
+        ai.buildMergeSystemPrompt(input.templateId, input.speakers)
+      )
+    } finally {
+      await service.dispose()
+      const logs = fs.readFileSync(path.join(dir, 'notes-engine.log'), 'utf8')
+      assert.doesNotMatch(logs, /PrivateOldName|PrivateProfileName/)
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+}
+
+test('both capture starts self-only, ignores echo, and debounces new observed speakers', async () => {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const { service } = createService(dir, undefined, rig)
+  const mic: meetings.TranscriptSegment = {
+    id: '1',
+    channel: 'mic',
+    speaker: 'You',
+    text: 'Hello',
+    startMs: 0,
+    endMs: 1000,
+    confidence: 1
+  }
+  const far: meetings.TranscriptSegment = {
+    ...mic,
+    id: '2',
+    channel: 'system',
+    speaker: 'Them'
+  }
+  try {
+    service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+    service.warmNotesModel('synthetic', 'both')
+    await service.notesWarm!.work
+    assert.equal(
+      rig.engines[0]!.warmed[0],
+      ai.buildMergeSystemPrompt('general', [{ label: 'You', isSelf: true }])
+    )
+    service.observeNotesTranscript('synthetic', [mic, { ...far, echo: true }])
+    await new Promise((resolve) => setTimeout(resolve, 3100))
+    assert.equal(rig.engines[0]!.warmed.length, 1)
+    service.observeNotesTranscript('synthetic', [mic, far])
+    service.observeNotesTranscript('synthetic', [mic, far, { ...far, id: '3' }])
+    assert.equal(rig.engines[0]!.warmed.length, 1, 'capture does not wait for native work')
+    await new Promise((resolve) => setTimeout(resolve, 3100))
+    await service.notesWarm?.work
+    assert.equal(rig.engines[0]!.warmed.length, 2)
+    await service.enhance(
+      {
+        meetingId: 'synthetic',
+        runId: 'observed',
+        title: 'Planning',
+        rawNotesMarkdown: '',
+        templateId: 'general',
+        segments: [mic, far]
+      },
+      1
+    )
+    const input = rig.engines[0]!.generated[0]!
+    assert.equal(
+      rig.engines[0]!.warmed[1],
+      ai.buildMergeSystemPrompt(input.templateId, input.speakers)
+    )
+  } finally {
+    await service.dispose()
+    const logs = fs
+      .readFileSync(path.join(dir, 'notes-engine.log'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    assert.ok(
+      logs.some((e) => e.event === 'warmup' && e.reason === 'rewarm' && e.predictedSpeakers === 2)
+    )
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('production transcript callback observes committed non-echo speakers and resumed history', async () => {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const clock = debounceClock()
+  const { service } = createService(dir, undefined, rig, undefined, undefined, clock.timers)
+  const liveSessions: TranscriptSession[] = []
+  const mic: meetings.TranscriptSegment = {
+    id: 'base',
+    channel: 'mic',
+    speaker: 'You',
+    text: 'Hello',
+    startMs: 0,
+    endMs: 1000,
+    confidence: 1
+  }
+  const far = { ...mic, id: 'live', channel: 'system' as const, speaker: 'Them' }
+  const delivered: unknown[] = []
+  try {
+    service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+    service.warmNotesModel('synthetic', 'both')
+    await service.notesWarm!.work
+    productionHook(
+      (node) =>
+        ts.isVariableStatement(node) &&
+        node.declarationList.declarations.some(
+          (d) => ts.isIdentifier(d.name) && d.name.text === 'session'
+        ),
+      {
+        TranscriptSession: class extends TranscriptSession {
+          constructor(...args: ConstructorParameters<typeof TranscriptSession>) {
+            super(...args)
+            liveSessions.push(this)
+          }
+        },
+        broadcastEngineEvent: (event: unknown) => delivered.push(event),
+        captureMeetingId: 'synthetic',
+        captureBase: [mic],
+        captureBaseEcho: 0,
+        notesService: service,
+        libraryRoot: () => dir,
+        join: path.join,
+        assertLibrary: () => {},
+        persistCaptureTranscript: () => {},
+        meetingsService: {},
+        process
+      }
+    )
+    const live = liveSessions[0]!
+    live.bindMeeting('synthetic')
+    live.handle({
+      event: 'started',
+      command: 'live',
+      binaryPath: 'synthetic',
+      captureId: 'capture'
+    })
+    live.handle({ event: 'ready' })
+    const publish = (segments: meetings.TranscriptSegment[]): void =>
+      (live as unknown as { publish(segments: meetings.TranscriptSegment[]): void }).publish(
+        segments
+      )
+    publish([{ ...far, echo: true }])
+    assert.equal(clock.pending(), 0)
+    publish([far])
+    assert.equal(clock.pending(), 1)
+    assert.equal(delivered.length, 2)
+    clock.fire()
+    await new Promise((resolve) => setImmediate(resolve))
+    await service.notesWarm?.work
+    assert.equal(
+      rig.engines[0]!.warmed.at(-1),
+      ai.buildMergeSystemPrompt('general', [
+        { label: 'You', isSelf: true },
+        { label: 'Them', isSelf: false }
+      ])
+    )
+  } finally {
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// Drive only debounce timers; model and service promises still settle normally.
+function debounceClock(): {
+  timers: { setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout }
+  fire(): void
+  pending(): number
+} {
+  const callbacks = new Map<object, () => void>()
+  return {
+    timers: {
+      setTimeout: ((callback: () => void, ms: number) => {
+        if (ms !== 3000) return setTimeout(callback, ms)
+        const token = {
+          unref() {
+            /* Debounce is manually driven in this test. */
+          }
+        }
+        callbacks.set(token, callback)
+        return token
+      }) as typeof setTimeout,
+      clearTimeout: ((token: NodeJS.Timeout) => {
+        if (!callbacks.delete(token)) clearTimeout(token)
+      }) as typeof clearTimeout
+    },
+    fire() {
+      const work = [...callbacks.values()]
+      callbacks.clear()
+      for (const callback of work) callback()
+    },
+    pending: () => callbacks.size
+  }
+}
+
+for (const guard of ['battery', 'cloud', 'busy', 'memory', 'cancel', 'generate'] as const) {
+  test(`pending re-warm respects ${guard}`, async () => {
+    const dir = sandbox()
+    const spec = ai.LOCAL_MODELS[0]!
+    const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+    const power = { battery: false, free: 32 * 1024 ** 3 }
+    const clock = debounceClock()
+    const { service } = createService(dir, undefined, rig, power, undefined, clock.timers)
+    const segments: meetings.TranscriptSegment[] = [
+      {
+        id: '1',
+        channel: 'system',
+        speaker: 'Them',
+        text: 'Hello',
+        startMs: 0,
+        endMs: 1000,
+        confidence: 1
+      }
+    ]
+    try {
+      service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+      service.warmNotesModel('synthetic', 'both')
+      await service.notesWarm!.work
+      service.observeNotesTranscript('unrelated', segments)
+      assert.equal(clock.pending(), 0)
+      service.observeNotesTranscript('synthetic', segments)
+      assert.equal(clock.pending(), 1)
+      if (guard === 'battery') power.battery = true
+      if (guard === 'cloud') service.settings.engineChoice = 'cloud'
+      if (guard === 'busy') service.askBusy = true
+      if (guard === 'memory') power.free = 0
+      if (guard === 'cancel') {
+        await service.cancelNotesWarmup('unrelated')
+        assert.equal(clock.pending(), 1)
+        await service.cancelNotesWarmup('synthetic')
+        assert.equal(clock.pending(), 0)
+      }
+      if (guard === 'generate') {
+        await service.enhance(
+          {
+            meetingId: 'synthetic',
+            runId: 'pending',
+            title: 'Planning',
+            rawNotesMarkdown: '',
+            segments
+          },
+          1
+        )
+        assert.equal(clock.pending(), 0)
+      }
+      clock.fire()
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(rig.engines[0]!.warmed.length, 1)
+    } finally {
+      service.askBusy = false
+      await service.dispose()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+}
+
+test('re-warm cancels active prefill and settles it before replacement; Generate joins replacement', async () => {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const hold: { release?: () => void } = {}
+  const clock = debounceClock()
+  const { service } = createService(dir, hold, rig, undefined, undefined, clock.timers)
+  try {
+    service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+    service.warmNotesModel('synthetic', 'both')
+    await new Promise((resolve) => setImmediate(resolve))
+    const oldWork = service.notesWarm!.work
+    const segments: meetings.TranscriptSegment[] = [
+      {
+        id: '1',
+        channel: 'system',
+        speaker: 'Them',
+        text: 'Hello',
+        startMs: 0,
+        endMs: 1000,
+        confidence: 1
+      }
+    ]
+    service.observeNotesTranscript('synthetic', segments)
+    clock.fire()
+    await oldWork
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(rig.engines[0]!.canceled, true)
+    assert.equal(rig.engines[0]!.warmed.length, 2)
+    const result = service.enhance(
+      {
+        meetingId: 'synthetic',
+        runId: 'replacement',
+        title: 'Planning',
+        rawNotesMarkdown: '',
+        segments
+      },
+      1
+    )
+    hold.release!()
+    assert.equal((await result).markdown, 'Synthetic notes')
+  } finally {
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 for (const source of ['mic', 'system', 'both'] as const) {
   for (const named of [false, true]) {
     test(`recording ${source} warm-up matches final speaker rules (named=${named})`, async () => {
@@ -838,6 +1186,9 @@ for (const source of ['mic', 'system', 'both'] as const) {
           endMs: i * 2000 + 1500,
           confidence: 1
         }))
+        service.observeNotesTranscript('synthetic', segments)
+        await new Promise((resolve) => setTimeout(resolve, 3100))
+        await service.notesWarm?.work
         const result = await service.enhance(
           {
             meetingId: 'synthetic',
@@ -853,7 +1204,7 @@ for (const source of ['mic', 'system', 'both'] as const) {
         assert.equal(result.markdown, 'Synthetic notes')
         const input = rig.engines[0]!.generated[0]!
         assert.equal(
-          rig.engines[0]!.warmed[0],
+          rig.engines[0]!.warmed.at(-1),
           ai.buildMergeSystemPrompt(input.templateId, input.speakers)
         )
         assert.equal(
@@ -872,136 +1223,157 @@ for (const source of ['mic', 'system', 'both'] as const) {
 // Uses a local Qwen3 GGUF, with its real tokenizer and automatically selected
 // wrapper. No download/profile access in tests. GPU eligibility alone is injected
 // so CPU CI hardware can exercise the application's speculative prefill path.
-test(
-  'real Qwen3: mic-only recording reuses the entire rendered system prompt',
-  {
-    skip:
-      !process.env.DOODLENOTE_TEST_QWEN_GGUF &&
-      'Set DOODLENOTE_TEST_QWEN_GGUF to an existing Qwen3 GGUF',
-    // Native Windows CPU prefill takes over two minutes on Dev04.
-    // Production deadlines remain unchanged; this only bounds the opt-in test.
-    timeout: 360_000
-  },
-  async () => {
-    const { getLlama, LlamaChatSession, QwenChatWrapper, LlamaText, SpecialTokensText } =
-      await import('node-llama-cpp')
-    const dir = sandbox()
-    const spec = ai.LOCAL_MODELS[0]!
-    const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
-    const { service } = createService(dir, undefined, rig)
-    const llama = await getLlama({ gpu: false, build: 'never' })
-    const events: ai.NotesDiagnostic[] = []
-    const engine = new ai.LocalNotesEngine({
-      modelUri: 'synthetic',
-      contextSize: 4096,
-      onDiagnostic: (e) => events.push(e)
-    })
-    try {
-      service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
-      service.warmNotesModel('synthetic', 'mic')
-      await service.notesWarm!.work
-      await service.enhance(
-        {
-          meetingId: 'synthetic',
-          runId: 'native-roster',
-          title: 'Release planning',
-          rawNotesMarkdown: 'Review the checklist',
-          templateId: 'general',
-          segments: [
-            {
-              id: '1',
-              channel: 'mic',
-              speaker: 'You',
-              text: 'I will review the release checklist tomorrow. We need to finish the installer tests before Friday.',
-              startMs: 0,
-              endMs: 9000,
-              confidence: 1
-            }
-          ]
-        },
-        1
-      )
-      const input = rig.engines[0]!.generated[0]!
-      const system = ai.buildMergeSystemPrompt(input.templateId, input.speakers)
-      const warmSystem = rig.engines[0]!.warmed[0]!
-      const model = await llama.loadModel({ modelPath: process.env.DOODLENOTE_TEST_QWEN_GGUF! })
-      const state = engine as unknown as {
-        llama: typeof llama
-        model: typeof model
-        sequence: import('node-llama-cpp').LlamaContextSequence
-      }
-      state.llama = new Proxy(llama, {
-        get: (target, key) => (key === 'gpu' ? 'vulkan' : Reflect.get(target, key))
+for (const scenario of ['mic-only-both', 'rewarm'] as const) {
+  test(
+    `real Qwen3: ${scenario} reuses the entire rendered system prompt`,
+    {
+      skip:
+        !process.env.DOODLENOTE_TEST_QWEN_GGUF &&
+        'Set DOODLENOTE_TEST_QWEN_GGUF to an existing Qwen3 GGUF',
+      // Native Windows CPU prefill takes over two minutes on Dev04.
+      // Production deadlines remain unchanged; this only bounds the opt-in test.
+      timeout: 360_000
+    },
+    async () => {
+      const { getLlama, LlamaChatSession, QwenChatWrapper, LlamaText, SpecialTokensText } =
+        await import('node-llama-cpp')
+      const dir = sandbox()
+      const spec = ai.LOCAL_MODELS[0]!
+      const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+      const { service } = createService(dir, undefined, rig)
+      const llama = await getLlama({ gpu: false, build: 'never' })
+      const events: ai.NotesDiagnostic[] = []
+      const engine = new ai.LocalNotesEngine({
+        modelUri: 'synthetic',
+        contextSize: 4096,
+        onDiagnostic: (e) => events.push(e)
       })
-      state.model = new Proxy(model, {
-        get(target, key) {
-          if (key === 'gpuLayers') return 1
-          if (key === 'createContext')
-            return (options: Parameters<typeof model.createContext>[0]) =>
-              target.createContext({ ...options, threads: 2 })
-          const value = Reflect.get(target, key)
-          return typeof value === 'function' ? value.bind(target) : value
-        }
-      })
-      await engine.warm(warmSystem)
-      const session = new LlamaChatSession({
-        contextSequence: state.sequence,
-        systemPrompt: system,
-        forceAddSystemPrompt: true
-      })
-      const wrapper = session.chatWrapper
-      assert.ok(wrapper instanceof QwenChatWrapper)
-      assert.equal(wrapper.variation, '3')
-      const user = ai.buildMergeUserMessage(input)
-      const render = (prompt: string): import('node-llama-cpp').Token[] =>
-        wrapper
-          .generateContextState({
-            chatHistory: [
-              ...wrapper.generateInitialChatHistory({ systemPrompt: prompt }),
-              { type: 'user', text: user },
-              { type: 'model', response: [] }
-            ]
+      try {
+        service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+        service.warmNotesModel('synthetic', 'both')
+        await service.notesWarm!.work
+        const segments: meetings.TranscriptSegment[] = [
+          {
+            id: '1',
+            channel: 'mic',
+            speaker: 'You',
+            text: 'Review the checklist.',
+            startMs: 0,
+            endMs: 9000,
+            confidence: 1
+          }
+        ]
+        if (scenario === 'rewarm')
+          segments.push({
+            ...segments[0]!,
+            id: '2',
+            channel: 'system',
+            speaker: 'Them',
+            startMs: 9000,
+            endMs: 10000
           })
-          .contextText.tokenize(model.tokenizer)
-      const oldTokens = render(ai.buildMergeSystemPrompt('general', []))
-      const foreground = render(system)
-      const turnStart = LlamaText(new SpecialTokensText('<|im_start|>')).tokenize(
-        model.tokenizer
-      )[0]!
-      const systemEnd = foreground.indexOf(turnStart, 1)
-      assert.ok(systemEnd > 0)
-      const systemTokens = foreground.slice(0, systemEnd)
-      const divergence = oldTokens.findIndex((token, i) => token !== foreground[i])
-      assert.ok(divergence > 0 && divergence < systemTokens.length)
-      const warmed = [...state.sequence.contextTokens]
-      assert.deepEqual(warmed, foreground.slice(0, warmed.length))
-      assert.ok(warmed.length >= systemTokens.length)
-      session.dispose({ disposeSequence: false })
-      await assert.rejects(
-        engine.runRaw(system, user, undefined, { maxTokens: 1 }),
-        /token|limit|budget/i
-      )
-      const prefill = events.find((e) => e.event === 'prefill' && e.reason !== 'start')!
-      assert.ok(prefill.skippedTokens! >= systemTokens.length, JSON.stringify(prefill))
-      assert.equal(prefill.skippedTokens, warmed.length)
-      console.log(
-        JSON.stringify({
-          event: 'qwen3-roster-regression',
-          divergence,
-          oldToken: model.detokenize([oldTokens[divergence]!]),
-          newToken: model.detokenize([foreground[divergence]!]),
-          oldText: model.detokenize(oldTokens.slice(divergence - 8, divergence + 20)),
-          newText: model.detokenize(foreground.slice(divergence - 8, divergence + 20)),
-          systemTokens: systemTokens.length,
-          warmedTokens: warmed.length,
-          skippedTokens: prefill.skippedTokens
+        service.observeNotesTranscript('synthetic', segments)
+        if (scenario === 'rewarm') await new Promise((resolve) => setTimeout(resolve, 3100))
+        await service.notesWarm?.work
+        await service.enhance(
+          {
+            meetingId: 'synthetic',
+            runId: 'native-roster',
+            title: 'Release planning',
+            rawNotesMarkdown: 'Review the checklist',
+            templateId: 'general',
+            segments
+          },
+          1
+        )
+        const input = rig.engines[0]!.generated[0]!
+        const system = ai.buildMergeSystemPrompt(input.templateId, input.speakers)
+        const warmSystems = rig.engines[0]!.warmed
+        assert.equal(warmSystems.length, scenario === 'rewarm' ? 2 : 1)
+        const model = await llama.loadModel({ modelPath: process.env.DOODLENOTE_TEST_QWEN_GGUF! })
+        const state = engine as unknown as {
+          llama: typeof llama
+          model: typeof model
+          sequence: import('node-llama-cpp').LlamaContextSequence
+        }
+        state.llama = new Proxy(llama, {
+          get: (target, key) => (key === 'gpu' ? 'vulkan' : Reflect.get(target, key))
         })
-      )
-    } finally {
-      await service.dispose()
-      await engine.dispose()
-      await llama.dispose()
-      fs.rmSync(dir, { recursive: true, force: true })
+        state.model = new Proxy(model, {
+          get(target, key) {
+            if (key === 'gpuLayers') return 1
+            if (key === 'createContext')
+              return (options: Parameters<typeof model.createContext>[0]) =>
+                target.createContext({ ...options, threads: 2 })
+            const value = Reflect.get(target, key)
+            return typeof value === 'function' ? value.bind(target) : value
+          }
+        })
+        for (const warmSystem of warmSystems) await engine.warm(warmSystem)
+        const rewarm = events.filter((e) => e.event === 'prefill' && e.reason === 'start').at(-1)!
+        if (scenario === 'rewarm')
+          assert.ok(rewarm.skippedTokens! > 0, 're-warm keeps the matching prefix')
+        const session = new LlamaChatSession({
+          contextSequence: state.sequence,
+          systemPrompt: system,
+          forceAddSystemPrompt: true
+        })
+        const wrapper = session.chatWrapper
+        assert.ok(wrapper instanceof QwenChatWrapper)
+        assert.equal(wrapper.variation, '3')
+        const user = ai.buildMergeUserMessage(input)
+        const render = (prompt: string): import('node-llama-cpp').Token[] =>
+          wrapper
+            .generateContextState({
+              chatHistory: [
+                ...wrapper.generateInitialChatHistory({ systemPrompt: prompt }),
+                { type: 'user', text: user },
+                { type: 'model', response: [] }
+              ]
+            })
+            .contextText.tokenize(model.tokenizer)
+        const oldTokens = render(ai.buildMergeSystemPrompt('general', []))
+        const foreground = render(system)
+        const turnStart = LlamaText(new SpecialTokensText('<|im_start|>')).tokenize(
+          model.tokenizer
+        )[0]!
+        const systemEnd = foreground.indexOf(turnStart, 1)
+        assert.ok(systemEnd > 0)
+        const systemTokens = foreground.slice(0, systemEnd)
+        const divergence = oldTokens.findIndex((token, i) => token !== foreground[i])
+        assert.ok(divergence > 0 && divergence < systemTokens.length)
+        const warmed = [...state.sequence.contextTokens]
+        assert.deepEqual(warmed, foreground.slice(0, warmed.length))
+        assert.ok(warmed.length >= systemTokens.length)
+        session.dispose({ disposeSequence: false })
+        await assert.rejects(
+          engine.runRaw(system, user, undefined, { maxTokens: 1 }),
+          /token|limit|budget/i
+        )
+        const prefill = events.find((e) => e.event === 'prefill' && e.reason !== 'start')!
+        assert.ok(prefill.skippedTokens! >= systemTokens.length, JSON.stringify(prefill))
+        assert.equal(prefill.skippedTokens, warmed.length)
+        console.log(
+          JSON.stringify({
+            event: 'qwen3-roster-regression',
+            scenario,
+            rewarmSkippedTokens: rewarm.skippedTokens,
+            divergence,
+            oldToken: model.detokenize([oldTokens[divergence]!]),
+            newToken: model.detokenize([foreground[divergence]!]),
+            oldText: model.detokenize(oldTokens.slice(divergence - 8, divergence + 20)),
+            newText: model.detokenize(foreground.slice(divergence - 8, divergence + 20)),
+            systemTokens: systemTokens.length,
+            warmedTokens: warmed.length,
+            skippedTokens: prefill.skippedTokens
+          })
+        )
+      } finally {
+        await service.dispose()
+        await engine.dispose()
+        await llama.dispose()
+        fs.rmSync(dir, { recursive: true, force: true })
+      }
     }
-  }
-)
+  )
+}

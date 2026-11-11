@@ -130,8 +130,17 @@ export class LocalNotesEngine implements NotesEngine {
           systemPrompt,
           forceAddSystemPrompt: true
         })
+        // Our abort checks run only between awaited native operations. Those
+        // cancellations leave a valid prefix; actual native errors still discard it.
+        let canceledBetweenBatches = false
+        const checkAbort = (): void => {
+          if (active.aborted) {
+            canceledBetweenBatches = true
+            active.throwIfAborted()
+          }
+        }
         try {
-          active.throwIfAborted()
+          checkAbort()
           const before = this.options.onDiagnostic
             ? this.sequence!.tokenMeter.getState()
             : undefined
@@ -166,13 +175,13 @@ export class LocalNotesEngine implements NotesEngine {
             offset < tokens.length;
             offset += WARM_PREFILL_BATCH_TOKENS
           ) {
-            active.throwIfAborted()
+            checkAbort()
             await sequence.evaluateWithoutGeneratingNewTokens(
               tokens.slice(offset, offset + WARM_PREFILL_BATCH_TOKENS),
               { evaluationPriority: 1 }
             )
           }
-          active.throwIfAborted()
+          checkAbort()
           if (before) {
             const evaluatedTokens = this.sequence!.tokenMeter.diff(before).usedInputTokens
             const promptTokens = this.sequence!.nextTokenIndex
@@ -191,7 +200,7 @@ export class LocalNotesEngine implements NotesEngine {
             })
           }
         } catch (error) {
-          await this.disposeContext()
+          if (!canceledBetweenBatches) await this.disposeContext()
           throw error
         } finally {
           session.dispose({ disposeSequence: false })

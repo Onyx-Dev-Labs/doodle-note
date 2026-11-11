@@ -141,6 +141,33 @@ test(
       }
     )
 
+    await t.test('re-warm retains the settled prefix after bounded cancellation', async () => {
+      const f = await fixture()
+      const abort = new AbortController()
+      f.onBatch(() => abort.abort(new Error('roster changed')))
+      await assert.rejects(f.engine.warm(system, abort.signal), /roster changed/)
+      assert.equal(f.state.sequence?.nextTokenIndex, WARM_PREFILL_BATCH_TOKENS)
+      f.onBatch(() => {})
+      await f.engine.warm(`${system} A newly observed speaker.`)
+      const prefill = f.events.filter((e) => e.event === 'prefill' && e.reason === 'start').at(-1)!
+      assert.equal(prefill.skippedTokens, WARM_PREFILL_BATCH_TOKENS)
+      assert.equal(f.metrics().contextCalls, 1)
+    })
+
+    await t.test(
+      'native warm evaluation failure discards context even if cancellation also arrives',
+      async () => {
+        const f = await fixture()
+        const abort = new AbortController()
+        f.onBatch(() => {
+          abort.abort(new Error('roster changed'))
+          throw new Error('injected native evaluation failure')
+        })
+        await assert.rejects(f.engine.warm(system, abort.signal))
+        assert.equal(f.state.sequence, null)
+      }
+    )
+
     await t.test(
       'runRaw reuses every warmed prefix token with real chat rendering and native evaluation',
       async () => {

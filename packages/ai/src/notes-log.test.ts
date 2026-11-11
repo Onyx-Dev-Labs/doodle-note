@@ -106,11 +106,13 @@ test('runtime duration and boolean battery observations persist without arbitrar
   const logger = new NotesEngineLog(file)
   logger.log({ event: 'runtime', backend: 'vulkan', runtimeMs: 6000 })
   logger.log({ event: 'warmup', reason: 'skipped', why: 'battery', onBatteryPower: true })
-  logger.log({ event: 'warmup', reason: 'start', onBatteryPower: false })
+  logger.log({ event: 'warmup', reason: 'rewarm', onBatteryPower: false, predictedSpeakers: 2 })
   logger.log({
     event: 'warmup',
     reason: 'start',
-    onBatteryPower: 'PRIVATE'
+    onBatteryPower: 'PRIVATE',
+    predictedSpeakers: 'PRIVATE',
+    speakers: ['PRIVATE']
   } as unknown as NotesDiagnostic)
   await logger.flush()
   const text = await readFile(file, 'utf8')
@@ -124,5 +126,8 @@ test('runtime duration and boolean battery observations persist without arbitrar
   assert.equal(lines[1].why, 'battery')
   assert.equal(lines[1].onBatteryPower, true)
   assert.equal(lines[2].onBatteryPower, false)
+  assert.equal(lines[2].reason, 'rewarm')
+  assert.equal(lines[2].predictedSpeakers, 2)
+  assert.equal(lines[3].predictedSpeakers, undefined)
   assert.equal(lines[3].onBatteryPower, undefined)
 })
