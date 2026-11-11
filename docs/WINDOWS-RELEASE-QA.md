@@ -809,7 +809,9 @@ ever.
 Every other state is pending:
 - The record is kept, nothing is written, and the app shows "DoodleNote may have changed your clipboard while
   dictating. Put back what you had copied before?" with Restore and Dismiss (the card's own buttons; the shared
-  dismiss of other cards never touches it). The card names formats and size only, never content.
+  dismiss of other cards never touches it). The card names formats and size only, never content. The recovery
+  CARD has no timer (it stays until Restore, Dismiss or its withdrawal); the separate notice after a successful
+  typing fallback, like the other completion notices, keeps its six-second expiry (see the notice rules above).
 - Restore runs as a journaled transaction of its own (offer-only from the start: interrupted, it is offered again),
   and only while the clipboard is exactly as it was when first offered. The offered sequence is fixed then; a retry
   never refreshes it. If the clipboard changed, the card says what a restore would overwrite (formats and size) and
@@ -943,10 +945,13 @@ a write thread of ours still runs (deliveries and the Restore share the request 
 recovery lock, so a write thread whose delivery returned, a late write and its rollback, is the one opener left; it is
 counted until its rollback is done), and a new delivery waits for a late write at most 1 s
 within its deadline, else refuses ("own-busy" since round 39, nothing touched) (CI case 59). Round 39 (Opus nit): a late write that
-has not ended 30 s after it was abandoned (a hung EmptyClipboard was measured at about 5.2 s before Windows gave up, so
-this needs a write that never returns) makes the helper leave to be replaced, the usual restart between deliveries
-("clipboard-write-stuck", logged); its exit waits for that write within its usual wait, and past it the record lets
-the next helper judge the transaction by content (CI case 60, with the watchdog shortened in the test build).
+is still unfinished 30 seconds after it was abandoned (one hung EmptyClipboard was observed to return after about
+5.2 s, an observation, not a bound) makes the helper DECIDE to leave and be replaced, the usual restart between
+deliveries ("clipboard-write-stuck", logged); the existing bounded shutdown wait (up to 60 s) then waits for that
+write, and past it the record lets the next helper judge the transaction by content. Worst case: about 90 s of
+refused deliveries (about 30 s refused "own-busy", then up to 60 s "helper-busy") before a fresh helper. A
+privacy-marked save is memory-only (never written down), so it cannot be promised recovery once the process ends
+(CI case 60, with the watchdog shortened in the test build).
 
 If the helper's UI thread itself crashes, the hooks may block input for up to 3 s while the bounded
 shutdown runs; a clipboard transaction in flight is then finished by the next helper from its record.
