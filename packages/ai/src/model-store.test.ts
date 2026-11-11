@@ -1,11 +1,38 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, writeFile, readdir, rm, stat, chmod } from 'node:fs/promises'
+import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  readdir,
+  rm,
+  stat,
+  chmod,
+  readFile,
+  realpath
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import type { LocalModelSpec } from './catalog'
 import { LocalModelStore } from './model-store'
+
+// Stand-in for OS-protected storage; the encryption key never enters the cache.
+const storageSecret = randomBytes(32)
+const receiptStorage = {
+  isEncryptionAvailable: () => true,
+  encryptString(value: string): Buffer {
+    const iv = randomBytes(12)
+    const cipher = createCipheriv('aes-256-gcm', storageSecret, iv)
+    const data = Buffer.concat([cipher.update(value), cipher.final()])
+    return Buffer.concat([iv, cipher.getAuthTag(), data])
+  },
+  decryptString(value: Buffer): string {
+    const cipher = createDecipheriv('aes-256-gcm', storageSecret, value.subarray(0, 12))
+    cipher.setAuthTag(value.subarray(12, 28))
+    return Buffer.concat([cipher.update(value.subarray(28)), cipher.final()]).toString()
+  }
+}
 
 const bytes = Buffer.from('GGUF synthetic model fixture')
 const spec: LocalModelSpec = {
@@ -66,7 +93,10 @@ test('current compatible files win; wrong model identity never matches by name o
   await writeFile(join(legacy, 'model.gguf'), bytes)
   assert.equal(await store.find(spec), file)
   assert.equal(
-    await store.find({ ...spec, artifact: { ...spec.artifact, sha256: '0'.repeat(64) } }),
+    await store.find({
+      ...spec,
+      artifact: { ...spec.artifact, sha256: '0'.repeat(64) }
+    }),
     null
   )
 })
@@ -157,6 +187,7 @@ test('persists verdict across processes and rehashes any changed stamp or catalo
   const store = () =>
     new LocalModelStore([legacy], {
       verdictPath,
+      receiptStorage,
       onIntegrityCheck: (event) => checks.push(event.cached)
     })
   assert.equal(await store().find(spec), file)
@@ -166,7 +197,7 @@ test('persists verdict across processes and rehashes any changed stamp or catalo
   const saved = JSON.parse(await readFile(verdictPath, 'utf8'))
   assert.deepEqual(
     Object.keys(saved[0]).sort(),
-    ['path', 'size', 'mtime', 'ctime', 'dev', 'ino', 'sha256'].sort()
+    ['version', 'mac', 'path', 'size', 'mtime', 'ctime', 'dev', 'ino', 'sha256'].sort()
   )
   for (const key of ['size', 'mtime', 'ctime', 'dev', 'ino']) {
     const stale = structuredClone(saved)
@@ -176,7 +207,10 @@ test('persists verdict across processes and rehashes any changed stamp or catalo
     assert.equal(checks.at(-1), false, `${key} change must rehash`)
   }
   assert.equal(
-    await store().find({ ...spec, artifact: { ...spec.artifact, sha256: '0'.repeat(64) } }),
+    await store().find({
+      ...spec,
+      artifact: { ...spec.artifact, sha256: '0'.repeat(64) }
+    }),
     null
   )
   const before = await stat(file)
@@ -212,6 +246,7 @@ test('corrupt, oversized or unwritable verdict file cannot prevent verification'
     assert.equal(
       await new LocalModelStore([legacy], {
         verdictPath,
+        receiptStorage,
         onIntegrityCheck: (event) => checks.push(event.cached)
       }).find(spec),
       file
@@ -225,4 +260,74 @@ test('corrupt, oversized or unwritable verdict file cannot prevent verification'
     (await readdir(legacy)).some((name) => name.endsWith('.tmp')),
     false
   )
+})
+
+test('well-formed forged and retargeted receipts cannot authorize wrong bytes', async (t) => {
+  const { legacy } = await fixture(t)
+  const good = join(legacy, 'good.gguf')
+  const wrong = join(legacy, 'wrong.gguf')
+  const verdictPath = join(legacy, 'verdict.json')
+  await writeFile(good, bytes)
+  const store = (checks: boolean[]) =>
+    new LocalModelStore([legacy], {
+      verdictPath,
+      receiptStorage,
+      onIntegrityCheck: (e) => checks.push(e.cached)
+    })
+  assert.equal(await store([]).find(spec), good)
+  const original = JSON.parse(await readFile(verdictPath, 'utf8'))[0]
+  const key = receiptStorage.decryptString(await readFile(`${verdictPath}.key`))
+  assert.ok(!(await readFile(verdictPath, 'utf8')).includes(key))
+  assert.ok(!(await readFile(`${verdictPath}.key`)).includes(Buffer.from(key)))
+  await rm(good)
+  await writeFile(wrong, Buffer.alloc(bytes.length, 88))
+  const file = await stat(wrong)
+  const forged = {
+    version: 1,
+    mac: '0'.repeat(64),
+    path: await realpath(wrong),
+    size: file.size,
+    mtime: file.mtimeMs,
+    ctime: file.ctimeMs,
+    dev: file.dev,
+    ino: file.ino,
+    sha256: spec.artifact.sha256
+  }
+  for (const receipt of [forged, { ...forged, mac: original.mac }, { ...original, version: 2 }]) {
+    await writeFile(verdictPath, JSON.stringify([receipt]))
+    const checks: boolean[] = []
+    assert.equal(await store(checks).find(spec), null)
+    assert.deepEqual(checks, [false])
+  }
+})
+
+test('unavailable storage, plaintext backend, changed key and decryption failure all rehash', async (t) => {
+  const { legacy } = await fixture(t)
+  const file = join(legacy, 'model.gguf')
+  const verdictPath = join(legacy, 'verdict.json')
+  await writeFile(file, bytes)
+  await new LocalModelStore([legacy], { verdictPath, receiptStorage }).find(spec)
+  const checks: boolean[] = []
+  for (const storage of [
+    undefined,
+    { ...receiptStorage, isEncryptionAvailable: () => false },
+    { ...receiptStorage, getSelectedStorageBackend: () => 'basic_text' },
+    {
+      ...receiptStorage,
+      decryptString: () => {
+        throw new Error('DPAPI unavailable')
+      }
+    },
+    { ...receiptStorage, decryptString: () => randomBytes(32).toString('hex') }
+  ]) {
+    assert.equal(
+      await new LocalModelStore([legacy], {
+        verdictPath,
+        receiptStorage: storage,
+        onIntegrityCheck: (e) => checks.push(e.cached)
+      }).find(spec),
+      file
+    )
+    assert.equal(checks.at(-1), false)
+  }
 })

@@ -172,6 +172,7 @@ export class NotesService {
       modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR),
       {
         verdictPath: join(userDataDir, 'model-integrity.json'),
+        receiptStorage: safeStorage,
         onIntegrityCheck: (event) => this.engineLog.log({ event: 'hash', ...event })
       }
     )

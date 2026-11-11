@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import {
   access,
@@ -16,6 +16,8 @@ import { dirname, join, resolve } from 'node:path'
 import type { LocalModelSpec } from './catalog'
 
 interface IntegrityVerdict {
+  version: 1
+  mac: string
   path: string
   size: number
   mtime: number
@@ -27,6 +29,13 @@ interface IntegrityVerdict {
 export interface ModelStoreOptions {
   /** Profile-owned cache; never written beside shared model artifacts. */
   verdictPath?: string
+  /** Electron safeStorage: DPAPI/Keychain (never Linux's plaintext fallback). */
+  receiptStorage?: {
+    isEncryptionAvailable(): boolean
+    encryptString(value: string): Buffer
+    decryptString(value: Buffer): string
+    getSelectedStorageBackend?(): string
+  }
   onIntegrityCheck?: (event: { modelId: string; cached: boolean; hashMs: number }) => void
 }
 const MAX_VERDICTS = 64
@@ -42,6 +51,9 @@ function validVerdict(value: unknown): value is IntegrityVerdict {
   if (!value || typeof value !== 'object') return false
   const v = value as IntegrityVerdict
   return (
+    v.version === 1 &&
+    typeof v.mac === 'string' &&
+    /^[a-f0-9]{64}$/.test(v.mac) &&
     typeof v.path === 'string' &&
     v.path.length < 4096 &&
     typeof v.sha256 === 'string' &&
@@ -59,6 +71,7 @@ export class LocalModelStore {
   private readonly pending = new Map<string, Promise<string>>()
 
   private readonly verdicts = new Map<string, IntegrityVerdict>()
+  private receiptKey: Buffer | null = null
   private verdictLoad: Promise<void> | null = null
   private verdictWrite: Promise<void> = Promise.resolve()
 
@@ -91,11 +104,17 @@ export class LocalModelStore {
       const digestCached =
         cached?.stamp === beforeStamp
           ? cached.digest
-          : persistent && verdictStamp(persistent) === beforeStamp
+          : persistent &&
+              persistent.sha256 === spec.artifact.sha256 &&
+              verdictStamp(persistent) === beforeStamp
             ? persistent.sha256
             : undefined
       if (digestCached !== undefined) {
-        this.options.onIntegrityCheck?.({ modelId: spec.id, cached: true, hashMs: 0 })
+        this.options.onIntegrityCheck?.({
+          modelId: spec.id,
+          cached: true,
+          hashMs: 0
+        })
         return digestCached === spec.artifact.sha256
       }
       const started = Date.now()
@@ -121,9 +140,11 @@ export class LocalModelStore {
         hashMs: Date.now() - started
       })
       // Persist successful catalog verdicts only, bounded even with many candidates.
-      if (digest === spec.artifact.sha256) {
+      if (digest === spec.artifact.sha256 && this.receiptKey) {
         this.verdicts.delete(path)
-        this.verdicts.set(path, {
+        const verdict: IntegrityVerdict = {
+          version: 1,
+          mac: '',
           path,
           size: before.size,
           mtime: before.mtimeMs,
@@ -131,7 +152,9 @@ export class LocalModelStore {
           dev: before.dev,
           ino: before.ino,
           sha256: digest
-        })
+        }
+        verdict.mac = this.authenticate(verdict)
+        this.verdicts.set(path, verdict)
         while (this.verdicts.size > MAX_VERDICTS)
           this.verdicts.delete(this.verdicts.keys().next().value!)
         await this.saveVerdicts()
@@ -142,15 +165,71 @@ export class LocalModelStore {
     }
   }
 
+  private authenticate(v: IntegrityVerdict): string {
+    // Fixed field order binds the canonical path, every stat field, catalog
+    // digest and schema. No user-controlled property ordering affects the MAC.
+    return createHmac('sha256', this.receiptKey!)
+      .update(JSON.stringify([v.version, v.path, v.size, v.mtime, v.ctime, v.dev, v.ino, v.sha256]))
+      .digest('hex')
+  }
+
+  private async loadReceiptKey(): Promise<Buffer | null> {
+    const storage = this.options.receiptStorage
+    const file = this.options.verdictPath
+    try {
+      if (
+        !file ||
+        !storage?.isEncryptionAvailable() ||
+        storage.getSelectedStorageBackend?.() === 'basic_text'
+      )
+        return null
+      const keyPath = `${file}.key`
+      const read = async (): Promise<Buffer> => {
+        if ((await stat(keyPath)).size > 4096) throw new Error('Invalid receipt key')
+        const plain = storage.decryptString(await readFile(keyPath))
+        if (!/^[a-f0-9]{64}$/.test(plain)) throw new Error('Invalid receipt key')
+        return Buffer.from(plain, 'hex')
+      }
+      try {
+        return await read()
+      } catch (error) {
+        // A failed decryption must rehash, never trust or replace this key.
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null
+      }
+      const key = randomBytes(32)
+      const encrypted = storage.encryptString(key.toString('hex'))
+      await mkdir(dirname(keyPath), { recursive: true })
+      try {
+        await writeFile(keyPath, encrypted, { mode: 0o600, flag: 'wx' })
+        return key
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return await read()
+        return null
+      }
+    } catch {
+      return null // No secure storage means launch-time hashing, as before.
+    }
+  }
+
   private loadVerdicts(): Promise<void> {
     return (this.verdictLoad ??= (async () => {
       const file = this.options.verdictPath
       if (!file) return
+      this.receiptKey = await this.loadReceiptKey()
+      if (!this.receiptKey) return
       try {
         if ((await stat(file)).size > MAX_VERDICT_BYTES) return
         const data: unknown = JSON.parse(await readFile(file, 'utf8'))
         if (!Array.isArray(data) || data.length > MAX_VERDICTS || !data.every(validVerdict)) return
-        for (const verdict of data) this.verdicts.set(verdict.path, verdict)
+        for (const verdict of data) {
+          if (
+            timingSafeEqual(
+              Buffer.from(verdict.mac, 'hex'),
+              Buffer.from(this.authenticate(verdict), 'hex')
+            )
+          )
+            this.verdicts.set(verdict.path, verdict)
+        }
       } catch {
         /* Missing/corrupt cache: stream and verify the model normally. */
       }
@@ -159,7 +238,7 @@ export class LocalModelStore {
 
   private saveVerdicts(): Promise<void> {
     const file = this.options.verdictPath
-    if (!file) return Promise.resolve()
+    if (!file || !this.receiptKey) return Promise.resolve()
     this.verdictWrite = this.verdictWrite.then(async () => {
       const temporary = `${file}.${randomUUID()}.tmp`
       try {
