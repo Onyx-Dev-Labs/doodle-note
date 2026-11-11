@@ -50,7 +50,8 @@ export type NotesDiagnosticSink = (event: NotesDiagnostic) => void
 function safeError(error: unknown): { errorClass: string; message: string; timeout: boolean } {
   const candidate = error as { name?: unknown; message?: unknown; code?: unknown } | null
   const name = typeof candidate?.name === 'string' ? candidate.name : ''
-  const text = typeof candidate?.message === 'string' ? candidate.message : ''
+  const text =
+    typeof candidate?.message === 'string' ? candidate.message.slice(0, 4096).toLowerCase() : ''
   const errorClass = [
     'Error',
     'TypeError',
@@ -62,14 +63,19 @@ function safeError(error: unknown): { errorClass: string; message: string; timeo
   ].includes(name)
     ? name
     : 'Error'
-  const timeout = candidate?.code === 'timeout' || /timed out|timeout/i.test(text)
+  const timeout =
+    candidate?.code === 'timeout' || text.includes('timed out') || text.includes('timeout')
   const message = timeout
     ? 'Model operation timed out.'
     : candidate?.code === 'canceled' || name === 'AbortError'
       ? 'Model operation canceled.'
-      : /NoBinaryFoundError|No usable .*runtime|no.*binary/i.test(text)
+      : text.includes('nobinaryfounderror') ||
+          (text.includes('no usable') && text.includes('runtime')) ||
+          (text.includes('no') && text.includes('binary'))
         ? 'No usable native runtime.'
-        : /out of memory|allocat.*fail|insufficient.*memory/i.test(text)
+        : text.includes('out of memory') ||
+            (text.includes('allocat') && text.includes('fail')) ||
+            (text.includes('insufficient') && text.includes('memory'))
           ? 'Native memory allocation failed.'
           : 'Model operation failed; unclassified details omitted for content privacy.'
   return { errorClass, message, timeout }

@@ -80,3 +80,21 @@ test('logging failures resolve harmlessly and later writes recover', async (t) =
   await logger.flush()
   assert.equal(JSON.parse((await readFile(file, 'utf8')).trim()).reason, 'start')
 })
+
+test('large repeated exception text has bounded classification work and cannot inflate the log', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'notes-log-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const file = join(dir, 'notes-engine.log')
+  const logger = new NotesEngineLog(file)
+  logger.log({
+    event: 'failure',
+    error: new Error('no usable allocat insufficient '.repeat(100_000))
+  })
+  await logger.flush()
+  const text = await readFile(file, 'utf8')
+  assert.ok(text.length < 1024)
+  assert.equal(
+    JSON.parse(text).message,
+    'Model operation failed; unclassified details omitted for content privacy.'
+  )
+})
