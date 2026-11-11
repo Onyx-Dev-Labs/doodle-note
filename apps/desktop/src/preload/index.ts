@@ -191,6 +191,12 @@ import {
 } from '../shared/update-api'
 import { THEME_SET_SOURCE_CHANNEL, type ThemeApi, type ThemeSource } from '../shared/theme-api'
 import {
+  INSTALL_MIGRATION_GET_STATUS_CHANNEL,
+  INSTALL_MIGRATION_STATUS_EVENT_CHANNEL,
+  type InstallMigrationApi,
+  type InstallMigrationStatus
+} from '../shared/install-migration-api'
+import {
   EXPORT_MEETING_CHANNEL,
   type ExporterApi,
   type ExportFormat,
@@ -615,6 +621,18 @@ const updateApi: UpdateApi = {
   }
 }
 
+const installMigrationApi: InstallMigrationApi = {
+  getStatus(): Promise<InstallMigrationStatus | null> {
+    return ipcRenderer.invoke(
+      INSTALL_MIGRATION_GET_STATUS_CHANNEL
+    ) as Promise<InstallMigrationStatus | null>
+  },
+
+  onStatus(cb: (status: InstallMigrationStatus | null) => void): () => void {
+    return subscribe(INSTALL_MIGRATION_STATUS_EVENT_CHANNEL, cb)
+  }
+}
+
 const detectApi: DetectApi = {
   getState(): Promise<DetectState> {
     return ipcRenderer.invoke(DETECT_GET_STATE_CHANNEL) as Promise<DetectState>
@@ -793,6 +811,9 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('detect', detectApi)
     contextBridge.exposeInMainWorld('themeNative', themeApi)
     contextBridge.exposeInMainWorld('updates', updateApi)
+    // Windows only: the install folder move's status (macOS has no such move).
+    if (process.platform === 'win32')
+      contextBridge.exposeInMainWorld('installMigration', installMigrationApi)
     contextBridge.exposeInMainWorld('integrations', integrationsApi)
     contextBridge.exposeInMainWorld('audio', audioApi)
     contextBridge.exposeInMainWorld('importer', importerApi)

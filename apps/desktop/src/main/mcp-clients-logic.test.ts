@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   ClientConfigError,
   codexConfigHasServer,
+  codexConfigServerCommand,
   codexConfigWithServer,
   codexConfigWithoutServer,
   jsonConfigHasServer,
@@ -131,4 +132,115 @@ test('codex round-trip from empty', () => {
   const out = codexConfigWithServer(null, spec)
   assert.ok(codexConfigHasServer(out))
   assert.equal(codexConfigWithoutServer(out).trim(), '')
+})
+
+const codexSpec: McpServerSpec = {
+  command: 'C:\\Programs\\DoodleNote\\DoodleNote.exe',
+  args: ['C:\\Programs\\DoodleNote\\resources\\mcp\\cli.js'],
+  env: { ELECTRON_RUN_AS_NODE: '1' }
+}
+
+/** Every table header in a TOML text, for "defined once" checks. */
+const headers = (text: string): string[] =>
+  text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^\[/.test(line))
+
+test('codex: a user-added [mcp_servers.doodle-note.env] subtable is removed with our table', () => {
+  const raw = [
+    'model = "o3"',
+    '',
+    '[mcp_servers.doodle-note]',
+    'command = "C:\\\\old\\\\DoodleNote.exe"',
+    'args = []',
+    '',
+    '[mcp_servers.doodle-note.env]',
+    'FOO = "bar"',
+    '',
+    '[mcp_servers.other]',
+    'command = "npx"',
+    ''
+  ].join('\n')
+  assert.equal(codexConfigServerCommand(raw, 'x'), 'C:\\old\\DoodleNote.exe')
+  const next = codexConfigWithServer(raw, codexSpec)
+  // Our server is defined once, by our table with its inline env; no clashing subtable.
+  assert.deepEqual(headers(next), ['[mcp_servers.other]', '[mcp_servers.doodle-note]'])
+  assert.doesNotMatch(next, /FOO = "bar"/)
+  assert.match(next, /^model = "o3"\n/)
+  assert.match(next, /\[mcp_servers\.other\]\ncommand = "npx"\n/)
+  assert.equal(codexConfigServerCommand(next, 'x'), codexSpec.command)
+  // Idempotent.
+  assert.equal(codexConfigWithServer(next, codexSpec), next)
+  // Lines go exactly as the base (macOS) code removed them: the blank lines
+  // between our table and the next one go with ours.
+  assert.equal(
+    codexConfigWithoutServer(next),
+    'model = "o3"\n[mcp_servers.other]\ncommand = "npx"\n'
+  )
+})
+
+test('codex: dotted and inline definitions of our server are found and replaced', () => {
+  const dotted = [
+    '[mcp_servers]',
+    'doodle-note.command = "C:\\\\old\\\\DoodleNote.exe"',
+    'doodle-note.args = ["x"]',
+    'other.command = "npx"',
+    ''
+  ].join('\n')
+  assert.ok(codexConfigHasServer(dotted))
+  assert.equal(codexConfigServerCommand(dotted, 'x'), 'C:\\old\\DoodleNote.exe')
+  assert.equal(codexConfigWithoutServer(dotted), '[mcp_servers]\nother.command = "npx"\n')
+  const root = 'mcp_servers.doodle-note.command = "C:\\\\old\\\\DoodleNote.exe"\nmodel = "o3"\n'
+  assert.equal(codexConfigServerCommand(root, 'x'), 'C:\\old\\DoodleNote.exe')
+  assert.equal(codexConfigWithoutServer(root), 'model = "o3"\n')
+  const inline = [
+    '[mcp_servers]',
+    `"doodle-note" = { command = 'C:\\old\\DoodleNote.exe', args = [] }`,
+    'other = { command = "npx" }',
+    ''
+  ].join('\n')
+  assert.equal(codexConfigServerCommand(inline, 'x'), 'C:\\old\\DoodleNote.exe')
+  const next = codexConfigWithServer(inline, codexSpec)
+  assert.doesNotMatch(next, /"doodle-note" =/)
+  assert.match(next, /other = \{ command = "npx" \}/)
+  assert.equal(codexConfigServerCommand(next, 'x'), codexSpec.command)
+  // A quoted table name is the same table.
+  const quoted = '[mcp_servers."doodle-note"]\ncommand = "C:\\\\old\\\\DoodleNote.exe"\n'
+  assert.equal(codexConfigWithoutServer(quoted), '')
+})
+
+test('codex: multi-line values and strings never end or start a table', () => {
+  const raw = [
+    '[mcp_servers.doodle-note]',
+    'command = "x"',
+    'args = [',
+    '  "a",',
+    '  ["b"],',
+    ']',
+    '[mcp_servers.other]',
+    'command = "npx"',
+    '[profiles.notes]',
+    'text = """',
+    '[mcp_servers.doodle-note]',
+    'command = "not a table"',
+    '"""',
+    ''
+  ].join('\n')
+  const without = codexConfigWithoutServer(raw)
+  assert.doesNotMatch(without, /"a",|\["b"\]/)
+  assert.match(without, /^\[mcp_servers\.other\]\ncommand = "npx"\n\[profiles\.notes\]/)
+  // The string's text is kept as it was.
+  assert.match(without, /text = """\n\[mcp_servers\.doodle-note\]\ncommand = "not a table"\n"""\n$/)
+  assert.ok(!codexConfigHasServer(without))
+  assert.equal(codexConfigServerCommand(without, 'x'), null)
+})
+
+test('codex: another server whose name starts with ours, comments and CRLF are left alone', () => {
+  const raw =
+    '[mcp_servers.doodle-note-qa]\r\ncommand = "qa"\r\n\r\n' +
+    '[mcp_servers.doodle-note] # added by DoodleNote\r\ncommand = "C:\\\\old\\\\DoodleNote.exe"\r\n'
+  assert.equal(codexConfigServerCommand(raw, 'x'), 'C:\\old\\DoodleNote.exe')
+  assert.equal(codexConfigWithoutServer(raw), '[mcp_servers.doodle-note-qa]\r\ncommand = "qa"\r\n')
+  assert.ok(!codexConfigHasServer('[mcp_servers.doodle-note-qa]\ncommand = "qa"\n'))
 })

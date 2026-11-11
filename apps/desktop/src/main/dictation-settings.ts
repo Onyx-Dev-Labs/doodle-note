@@ -6,6 +6,7 @@ import {
   type DictationSettingsUpdate
 } from '../shared/dictation-api'
 import { HOLD_KEYS, MOUSE_MODES, isAllowedMouseButton } from '../shared/dictation-helper-protocol'
+import { APP_IDENTITY, type AppIdentity } from './app-identity'
 import { TIDY_LEVELS } from '../shared/dictation-api'
 import { coerceEdge } from '../shared/dictation-pill'
 import {
@@ -50,10 +51,19 @@ function normalizeStyleApps(input: unknown): StyleApps {
   return out
 }
 
+/** The defaults for this build's identity: a QA build has its own global shortcuts. */
+export function dictationDefaults(
+  identity: Pick<AppIdentity, 'dictationShortcuts'> = APP_IDENTITY
+): DictationSettings {
+  return { ...DEFAULT_DICTATION_SETTINGS, ...identity.dictationShortcuts }
+}
+
 /** Coerce arbitrary JSON into valid settings; anything unrecognized falls back to the default. */
-export function normalizeDictationSettings(input: unknown): DictationSettings {
+export function normalizeDictationSettings(
+  input: unknown,
+  defaults: DictationSettings = dictationDefaults()
+): DictationSettings {
   const raw = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
-  const defaults = DEFAULT_DICTATION_SETTINGS
   const consent = raw.byokConsent as Record<string, unknown> | null | undefined
   return {
     enabled: raw.enabled === true,
@@ -147,7 +157,10 @@ export class DictationSettingsStore {
   private readonly path: string
   private current: DictationSettings
 
-  constructor(userDataDir: string) {
+  constructor(
+    userDataDir: string,
+    private readonly defaults: DictationSettings = dictationDefaults()
+  ) {
     this.path = join(userDataDir, 'dictation.json')
     this.current = this.load()
   }
@@ -160,14 +173,17 @@ export class DictationSettingsStore {
     // The dictionary has its own calls, so a stale page can never overwrite what was learned.
     const { dictionary: _ignored, ...rest } = patch
     void _ignored
-    this.current = normalizeDictationSettings({ ...this.current, ...rest })
+    this.current = normalizeDictationSettings({ ...this.current, ...rest }, this.defaults)
     this.save()
     return this.current
   }
 
   /** Replace the dictionary. The only way it changes: a settings patch cannot carry one. */
   setDictionary(entries: DictationSettings['dictionary']): DictationSettings {
-    this.current = normalizeDictationSettings({ ...this.current, dictionary: entries })
+    this.current = normalizeDictationSettings(
+      { ...this.current, dictionary: entries },
+      this.defaults
+    )
     this.save()
     return this.current
   }
@@ -175,11 +191,14 @@ export class DictationSettingsStore {
   private load(): DictationSettings {
     try {
       if (existsSync(this.path))
-        return normalizeDictationSettings(JSON.parse(readFileSync(this.path, 'utf8')))
+        return normalizeDictationSettings(
+          JSON.parse(readFileSync(this.path, 'utf8')),
+          this.defaults
+        )
     } catch {
       // A damaged file must not stop the app; defaults keep dictation off.
     }
-    return { ...DEFAULT_DICTATION_SETTINGS }
+    return { ...this.defaults }
   }
 
   private save(): void {

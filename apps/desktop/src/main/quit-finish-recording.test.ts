@@ -119,7 +119,8 @@ test('only Windows quits wait for the recording; macOS keeps its engine-owned sh
   // macOS menu, Windows menu and the Windows "finishing notes" menu.
   const tray = readFileSync(new URL('./recording-tray.ts', import.meta.url), 'utf8')
   assert.equal(
-    tray.match(/\{ label: 'Quit DoodleNote', click: \(\) => app\.quit\(\) \}/g)?.length,
+    // The label names the build identity (DoodleNote, or DoodleNote QA).
+    tray.match(/\{ label: `Quit \$\{APP_NAME\}`, click: \(\) => app\.quit\(\) \}/g)?.length,
     3
   )
 })

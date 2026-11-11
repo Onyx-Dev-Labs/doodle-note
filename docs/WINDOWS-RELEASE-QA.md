@@ -294,6 +294,876 @@ reproduce with the commands above.
   Interrupt the network during a download: after 90 seconds without new bytes,
   Settings should show a short error and offer Retry update.
 
+## Install folder
+
+Builds before this change installed per-user to `<UserProgramFiles>\desktop`
+(normally `%LocalAppData%\Programs\desktop`): electron-builder names a one-click
+per-user folder after the package (`desktop`). New installs go to
+`<UserProgramFiles>\DoodleNote`. `apps/desktop/build/windows-installer.nsh`
+moves an existing install on upgrade:
+
+1. `customInit` redirects an install that would land in exactly
+   `%LocalAppData%\Programs\desktop` (after normalising case, a trailing
+   separator and short names) to the sibling `DoodleNote` folder. An install with
+   `/D=<folder>` is left alone, and so is one recorded in any other folder named
+   `desktop` (an earlier `/D=X\desktop`): it is upgraded in place, nothing is
+   moved or deleted. It treats the old folder as an install to move only when the guards in
+   `apps/desktop/build/windows-install-guards.nsh` prove it is one: exactly
+   `%LocalAppData%\Programs\desktop` after normalising case, separators, `..`
+   and short names; a real folder (not a junction, symbolic link or mount
+   point) holding `DoodleNote.exe`; resolving (`GetFinalPathNameByHandle`) to
+   that same place and not onto or into the new folder; the new folder, if it
+   exists, a real folder too; neither overlapping the profile
+   (`%APPDATA%\desktop`), compared both as written and resolved: every path in
+   the comparison (old, new, profile) is resolved by handle, a missing one through
+   its deepest existing parent, and equality or containment either way refuses
+   (so a profile that is a junction into the old install, a `Roaming` folder that
+   is one, or a `Programs` folder that is a junction into the profile all
+   refuse). Every registered uninstall command must also be exactly the old (or
+   new) folder's own uninstaller, `"<dir>\Uninstall DoodleNote.exe" /currentuser`
+   with the whole exe path compared normalised (short names such as
+   `C:\Users\LONGUS~1\...\UNINST~1.EXE`, expanded while the file exists, and
+   case; a short name for an uninstaller that is gone cannot be expanded and
+   counts as foreign); any other command could not be parked and
+   electron-builder would run it before the new copy exists, so the install is
+   upgraded in place and the journal is left alone (the one-click installer
+   shows no details and keeps no install log: the reason is recorded as
+   `LastReason` = `uninstall-command`, see "Where an install records what it
+   decided" below; the exit code stays 0, as for any in-place upgrade). Anything
+   else is upgraded in place, as before.
+2. `customCheckAppRunning` closes copies running from exactly the old exe and
+   exactly the new exe, each checked on its own, through `Win32_Process`
+   executable paths (never electron-builder's path-prefix match, which also
+   matched `Programs\DoodleNote QA`, or its `taskkill` by image name). It asks
+   each to close, waits, then stops only the PIDs that still match. It closes
+   only with consent: when the app started the update (`--updated`) or the user
+   says OK. A silent install nobody asked the app for (`/S` without `--updated`)
+   closes nothing: with the old app running it quits with exit code 2, exactly
+   like an in-place upgrade whose app is running (installing the new copy beside
+   it would leave the old app running, starting at login and holding the
+   single-instance lock until it quit). It quits before anything is closed,
+   parked, extracted or deleted: no file, folder, shortcut or process is touched.
+   `customInit` has run by then, though, and may already have made these registry
+   repairs, each also made by any other run: (a) journal and record values
+   missing from `HKCU\Software\{APP_GUID}` written back from the recovery copy,
+   which is then deleted (only after an earlier run stopped mid-update; see below);
+   (b) the old folder's own uninstall command, parked by an earlier unfinished
+   run, put back as `UninstallString` when nothing is registered and that
+   uninstaller exists; (c) the `DesktopLink` / `StartMenuLink` answers of a journal
+   that is not trusted deleted. Every CIM query has a 10 s
+   timeout, the closer script a 25 s budget, and the installer runs it through a
+   watchdog (`CreateProcess` + `WaitForSingleObject`, 30 s to find, 45 s to
+   close, then the child is terminated), so a stalled WMI provider cannot hang
+   the installer or uninstaller; a timeout counts as "cannot be established". If
+   the old folder's app cannot be closed, or which processes are ours cannot be
+   established (no PowerShell, a timeout, or an unreadable process with the same
+   name), the new copy is installed and the old folder is kept for the next run.
+   **The installer's closer still needs Windows PowerShell** (the app's record path
+   does not since round 7). If PowerShell cannot start (removed, blocked by
+   AppLocker / WDAC) or runs in ConstrainedLanguage mode (as an application-control
+   policy imposes: the closer's `[Diagnostics.Stopwatch]` call is refused, exit 3),
+   the answer is "unknown": the move does not happen, the old folder stays, and the
+   old exe keeps starting at login from its Run value until a later run succeeds.
+   That is the fail-safe direction and it is visible: the status key and the install
+   log read `close / close-keep / unknown-process`. The harness proves both (a closer
+   that names no PowerShell, and the real closer downgraded to ConstrainedLanguage
+   first, with the old app really running; `d5b-missing`, `d5b-clm`). It
+   then parks the old uninstall command in the journal
+   `HKCU\Software\{APP_GUID}\InstallMigration` (the GUID derives from `appId`),
+   so electron-builder's "uninstall old version" step does not delete the old
+   folder before the new one exists. The journal records the identity
+   (`APP_GUID`, the old and the new folder name) and both folders; a later run
+   uses it, to finish an interrupted move or to put back the parked command
+   for Apps & features, only when all of them match and the old folder still
+   passes the checks above, and only puts back exactly the old folder's own
+   uninstaller. electron-builder's uninstaller, which "uninstall old version"
+   runs with `--updated` on every update once the uninstall entry names an
+   installed copy, deletes `HKCU\Software\{APP_GUID}` with the journal and the
+   `MigrationRecord` in it. Right before that step both are copied to
+   `HKCU\Software\DoodleNote-InstallRecovery\{APP_GUID}` (outside the deleted
+   subtree, still one per identity; `RecoveryFor` written last, so a copy cut
+   short is ignored) and written back first thing in `customInstall`. If the
+   installer stops in between (killed, extraction failed), the next run's
+   `customInit` puts them back before anything reads them, after checking the
+   copy: written for this identity, the journal complete (`Identity`, `SourceDir`,
+   `DestDir`) and naming this identity and exactly `Programs\desktop` →
+   `Programs\DoodleNote`, the record complete and naming those same two folders.
+   Every journal value that is missing or empty is written (`Identity` last, so a
+   journal cut short is incomplete and never trusted, and the next run fills in
+   the rest); the record is one value, written whole. The copy is deleted only
+   once every value in it reads back from the live keys exactly, and then
+   `DoodleNote-InstallRecovery` itself if no other identity's copy is in it. A
+   copy that fails its checks is left alone (and reported); a user uninstall
+   deletes it. A run cut short at any of the harness's kill points (below) is
+   finished by the next run: during restoration after each of its writes
+   (`recover-<value>` for each journal value, `recover-MigrationRecord`,
+   `recover-deleted`); while saving the copy after its journal values as a group
+   (`save-journal`, after all seven) and after its record (`save-record`), not
+   after each single value; while arming the journal after `SourceDir` and
+   `DestDir` (`park-SourceDir`, `park-DestDir`); and around the removal
+   (`finish-removed`, `finish-record`). The CI end-to-end job adds two
+   installer-level points (`after-uninstall-old-version`, `after-stock-uninstall`). So a move kept by a held file stays armed for
+   as many runs as it takes, and a record the app has not read yet survives
+   another update, even an interrupted one (before this, an update interrupted
+   before the first launch after a move lost the record, and with the old folder
+   already gone the app never repointed its login item or MCP entries). A user
+   uninstall (not `--updated`) deletes the copy with the rest.
+3. `customInstall` verifies the new copy (exe, `app.asar`, uninstaller, and the
+   uninstall entry pointing at it), then pins the old folder before checking it
+   again (`dnPinLegacy`): it opens the old folder itself (never what a link there
+   points to, `DELETE` access, no `FILE_SHARE_DELETE`, so nobody can rename or
+   replace it) and, as they are now, `Programs`, the profile and the new folder;
+   runs every check above; and checks the same facts again on those very handles:
+   the pinned folder is a real folder, its final path is the pinned `Programs`'s
+   final path plus `desktop`, it holds `DoodleNote.exe` (opened through that final
+   path), and it is neither the profile nor the new folder nor overlaps them
+   (final paths and volume serial + file index of the same handles). Only then
+   does it remove exactly that pinned folder, never re-opening it by path: a
+   `Programs` junction retargeted between the checks and the removal makes the
+   path no longer open as the pinned folder, so removal stops ("unsafe") and the
+   journal stays armed; and the walk never enters a folder whose identity is the
+   profile's or the new folder's, however it was reached. It removes the old
+   folder with a walk that deletes a junction or link but never what it points to
+   (NSIS's own `RMDir /r` follows junctions, verified on Dev04) and deletes
+   `DoodleNote.exe` last, so a folder that is only partly removed is still
+   recognised next time. The walk is handle-based: each folder is held open
+   (`FILE_FLAG_OPEN_REPARSE_POINT`, no `FILE_SHARE_DELETE`, so no other process
+   can rename or replace it meanwhile), must still be the folder it opened (volume
+   serial and file index) before it is listed, and each entry is opened without
+   following links and must be that folder's own entry (its final path is the
+   folder's plus its name) before it is deleted through that handle
+   (`SetFileInformationByHandle`); a folder swapped for a junction between a check
+   and its use is never entered. If any identity check fails, removal stops at
+   once, the rest stays and the journal stays armed. Before the old version is touched, `customCheckAppRunning`
+   records (in the journal, so an interrupted run's leftovers cannot change the
+   answer) whether the user still had the old desktop and Start menu shortcuts;
+   electron-builder recreates both for the new exe, and `customInstall` deletes
+   again whichever the user had deleted. Every taskbar pin (`*.lnk` in
+   `User Pinned\TaskBar`, any name) whose target is exactly the old exe is
+   repointed to the new exe (its icon and working folder too where they named
+   the old ones; arguments, description and AppUserModelID kept); no other
+   shortcut is written and none is created. If the new copy is incomplete the
+   old folder is kept.
+   Right before the removal it asks Windows for the old folder's own 8.3 name
+   (`GetShortPathNameW`; `DESKTO~1` for `desktop-qa`, none for `desktop`, which
+   is a valid 8.3 name, or where 8.3 names are off) and keeps it in the journal
+   (`LegacyShortName`, saved and recovered with the other journal values).
+   Only when the old folder is really gone does it write the record, one value
+   `HKCU\Software\{APP_GUID}` `MigrationRecord` =
+   `DNMR2|{APP_GUID}|desktop|DoodleNote|<old folder>|<new folder>|<old 8.3 name>|<UTC>|END`
+   (the 8.3 name empty when there was none; 1 to 12 characters with a `~` and no
+   `\ / : * ? " < > |`, space or control character, the same rule in the
+   installer's `dnShortNameCheck` and the app's `recordShortNameValid`, both
+   checked against `src/main/fixtures/install-record-short-names.json`), read
+   back, and only then clear the journal. (`DNMR1`, without the 8.3 name, was
+   written only by this change's builds before round 9; both sides treat it as
+   not a record, `record-format`.) A run that stops between the
+   removal and the record leaves a complete journal whose old folder is gone; the
+   next run (which then has nothing to move) writes the record and clears the
+   journal after verifying the new copy (`LastStep` `install`, `LastReason`
+   `journal-completed`).
+4. Uninstalling the new copy (not an update's `--updated` run) while a move is
+   unfinished also removes the old folder it left (same checks, same
+   handle-based removal), since the uninstaller deletes the journal. Its app is
+   closed only with consent: started from Apps & features (no `/S`), the
+   uninstaller asks, as it does for the copy being uninstalled; with `/S` it
+   closes nothing. (A one-click uninstaller switches itself to silent mode before
+   the uninstall section runs, so this is decided in `customUnInit` from the
+   command line; before, it never asked and never closed the old app.) If that
+   app keeps running (the user said Cancel, or `/S`) or a file there is held, the
+   old folder stays as a stale copy without an uninstall entry; the next install
+   of the same identity finds it at the old default folder and moves it away.
+   Meanwhile it would start at every sign-in from this identity's "Open at login"
+   entry (`HKCU\...\CurrentVersion\Run`, value = the `appId`), so that entry is
+   deleted, with its Task Manager state (`...\Explorer\StartupApproved\Run`),
+   when it starts exactly the old exe or the exe being uninstalled (quoted path
+   compared normalised, short names expanded); an entry that starts anything else
+   is left alone. The log records it (`step=login-item`).
+
+`apps/desktop/scripts/test-windows-installer-guards.cjs` compiles the guards
+with electron-builder's makensis and runs them against real folders, junctions,
+held files and real processes in a temporary sandbox (CI "Check Windows
+installer migration guards"; 1188 cases before round 7, see the CI log for the
+current count): the junction overlap cases above, a
+second process swapping folders for junctions to an outside folder while the
+old folder is removed (nothing outside is touched), a second process
+retargeting the `Programs` junction onto the profile's parent or onto a decoy
+install at a pause between the checks and the removal (a harness-only build,
+`DN_TEST_PAUSE`; nothing anywhere is deleted and the journal stays armed, in an
+update and in the uninstall clean-up; a control run without the retarget removes
+the folder), short-name and foreign
+uninstall commands, a file held across two runs with the uninstaller's key
+deletion simulated each time and a third run finishing, the uninstall clean-up,
+an installer killed right after the "uninstall old version" step (twice: once
+mid-move, once on an update before the first launch) whose next run recovers the
+journal and the record, the app's own record handling
+(`scripts/consume-install-record.ts`) reading the recovered record, running and
+clearing it, tampered or foreign recovery copies ignored, a closer that never
+answers (`unknown` in about 4 s) and the silent quit-with-exit-code-2 case, the
+recorded status of each outcome and the log (see "Where an install records what it
+decided"), a user uninstall that keeps the old folder dropping only this
+identity's login entry for it, and (a harness-only build, `DN_TEST_STEPS`, that
+terminates right after a named step) an installer killed at each of these
+points: after each write of the restoration (`recover-LegacyUninstallString`,
+`-DesktopLink`, `-StartMenuLink`, `-LegacyShortName`, `-SourceDir`, `-DestDir`,
+`-Identity`, `recover-MigrationRecord`, `recover-deleted`), after `SourceDir` and
+`DestDir` while arming the journal (`park-SourceDir`, `park-DestDir`), after the
+recovery copy's journal values as a group (`save-journal`) and its record
+(`save-record`), and between the removal and the record (`finish-removed`,
+`finish-record`), each finished by the next run, mismatching and tampered
+copies kept, the empty recovery parent removed, and the app leaving an
+incomplete or foreign record untouched. Round 7 adds: a record with any time
+in `src/main/fixtures/install-record-times.json` judged as the app judges it,
+a malformed live record replaced from a valid recovery copy and a save that
+never copies one over it, the app recording `read-failed` (record untouched)
+while its reader is unavailable and consuming it on the retry, and an
+uninstaller built in electron-builder's hook order recording a `/S` uninstall of
+the running app and a cancelled close prompt. Durability: each write a later
+run depends on (the journal's `Identity`, the record, a complete recovery copy,
+a restored record) is followed by `RegFlushKey` on HKCU, so it survives a power
+loss right after it, not only a killed process; a power loss between two
+writes leaves the incomplete states the checks above handle.
+
+`appId`, the shortcut name and so the uninstall key are unchanged, so Start and
+Apps & features keep a single entry. The profile, `%APPDATA%\desktop`, holds the
+library location, settings and accounts; it is named after the app (package
+name `desktop`), not the install folder, and is not moved. Keep the package name
+and `appId` as they are unless a profile migration is written too.
+
+On the next launch the app repoints the "Open at login" entry and the MCP client
+configs (Claude Desktop, Claude Code, Codex) that launched the old exe
+(`src/main/windows-install-migration.ts`).
+
+The login item keeps a Task Manager disable. Round 10 reads it from
+`Explorer\StartupApproved\Run` itself, because Electron's own lookup cannot match
+a Run value written through an 8.3 path and would answer "enabled". When neither
+can tell, the entry is left as it is and the step stays pending: no login-item
+rewrite, only the step's status and progress are written. Round 11: which one
+decided is logged and kept in the progress marker, `loginItemSource`, and the e2e
+requires `startup-approved` after A3/B4/D7. Round 12: a marker whose
+`loginItemSource` is not one of the two known values counts as none recorded; the
+rest of its progress stands. Disclosed: an _empty_ StartupApproved value, which
+Windows does not write (it writes 12 bytes) and whose meaning is undocumented, is
+not read as "enabled". With an 8.3 Run program it stays unknown on every launch,
+so the step stays pending and the Run value keeps naming the removed exe (nothing
+starts at login) until the item is toggled in Task Manager or Open at login is
+turned on in Settings.
+
+"Launched the old exe" is decided with 8.3 short names expanded on both sides
+(`isInsideFolder`). Since round 11 it is decided on the resolved forms: a path
+written inside the old folder counts only once it resolves there, and a junction
+inside it that leads elsewhere does not count, when its destination exists. A
+dangling junction, whose destination is missing, is expanded like any missing
+part (see below), so its path counts as written, inside the old folder. That is
+harmless, because nothing exists there to start either. So an MCP command or Run
+value the old app wrote while it was started through a
+short path (`C:\Users\PATRIC~1\...\desktop\DoodleNote.exe`) still matches, since
+the old folder's parent exists and expands; in the old folder's own place exactly
+one unexpanded alias counts, the 8.3 name the installer recorded for it before
+removing it (never one guessed from its long name: `DESKTO~2` may have been
+another folder's). Only a missing part (`ENOENT`, `ENOTDIR`) is skipped while
+expanding; a part that exists but cannot be resolved (access denied, a busy
+volume) makes the entry undecidable: it is not repointed, its step (the login
+item, or that MCP client) stays pending and the record is not consumed, so the
+next attempt (1 / 5 / 30 minutes, every start) decides it; a record whose own
+folders cannot be resolved stays `pending / path-unresolved`. The Run value is read as written, through the speech
+worker's registry access, because Electron's own lookup compares plain strings;
+the progress marker's exe is compared the same way. This happens only on the
+installer's record: it must be complete and for this identity (version, the
+identity's `APP_GUID` and both folder names, both folders, a UTC time of exactly
+the shape `YYYY-MM-DDTHH:MM:SSZ` (ASCII digits; the installer's `dnRecordCheck`
+requires the same shape, so a record one calls complete the other does too, and
+recovery replaces a live record with a malformed time from a valid copy rather
+than keep it; `src/main/fixtures/install-record-times.json` holds the cases both
+are tested against), `END`),
+its new folder must be the running exe's own folder, and the old exe must be
+gone. A record that is there but not complete for this identity is left exactly
+as it is (logged `install record left for the installer`) for a later installer
+run to repair from its copy. When every step has succeeded the app deletes the
+record. A copy of the exe started from any folder
+that merely is named `DoodleNote` (a DPI capture, a portable copy) finds no
+record naming its folder and changes nothing. The app reads, writes and deletes
+these registry values through its speech worker (`src/main/windows-registry.ts`:
+`RegGetValueW`, `RegSetKeyValueW`, `RegDeleteKeyValueW` through the FFI the worker
+already loads), never through PowerShell or `reg.exe`: no child process, so an
+execution policy or AppLocker rule for PowerShell cannot stop it, and the record's
+folders read back exactly when the user folder is not ASCII (`reg.exe query`
+prints the console's OEM code page: `Jörg Ñandú 李雷 😀` comes back as `J�rg �and� ?? ??`
+under code page 437; `evidence/step5-fix-7/reg-unicode-probe.log`). Since round 9
+the worker's scope is one identity's, and nothing else: the identity the app
+forks it for, passed on its command line (`--doodlenote-registry-identity=<appId>`,
+`engine-host-win.ts`; never read from a message or the environment; a worker
+started without one may touch nothing), so the worker bundle itself carries no
+identity and stays byte-identical across packages: it may read only `MigrationRecord` in that identity's
+`Software\{APP_GUID}`, the three `AppMigration` / `AppMigrationReason` /
+`AppMigrationLastAttempt` values in its `Software\DoodleNote-InstallStatus\{APP_GUID}`,
+and its own Run value (named after its `appId`) in
+`Software\Microsoft\Windows\CurrentVersion\Run`, and (round 10, the only
+binary read, `RRF_RT_REG_BINARY`, at most 256 bytes) that value's Task Manager
+state in `Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`; write only those three status
+values; delete only that `MigrationRecord`. Anything else (another identity's
+GUID, the installer's own values such as `InstallLocation` or `LastResult`, the
+journal, another app's Run value) is refused (`SCOPE`) before any Win32 call. All
+three calls use `HKEY_CURRENT_USER` and the default registry view (no
+`KEY_WOW64_*` flag; the app and its installer are both 64-bit); a read is capped
+at 64 KiB (`SIZE`), a written value at 1024 characters, and the main process gives
+each request 60 s before it records `reader-timeout`.
+
+What the app did is recorded beside the installer's values, in the same
+`HKCU\Software\DoodleNote-InstallStatus\{APP_GUID}` key, and in
+`%APPDATA%\<package>\install-migration-status.json`, at every launch that finds a
+record or cannot read it (a launch with no record and nothing unfinished writes
+nothing): `AppMigrationReason`, `AppMigrationLastAttempt` (UTC) and, last,
+`AppMigration`:
+
+| `AppMigration` | `AppMigrationReason` | Retried |
+|---|---|---|
+| `complete` | `repointed`; `record-not-cleared` (the next launch deletes the record) | no |
+| `pending` | `steps-pending:<steps>` (`login-item`, `mcp-clients` or client ids that failed, incl. an entry whose path could not be resolved) | yes |
+| `pending` | `record-incomplete`, `record-foreign`, `record-format` (incl. a `DNMR1` record and an invalid 8.3 name), `record-time` (left for the installer), `record-other-folder` (a copy started elsewhere), `old-exe-present` | no (next start) |
+| `pending` | `path-unresolved` (the record's folders cannot be resolved now) | yes |
+| `read-failed` | `reader-unavailable` (the speech worker could not start or ended first), `reader-timeout` (no answer in 60 s), `reader-unsupported` (the FFI did not load), `reader-<code>` | yes |
+| `none` | `no-record`: an earlier `pending` / `read-failed` is over without a record | no |
+
+"Retried": again after 1, 5 and 30 minutes in the same session; every start tries
+once anyway. A retry after the speech worker's 5-minute idle unload starts the
+worker again, which reloads the speech model (about 765 MB, unloaded again after
+another 5 idle minutes); accepted, since it happens only while something is
+pending or unreadable, at most twice per launch. Nothing is repointed or cleared without a complete record. While the
+state is `pending` or `read-failed`, Settings > Updates shows "Finishing the
+Windows upgrade…" or "Couldn't finish the Windows upgrade" with the reason, and
+says that Open at login and connected agents may still start DoodleNote from the
+old folder, which the installer removed, until it finishes. Client configs are replaced atomically
+(a temporary file in the same folder with the original's mode, then a rename;
+a symbolic link is followed to the file the file system itself reaches,
+`fs.realpathSync.native`, never by joining link texts lexically; a dangling link
+to the name inside its folder's real path, where `writeFileSync` would create it;
+where that cannot be determined, nothing is written; the message, "could not tell
+where this file leads", does not name the cause, an `EIO` included: attaching
+it is a known follow-up), only when their content changes, and not at all if
+the client rewrote the file in the meantime (the update starts over from the new
+text). A temporary file whose removal fails stays beside the config as
+`.dn-<8 hex>.tmp` (not reported; the write's own result stands). The removal is
+one attempt (round 14: round 13's retry of a refused removal is reverted, since it
+removed the same name again without knowing it still held our file). It removes
+the temporary file by its name, a name this write created itself with an
+exclusive create, and does not identify the file again first. **Residual
+(disclosed):** a process that can write to the config's folder (normally only
+the same user) and replaces the file under that random name in the interval
+(moves ours aside and creates its own there) would have its file removed, or,
+before the rename, renamed over (for a new macOS config, linked as) the config.
+
+Those rules, and the strict Codex reading (a `config.toml` the TOML 1.0 statement
+scanner cannot read is refused and left unchanged; every definition of our server
+is removed; a definition inside another inline table is refused), the JSON byte
+order mark, an empty file read as none, a read error never treated as "no file",
+and mode 0600 for a new file, apply **on Windows only**. macOS (every platform but
+Windows) keeps the code of win/bark 9355b87 (`src/main/mcp-clients-logic-base.ts`,
+pinned by SHA-256) with one change: the write is a temporary file renamed over
+the config, in the file the base's `writeFileSync` wrote (the same resolution;
+where it cannot be determined, or the place holds no file, the base's in-place
+write). So on the atomic path an app crash never leaves a half-written config
+(the retained in-place fallback, the base's write, can still leave it empty or
+cut short if the app is killed mid-write); there is no `fsync` before the
+rename, so a power loss or a kernel panic still can. Kept from the
+base on purpose (for the owner to decide, a separate change): an existing config
+that cannot be read (mode 0200, or `EIO` on the read) is taken for no config,
+and Connect rewrites it with only our server (its other entries are lost);
+Windows refuses in that case. The replace is used only where the base's write would have been allowed
+too: the folder writable, and the file opened for writing first, as the base's
+write opened it (round 11: that descriptor, not an earlier access check, is the
+authority; a new file is linked into place, never over one that appeared
+meanwhile). A failure on the way for want of permission or support, or of a name
+that no longer leads to a file (`BASE_DECIDES`, exactly: `EACCES`, `EPERM`,
+`EROFS`, `EXDEV`, `ENOTSUP`, `EOPNOTSUPP`, `EINVAL`, `EMLINK`, `ENAMETOOLONG`,
+`EEXIST` (every temporary name taken, or a file that appeared before the link),
+`ENOENT` (a file or folder removed meanwhile), and since round 13 `ENOTDIR`,
+`EISDIR`, `ELOOP`), or a file replaced meanwhile, falls back to the base's
+in-place write, which then succeeds or fails as the base's write would have
+(truncating first, as it always did). Round 12: any other failure of the replace
+(`ENOSPC`, `EDQUOT`, `EIO`, `ENOMEM`, `EMFILE`, ...) is reported with the config
+untouched, and the temporary file is removed (it remains only if its removal
+fails, see below). Round 13: the checks before the replace (resolving the path, the
+`stat`, the folder's access check and the open for writing) are classified the
+same way. A `BASE_DECIDES` failure there falls back to the base's in-place write
+as before; any other is reported before anything is written or created.
+**Deviation (disclosed; for the owner to acknowledge):** in those cases the base's
+in-place write would have truncated the file first, so on a full disk it failed
+with the config empty or cut short (or, rarely, succeeded in the blocks it had
+just freed); the macOS build fails with the config intact. The temporary file's name is short and fixed
+(`.dn-<8 hex>.tmp`), whatever the config is called, so it no longer names its
+config (the accepted cost of round 11's B2). It is created exclusively; a taken
+name is drawn again (8 names in all), and only a name this write created is ever
+removed (round 12: round 11 removed a taken name's file, someone else's), by that
+name, one attempt, without identifying the file again (the same residual as on
+Windows above).
+Concurrency contract (tested where it can be): a change to the file's mode bits
+made before that open behaves as for the base (the base's write decides); one made
+after it is kept on the new file; one made in the interval between the last
+`fstat` and the rename lands on the replaced file instead. The owner, group and
+ACL of the original are not preserved at all: the new file is owned by the user,
+and it has only the ACL entries its folder passes on to a new file, if any (a
+disclosed difference). As with any replace by rename,
+another writer's content can be lost: another client's own atomic rewrite landing
+between the identity check (`lstat`) and the rename is replaced by ours, and
+another process's in-place write to the file between the open and the rename
+goes to the replaced file. And the temporary file remains whenever its removal
+fails, which is not reported (the write's own result stands). Its removal is
+attempted on every failure path, also when closing a descriptor failed (round
+13: such a close is never repeated). Round 14: when the temporary file's own
+write fails (`ENOSPC`, say) and its close then fails too, the first error is the
+one reported and classified; before, the close's error replaced it, and a close
+reporting a code of the fallback's kind (`EACCES` or `EPERM`, possible only as a
+deferred error on a network volume) sent a full disk to the in-place write,
+which emptied the config. A close that fails with no earlier error is reported
+as itself (darwin: classified like any other failure; Windows: thrown). It fails, for example, when the
+folder is made read-only between the temporary file and the rename (the in-place
+write still succeeds) or, for a new file, the link (`EACCES`, as the base's
+create). `src/main/agent-access-darwin.test.ts` compares a darwin service
+with the base service, byte for byte, on Connect, Disconnect and the status, and
+on 14 symbolic link topologies (a `..` after a folder link, dangling targets in
+linked folders, chains, loops) requires both writers to change the same file and
+nothing else.
+
+### Where an install records what it decided
+
+A one-click installer runs without a details page and writes no log of its own
+(`SetDetailsPrint none`; `customInit` runs in `.onInit`), so every decision of
+the move is recorded in two places, by the installer and by a user uninstall:
+
+- `HKCU\Software\DoodleNote-InstallStatus\{APP_GUID}` (one per identity,
+  outside `Software\{APP_GUID}`, which electron-builder's uninstaller deletes on
+  every update): `LastRun` (UTC, ISO 8601), `LastStep`, `LastResult`,
+  `LastReason`, overwritten at each decision, so after a run they say how it
+  ended (or where it stopped). They stay after an uninstall on purpose.
+- `%TEMP%\DoodleNote-install-<appId>.log` (`DoodleNote-install-com.doodlenote.desktop.qa.log`
+  for QA): the same decisions, one line each, appended (UTF-16):
+  `<UTC> installer version=<v> step=<step> result=<result> reason=<code> [from=<old folder>] [to=<new folder>]`;
+  a recovery line (`recover / recovered / restored`) ends in `wrote=<names>`, the
+  values it wrote back from the recovery copy (`wrote=none`: they were all still
+  live; round 10).
+  Past 64 KiB it is renamed to `<log>.1` (replacing an older one) and a new one
+  starts. The only paths in it are the install folders; nothing about the
+  profile, accounts or library.
+
+| `LastStep` | `LastResult` | `LastReason` |
+|---|---|---|
+| `recover` | `recovered`, `recover-incomplete` (copy kept), `recovery-ignored` (nothing in the copy passed its checks; kept) | `restored`; the first reason the copy must stay: `journal-mismatch` / `record-mismatch` (a live value differs from the copy's after the write), `journal-incomplete`, `journal-identity`, `journal-folders`, `record-format`, `record-identity`, `record-time`, `record-folders`; `recovery-foreign` (another identity's) |
+| `plan` | `plan-move` (the move starts) or `plan-in-place` | `legacy-found`, `journal-resumed`; `no-legacy` (already moved), `fresh-install`, `custom-dir` (`/D`), `not-default-folder`, `uninstall-command`, or the refusing check: `legacy-link`, `legacy-no-exe`, `legacy-missing`, `legacy-not-folder`, `legacy-resolves-elsewhere`, `dest-link`, `dest-open-failed`, `dirs-overlap`, `dirs-same`, `profile-overlap`, `profile-overlap-resolved`, `profile-invalid`, `resolve-failed`, `open-failed`, `path-invalid` |
+| `close` | `close-ok`, `close-keep`, `exit-2`, `cancelled` | `none`, `closed`; `app-running`, `unknown-process`; `app-running-silent` (old app, `/S` without `--updated`), `app-running` (in-place); `user-cancelled` |
+| `park` | `parked`, `refused-park` (exit code 2) | `parked`, `nothing-to-park`; `uninstall-command` |
+| `remove` | `moved` or `kept` (journal stays armed) | `removed`; `app-running`, `unknown-process`, `file-in-use`, `identity-check`, or the refusing check: `pin-open-failed`, `pin-not-folder`, `pin-read-failed`, `pin-moved`, `pin-no-exe`, `pin-profile-overlap`, `pin-dest-read-failed`, `pin-dest-overlap`, any `legacy-*` / `dest-*` / `profile-*` code above |
+| `record` | `moved` | `record-written`, `record-failed` (record did not read back; the journal stays, so the next run writes it) |
+| `install` | `in-place`, `kept`, `moved` | the plan's code; `incomplete-install`; `journal-completed` (an earlier run removed the old folder but stopped before the record) |
+| `uninstall` | `uninstalled`, `uninstalled-legacy-removed`, `uninstalled-legacy-kept` | `no-pending-move`, `removed`; `app-running`, `unknown-process`, `user-declined`, `file-in-use`, `identity-check`, or a `pin-*` / `legacy-*` code |
+| `login-item` (log only; `uninstall` is written after it) | `login-item-removed`, `login-item-absent`, `login-item-kept` | `run-value-deleted`, `no-run-value`, `not-ours`; only after `uninstalled-legacy-kept` |
+
+An uninstaller records its earliest exits too: electron-builder's `un.onInit` runs
+the app-running check (`customCheckAppRunning`) before `customUnInit` and the
+uninstall section, so the status destinations are set in that check. A `/S`
+uninstall while the app runs from the install folder records `close` / `exit-2` /
+`app-running` (`uninstaller step=close …` in the log) and exits with 2; a cancelled
+close prompt records `close` / `cancelled` / `user-cancelled`. The one exit nothing
+records is the one-click uninstaller's own "Are you sure?" box answered No: it
+comes before any hook electron-builder offers. The guard harness checks both
+recorded exits with an uninstaller built from `build/windows-installer.nsh` in
+electron-builder's order (`scripts/test-windows-uninstaller-hooks.nsi`), and
+`release-packaging.test.ts` pins that order in electron-builder 26.15.3's templates.
+
+The log also has `note` lines that do not change the registry values
+(`journal-ignored` with the reason the journal was not trusted:
+`journal-foreign`, `journal-incomplete`, `journal-other-dest`, `journal-<check code>`). A run whose
+`LastStep` is `plan`, `close` or `park` with no `exit-2` / `cancelled` stopped
+before `customInstall`. The guard harness checks these values for every outcome
+above, the line format, rotation, and that a log that cannot be written never
+stops the run.
+
+### Upgrade test: QA identity only
+
+**Never run this procedure against the production identity in a real Windows
+account.** A production build's installer, login item and MCP entries are the
+owner's real ones. The test uses the QA identity, a build-time mode that changes
+every identity-bearing name from the one entry in
+`apps/desktop/src/shared/app-identities.json` (checked by
+`src/main/app-identity.test.ts`):
+
+| | Production | QA identity |
+|---|---|---|
+| `appId` (uninstall key, `APP_GUID`) | `com.doodlenote.desktop` | `com.doodlenote.desktop.qa` |
+| Product name, exe, shortcuts | `DoodleNote`, `DoodleNote.exe` | `DoodleNote QA`, `DoodleNote QA.exe` |
+| Package name, profile | `desktop`, `%APPDATA%\desktop` | `desktop-qa`, `%APPDATA%\desktop-qa` |
+| Old / new install folder | `Programs\desktop` / `Programs\DoodleNote` | `Programs\desktop-qa` / `Programs\DoodleNote QA` |
+| AppUserModelID and the "Open at login" Run value | `com.doodlenote.desktop` | `com.doodlenote.desktop.qa` |
+| MCP entry in client configs | `doodle-note` | `doodle-note-qa` |
+| MCP opt-in file and client configs | the real home directory and `%APPDATA%\Claude` | all of them in a sandbox in the profile (`%APPDATA%\desktop-qa\agent-access-home`: its own `.doodlenote\mcp.json`, `.claude.json`, `.codex\config.toml` and `AppData\Roaming\Claude`), like the dev channel; neither `%APPDATA%` nor an inherited `DOODLE_NOTE_MCP_CONFIG` is consulted |
+| MCP server launch spec | `ELECTRON_RUN_AS_NODE` | also `DOODLE_NOTE_MCP_CONFIG` (the sandbox opt-in file, absolute) and `DOODLE_NOTE_MCP_IDENTITY=qa`; the server then reads only that file, only if it was written for `qa`, and never falls back to `~\.doodlenote\mcp.json` |
+| Profile data at first launch | an older profile's meetings, folders, settings and chat are adopted | starts empty: the sibling `%APPDATA%\desktop` is the production profile and is never copied (meetings, settings with the encrypted cloud API key, chat) |
+| Local AI models (meeting notes) | its profile's `models`, then `%APPDATA%\DoodleNote`, `%APPDATA%\desktop` and `%APPDATA%\DoodleNote Local` `models`, then `~\.cache\doodle-note\models` | only `%APPDATA%\desktop-qa\models`: download them in the QA build (or copy test models there); the production profile and the shared cache are never read |
+| Default global dictation shortcuts (fresh profile) | toggle `Control+Alt+D`, paste last `Control+Alt+Shift+V`, copy last `Control+Alt+Shift+C` | toggle `Control+Alt+Shift+D`, paste last and copy last off: only one app can register a global shortcut, so production's keep working while QA runs |
+| Migration journal | `HKCU\Software\f85f8dcf-...\InstallMigration` | `HKCU\Software\320d0756-...\InstallMigration` |
+| Completed-move record (`MigrationRecord`) | `HKCU\Software\f85f8dcf-...` | `HKCU\Software\320d0756-...` |
+| Update feed | (off on Windows until activation) | never: no `app-update.yml`, checks disabled |
+
+`pnpm package:win:qa` builds it: the app code with `DOODLENOTE_QA_IDENTITY=1`
+(electron-vite bakes in `__DOODLENOTE_IDENTITY__`) and the package with the
+`electron-builder.qa.cjs` overlay, into `release-qa\`, unsigned (signing
+variables are dropped). The packaged app refuses to start if its code identity
+and its package name disagree, so a production bundle can never be packaged as
+QA or the reverse. `node scripts/package-win-qa.cjs --legacy-layout` builds the
+starting point: the same QA identity without the migration include, so it
+installs to `Programs\desktop-qa` exactly like builds from before the rename
+(output `release-qa-legacy\`). The Bark helper names its output-mute
+coordination after the identity it is launched with (`DICTATION_HELPER_IDENTITY`
+= the build's `appId`: `Local\DoodleNote-Bark-output-<appId>` and
+`%TEMP%\DoodleNote-Bark-output-<appId>.json`), so production and QA no longer
+share it.
+
+CI proves the QA package is the production package apart from its identity
+(`scripts/test-windows-package.cjs --same-files-as … --negative-control`, in
+"Check the QA package ships exactly the production package's files"), in two
+steps.
+
+**Each package on its own first** (`packageSelfProblems`, round 9), whatever the
+other package holds, so a file copied from the other package (identical there,
+never "a difference") is still caught: its exe is named for its identity (the
+app.asar `package.json` `"name"`), every `FileDescription` / `InternalName` /
+`ProductName` version string is its product name, and its one ASAR integrity
+record is the SHA-256 of its own app.asar header; its `out/main/index.js` is built
+for its identity (`appIdentity("qa" | "production")`) and pins its own helper's
+stable Authenticode digest; its helper manifest's `sha256` / `authenticodeSha256`
+describe its own helper; its helper's `<PrivateImplementationDetails>` class
+names carry the helper's own module version id. The production package alone is
+checked the same way.
+
+**Then the comparison**: every app.asar entry, every app.asar.unpacked file and
+every other file of the two `win-unpacked` folders is compared by SHA-256. Only
+these may differ, each only in the stated way: `package.json` `"name"`; in
+`out/main/index.js` the identity block and the helper digest; the exe's name and,
+inside it, the three product-name version strings and Electron's ASAR integrity
+record. In the exe every byte outside the resource section must be equal except
+two PE header fields that hold the resource section's size: the size of data
+directory 2 (the resource table) and that section's `VirtualSize` in its section
+header; the resource section itself is compared resource by resource (its
+directory tables and padding are not). Then the Bark helper's csc.exe COFF time
+stamp and module version id (the `#GUID` heap and that id in its
+`<PrivateImplementationDetails>` class name); the helper manifest's `sha256` /
+`authenticodeSha256`; and `resources\app-update.yml`, which exactly the
+production package has. The negative control changes one byte in each kind of
+file (including next to each allowance), copies the production exe over the QA
+exe (under the QA exe's name) and the production helper manifest over the QA
+one, adds a feed file to the QA package, and requires each to be reported
+exactly.
+
+Production and QA can run at the same time, but they still share the Windows
+session. While both run, **do not**:
+
+- give QA production's global shortcuts. Windows gives a global shortcut to the
+  first app that registers it; the second one's registration fails (Settings
+  shows it as a conflict). A fresh QA profile defaults to `Control+Alt+Shift+D`
+  with paste last / copy last off for that reason; do not change them to
+  `Control+Alt+D`, `Control+Alt+Shift+V` or `Control+Alt+Shift+C`, and to test
+  paste last / copy last pick keys production does not use.
+- turn on Bark's hold key (or the hold mouse button) in both apps. Each app runs
+  its own helper with its own low-level hooks, so one press starts both and both
+  type the transcript into the focused field. Turn Bark on in QA only, or quit
+  production for the Bark part of the pass.
+- sign the QA build in to the owner's DoodleNote account (or any account that
+  holds real data). QA's cloud sync would then read and write the owner's real
+  meetings. Stay signed out, or use a disposable test account.
+- copy anything from `%APPDATA%\desktop` into `%APPDATA%\desktop-qa` (meetings,
+  settings, models): see step 1.
+
+Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
+`Programs\DoodleNote QA`, `%APPDATA%\desktop-qa` or QA journal before starting):
+
+Before step 1, check the QA identity's registry keys are clean. Unreleased QA
+builds of this change (before the record became one value) wrote three values,
+`MigratedFrom` / `MigratedTo` / `MigratedAt`, which today's installer and app
+ignore as no record at all (so they would neither be repointed nor reported):
+
+```
+reg query "HKCU\Software\320d0756-c91c-52c4-9287-55a7f514978d" /s
+reg query "HKCU\Software\DoodleNote-InstallRecovery\320d0756-c91c-52c4-9287-55a7f514978d" /s
+reg query "HKCU\Software\DoodleNote-InstallStatus\320d0756-c91c-52c4-9287-55a7f514978d"
+```
+
+Each should answer "unable to find the specified registry key" on a machine that
+never ran the QA build. On a QA machine that did, uninstall every QA copy first;
+then, only for these QA keys (`320d0756-…` is the QA `APP_GUID`; never the
+production `f85f8dcf-…` ones), `reg delete "<key>" /f` each that is still there.
+
+
+1. Install `release-qa-legacy\DoodleNote QA-<version>-setup.exe`. The QA profile
+   starts empty: seed it with test data only (import a test recording or create a
+   few test meetings; never copy anything from `%APPDATA%\desktop`). It finds no
+   local AI models until they are downloaded in the QA build (or test models are
+   copied into `%APPDATA%\desktop-qa\models`): it never reads production's. Turn on Open
+   at login, enable agent access and connect the three MCP clients (they are
+   written in the sandbox above, never the real `~/.claude.json`,
+   `%APPDATA%\Claude\claude_desktop_config.json` or `~/.codex`; check those
+   real files are byte-for-byte unchanged). Record the
+   QA Run value (`com.doodlenote.desktop.qa`) and confirm the production one, if
+   any, is unchanged.
+2. Run `release-qa\DoodleNote QA-<version>-setup.exe` (also with `/S --updated`).
+   Check: `Programs\DoodleNote QA` exists and `Programs\desktop-qa` is gone; one
+   "DoodleNote QA" entry in Apps & features whose uninstaller is in the new
+   folder; Start menu and desktop shortcuts start the new exe (repeat once with
+   the legacy Start menu shortcut deleted and once with the desktop one deleted:
+   they stay deleted); a taskbar pin of the legacy app, also one renamed, starts
+   the new exe and other pins are unchanged; the profile and
+   library are unchanged; the QA Run value and the sandboxed client configs name
+   the new exe (`install-migration.json` in the profile says `complete`); the QA
+   journal key is gone; right after the installer and before the first launch
+   `HKCU\Software\320d0756-...` holds `MigrationRecord`
+   (`DNMR2|320d0756-...|desktop-qa|DoodleNote QA|...\desktop-qa|...\DoodleNote QA|<the old folder's 8.3 name, e.g. DESKTO~1>|<UTC>|END`),
+   and after the first launch it is gone; `HKCU\Software\DoodleNote-InstallRecovery`
+   does not exist (unless another identity's copy is in it); nothing of production
+   changed (its folder, Run value, uninstall key and real MCP configs).
+3. Repeat with the legacy QA app running (closed only after the OK prompt; with
+   `/S` and no `--updated` the installer exits with code 2 and nothing changes),
+   with a file in the old folder held open across two runs (the folder and its
+   exe stay, the journal stays armed after each, a third run finishes), with
+   `Programs\DoodleNote QA` replaced by a junction to `Programs\desktop-qa`
+   before step 2 (nothing is moved or deleted; the install is upgraded in place),
+   with the QA uninstall entry's `UninstallString` rewritten in 8.3 form (still
+   moved; the parked command is put back verbatim if the run is cancelled), and
+   by uninstalling `DoodleNote QA` from Apps & features while a move is pending
+   (both folders are gone afterwards; with the legacy QA app running it asks
+   first, and after Cancel the old folder stays but the QA Run value
+   `com.doodlenote.desktop.qa` and its `StartupApproved` entry are gone, the
+   production one untouched, and `LastResult` is `uninstalled-legacy-kept`).
+
+### Installer end-to-end in CI (substitute for the desktop pass's installer items)
+
+Smart App Control on the QA machine (ODL-WIN-Dev04) has blocked particular
+freshly compiled unsigned builds, by file hash and not predictably (Code Integrity
+events 3033 / 3077, policy `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`): the guard
+harness builds of rounds 4–6 (one `harness-pause.exe` in round 4; in round 5
+every harness build, held for over 90 minutes; in round 6 all four; the harness
+has only been compiled, not run, on Dev04 since), and in
+round 8 electron-builder's NSIS uninstaller-writer step of `package:win` and
+`package:win:qa` (`spawn UNKNOWN`). Other fresh builds ran: the round 1–3 harness
+builds, and in round 8 the `--prepackaged` legacy-layout and kill-step installer
+builds, whose writer step was allowed. The QA installers, uninstallers and the
+rcedited `DoodleNote QA.exe` have not been started on Dev04 since round 5, so whether
+they would be blocked is not known; each block also raises a Windows Security
+notification that holds the shared desktop. It is never bypassed, excluded or
+disabled. Until the owner decides
+about it on the test machine, or the builds are signed, the installer items of the
+desktop pass run on the throwaway GitHub Windows runner instead: CI job
+`windows-installer-e2e` (`.github/workflows/ci.yml`), script
+`apps/desktop/scripts/test-windows-installer-e2e.cjs`. It refuses to run without
+`CI` (or `DOODLENOTE_E2E_THROWAWAY_MACHINE=1`), installs only the QA identity, and
+stops only processes it started.
+
+It builds the QA installer (`package-win-qa.cjs`), then from the same
+`win-unpacked` (`--prepackaged`, stored rather than compressed to save time) the
+legacy-layout QA installer and a kill-step QA installer. All three carry the
+current QA app's bytes: "legacy" means the legacy installer *layout*
+(`Programs\desktop-qa`, no migration include), not an older app version, so the
+job proves the installer's move, not an upgrade between app versions. The
+kill-step installer (`build/windows-installer-test-steps.nsh`; no release build
+includes it) has `DN_TEST_STEPS` and two kill points, armed by `DN_TEST_STOP_AT`:
+`after-uninstall-old-version`, the moment electron-builder's `uninstallOldVersion`
+returns (its `customUnInstallCheck` hook, which then repeats the stock result
+check verbatim), and `after-stock-uninstall`, its last hook before
+`customInstall` (after the file copy, the uninstall entry and the shortcuts).
+`--only` takes a subset of `A,B,C,D`; an unknown name fails, and the job fails
+unless every selected scenario ran. Each step is timed in the job
+summary and the artifact `installer-e2e-<sha>` (timings, the install log, the
+final status key).
+
+| Scenario | What it does | What it asserts |
+|---|---|---|
+| A basic | legacy `/S`; seed a Run value (the old folder's full 8.3 path, its own short name included) and the three sandboxed MCP configs naming the old exe; current `/S --updated`; launch the installed app; uninstall `/S /currentuser` | after the install: old folder gone, new folder complete, exactly one QA uninstall entry naming the new folder, `MigrationRecord` complete (`DNMR2|<GUID>|desktop-qa|DoodleNote QA|<old>|<new>|<the old folder's 8.3 name as read before the upgrade>|<UTC>|END`), journal, recovery copy and its parent gone, status `record / moved / record-written`, log, in this order, `plan-move legacy-found → close-ok → parked → recovered restored wrote=none → remove moved removed → record moved record-written` (the legacy command was parked, so the stock step ran no uninstaller and the copy is only checked and deleted: A proves no restoration), Start menu and desktop shortcuts start the new exe, the Run value still names the old exe; after the first launch: `AppMigration = complete / repointed`, record consumed, Run value and all three MCP entries repointed (Codex project table kept), `install-migration-status.json`; after the uninstall: folder, uninstall entry, `Software\{GUID}`, recovery keys and shortcuts gone, status `uninstall / uninstalled / no-pending-move`, profile, status key and `%TEMP%` log kept |
+| B interrupted | legacy `/S`, seed; kill-step `/S --updated` stopped right after "uninstall old version" (exit 9); current `/S --updated`; launch; uninstall | after the kill (the parked command meant the stock step ran no uninstaller): old folder kept, journal armed with the parked command, the new copy registered, no record; the next run logs, in this order, `recovered restored wrote=none` (B2's copy, its journal still live) → `plan-move journal-resumed` → `close-ok` → `parked nothing-to-park` → `recovered restored wrote=…SourceDir,DestDir,Identity` (its stock step ran the new copy's uninstaller, which deleted `Software\{GUID}` with the journal, written back in `customInstall`) → `remove moved removed` → `record moved record-written`; then as A |
+| D killed after the stock uninstaller | legacy `/S`, seed; hold a file; current `/S --updated` (journal armed, the new copy registered); release; kill-step `/S --updated` stopped the moment `uninstallOldVersion` returns (exit 9); current `/S --updated`; kill-step again with the move's record live (not yet consumed); current `/S --updated`; launch; uninstall | an update of the **new** layout, so the stock step really runs the new copy's uninstaller, which deletes `Software\{GUID}`: after the first kill the live journal is gone and the recovery copy holds every journal value exactly as it was (incl. `LegacyShortName`); the next run's **first** line is `recovered restored wrote=<exactly the journal's non-empty values, in dnRecoverState's order>`, before any plan (on the runner `plan-move legacy-found`), then close, park, `remove moved removed`, `record moved record-written`; after the second kill the live `MigrationRecord` is gone and the copy holds it exactly; the next run's first line is `recovered restored wrote=MigrationRecord`, before its plan, the record is back byte for byte, the copy and its parent go; the first launch consumes it; then as A |
+| C consent, held file | legacy `/S`; start the legacy app; current `/S` (no `--updated`); stop the app; hold a file in the old folder; current `/S --updated` twice; release; once more; uninstall | `/S` without `--updated`: exit 2, `close / exit-2 / app-running-silent`, app not closed, nothing moved; held: journal armed after each of two runs, `remove / kept / file-in-use`, one uninstall entry, no record; the third run completes as in A |
+
+Covered by the job: the basic move (silent), the running-app and held-file
+cases (silent), recovery (each restoration identified by its `wrote=` list, in
+order): B, a journal deleted by the stock uninstaller *during* a run (the new
+copy's uninstaller) written back in that run's `customInstall`; D, a run killed
+the moment the stock uninstaller deleted the live journal, then the live
+record, each written back by the next run before it plans), the silent user
+uninstall, the sandboxed MCP configs and Run value being repointed (including an
+8.3 path), and the record and status values: what a real installer, uninstaller
+and the installed app do to the registry, folders, Run value, shortcuts and MCP
+configs. A real installer killed at any other point is not covered (the guard
+harness's kill steps cover those against the installer functions), and every
+installer is built from the current app's bytes (no older app version).
+Still needs a real desktop: taskbar pins (Explorer), DPI and multi-monitor
+captures, notifications and the tray, every interactive prompt (the "close it?"
+and "Are you sure?" boxes, Cancel paths, Apps & features), the junction-profile
+and 8.3-uninstall-command cases on a real profile, elevated and
+production-plus-QA runs, a non-ASCII account, and the packaged smoke (Bark, live
+captions, the Settings rows).
+
+## Automatic updates (off until activation)
+
+Windows builds ship with automatic updates OFF. `updateAvailability` in
+`apps/desktop/src/main/update-policy.ts` reports Windows as unsupported unless
+the build was made with `DOODLENOTE_WINDOWS_UPDATES=on`, which electron-vite
+bakes into the main bundle (`__DOODLENOTE_WINDOWS_UPDATES__`). Off means no
+launch check, no 6-hour check and no manual check (Settings shows "Automatic
+updates are not on for Windows yet"); nothing on an installed PC can turn it
+on. macOS is unaffected. Neither CI nor `package:win` sets the variable, and a
+test fails if either does.
+
+The rest of the updater is already wired the same way as on the Mac:
+electron-updater with the shared generic `publish` feed
+(`https://www.doodlenote.ai/updates`, single-range requests), the NSIS target
+writes `latest.yml` and a `.blockmap` (differential downloads, like the Mac
+ZIP), and the packaged app carries `resources/app-update.yml`. On Windows the
+policy reads the `beta` channel (`beta.yml`) without downgrades. The live
+`beta.yml` (0.4.37) and stale `latest.yml` (0.3.4) are older than this build, so
+nothing an existing 0.4.x tester receives changes until a new manifest is
+published, and CI only uploads its manifest as a workflow artifact.
+
+To activate, in one release change:
+
+1. Require a valid signature first (Artifact Signing, below, including
+   `publisherName`); never publish an unsigned build to a feed.
+2. Choose the channel: keep `beta` for testers, or change `applyUpdatePolicy`
+   to the default channel (`latest.yml`) for production.
+3. Build the release with `DOODLENOTE_WINDOWS_UPDATES=on` (for example in
+   `release:win`) and update the "default to off" test so CI still builds off.
+4. Publish with `pnpm release:win` (signature gate, `latest.yml`) or
+   `publish:win-beta` (`beta.yml`). Installed builds from before activation never
+   check, so their users install the first activated build by hand.
+
+## Code signing (Microsoft Artifact Signing)
+
+Signing for Onyx Dev Labs LLC uses Microsoft Artifact Signing (formerly Trusted
+Signing) through SignTool and the Artifact Signing dlib
+(`Microsoft.ArtifactSigning.Client` 1.0.151 from nuget.org, pinned by SHA-256 in
+CI, running on .NET 10). `apps/desktop/scripts/sign-windows.cjs` is
+electron-builder's `win.signtoolOptions.sign` hook (SHA-256 only, `signExts`
+adds `.dll` and `.node`), so it signs the app exe, Electron's DLLs, the unpacked
+native modules (sherpa/ONNX, llama, Koffi), the installer and the uninstaller;
+files that already carry a valid vendor signature (Microsoft's
+`d3dcompiler_47.dll`, `dxil.dll`) keep it. electron-builder never offers
+single-file `extraResources` to its signer, so `package:win` signs
+`engine\.build\windows\dictation-helper.exe` itself right after building it.
+Anything that records the helper's signature must run after that step. The
+order is helper build, helper signing, `write-dictation-helper-manifest.cjs`
+(win/bark: the signing-invariant Authenticode digest, and for a signed helper
+the signer's exact CN and certificate thumbprint, which electron-vite bakes into
+the app), electron-vite, electron-builder; pinned by `helper-integrity.test.ts`
+and `dictation-platform.test.ts`. `pnpm package:win:qa` runs the same order
+(unsigned).
+
+A PFX supplied the electron-builder way (`CSC_LINK` / `WIN_CSC_LINK`) is refused
+with an error: the helper step never receives electron-builder's certificate,
+so the helper would ship unsigned while everything else was signed. This is
+deliberate and also applies to an otherwise unsigned build: with `CSC_LINK` or
+`WIN_CSC_LINK` set anywhere in the environment (a shell profile, a CI variable
+left from the old PFX setup), `pnpm package:win` fails at the helper-signing
+step instead of building; unset them. `pnpm package:win:qa` drops them, so a QA
+build is unaffected. SignTool is
+pinned: `SIGNTOOL_PATH`, else Windows SDK `10.0.26100.0`'s x64 `signtool.exe`
+(never "the newest one found"), and before first use the script checks that it
+is validly Authenticode-signed by Microsoft (`CN=Microsoft Corporation` or
+`CN=Microsoft Windows`, `O=Microsoft Corporation`), that its version resource's
+`OriginalFilename` is `signtool.exe` (case-insensitive; any other
+Microsoft-signed binary, `ping.exe` say, is refused) and that it is at least
+10.0.22621.755 (the dlib's minimum). Dev04 has no Windows SDK, so the exact
+signer subject of SDK 10.0.26100.0's SignTool (`CN=Microsoft Corporation` is
+expected) has not been seen natively yet: confirm it on the first
+`windows-sign.yml` run, or on any machine with the SDK, with
+`Get-AuthenticodeSignature` before relying on the check.
+
+Where signing runs: never in PR or branch CI. The `windows-package` job in
+`ci.yml` runs PR-controlled scripts, so it references no secrets at all and
+always builds unsigned (`signing skipped: no credentials`); if an installer it
+built ever carried a signature, it runs the full verification below anyway.
+Signed builds come only from `.github/workflows/windows-sign.yml`, started by
+hand on `main` or a `v*` tag, in the GitHub Environment `windows-signing`. It
+rebuilds from the approved commit, signs, runs the package check and
+`scripts/verify-windows-signature.ps1` (installer, helper and every shipped
+`.exe`, `.dll` and `.node` validly signed; the same check gates `release:win`),
+and uploads the artifact. It publishes nothing. Before anything else it checks
+that the commit is on `main` (`git merge-base --is-ancestor $GITHUB_SHA
+origin/main`, full history fetched): the environment matches a `v*` tag by name
+only, so without this a tag pushed onto any commit would be signable.
+
+**Create the environment with its protection rules before adding any secret**
+(Settings > Environments > New environment `windows-signing`): required
+reviewers (the owner), "Prevent self-review" if available, deployment branches
+and tags limited to `main` and `v*`, and no admin bypass. Also restrict who can
+create release tags (Settings > Rules > Rulesets > New tag ruleset: target
+`v*`, restrict creations, updates and deletions, bypass list = release
+maintainers only), so a `v*` tag cannot be created by anyone with push access.
+Only then add the
+secrets to that environment (never as repository secrets, which any workflow
+could reference): `ARTIFACT_SIGNING_ENDPOINT` (for example
+`https://eus.codesigning.azure.net`, matching the account's region),
+`ARTIFACT_SIGNING_ACCOUNT`, `ARTIFACT_SIGNING_PROFILE`, and an Entra app
+registration with the Artifact Signing Certificate Profile Signer role:
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`. A partial set
+fails the build.
+
+**Preferred credential once the Azure app registration exists: OIDC, no stored
+secret.** Add a federated credential to the app registration for GitHub Actions
+with subject `repo:Onyx-Dev-Labs/doodle-note:environment:windows-signing` and
+audience `api://AzureADTokenExchange`, so only jobs running in the protected
+environment can obtain a token. The signing job then gets `permissions:
+id-token: write`, requests a GitHub OIDC token for that audience, writes it to a
+file under `$RUNNER_TEMP` and passes `AZURE_FEDERATED_TOKEN_FILE` (with
+`AZURE_TENANT_ID` and `AZURE_CLIENT_ID`) instead of `AZURE_CLIENT_SECRET`.
+`sign-windows.cjs` accepts exactly one of the two (both set is an error), and
+tells the dlib's `DefaultAzureCredential` to try only the configured one
+(`WorkloadIdentityCredential` for the token file, `EnvironmentCredential` for
+the secret); the Azure CLI's session, managed identity, Visual Studio and
+browser logins stay excluded. GitHub's OIDC tokens are short-lived and SignTool
+runs once per file, so on the first OIDC run confirm the token lasts for the
+whole signing step (refresh the file before the packaging step if needed). The
+workflow change (`id-token: write`, the token step, dropping the secret) is made
+together with the app registration; until then the secret path above is what
+`windows-sign.yml` uses. The old `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`
+repository secrets are no longer read by any workflow and should be deleted if
+they exist.
+
+When the account is approved: create the environment as above, add the six
+secrets, run the workflow on `main` and confirm it signs and verifies, set
+`win.signtoolOptions.publisherName` to the certificate's subject CN
+(electron-updater then refuses an update installer signed by anyone else), and
+only then consider activating updates (above). Local plumbing checks can use
+`DOODLENOTE_SIGN_TEST_CERT_SHA1` with a temporary CurrentUser\My certificate
+(refused when `CI` is set); delete it from CurrentUser\My and CurrentUser\CA
+afterwards. Such a build is not trusted by Code Integrity.
+
+## High DPI and multiple monitors
+
+All window geometry is in DIPs and follows the display: caption-button insets
+come from the `titlebar-area-*` environment variables, the dictation pill and
+the meeting prompt are placed inside the work area of the display they are on,
+and the notification-area icons carry 16, 20, 24, 32, 40 and 48 px images.
+The main window opens on the display under the pointer, sized to fit its work
+area (1080p at 200% leaves about 960x500 DIPs, less than the 1180x760 default
+and the 560 DIP minimum height). After a move, a scale change or a removed
+display it is left alone whenever it is fully visible, including a window
+deliberately spanning two monitors and larger than either; it is brought back
+only when less than half of it is on any work area, and shrunk only when the
+display under its center became smaller (another display, or a higher scale)
+and the window is larger than the combined work areas it overlaps. macOS keeps
+its own window handling. The pill is placed again whenever scaling changes or a
+display is added or removed.
+
+`capture-windows-dpi.cjs` must run a copy of the app from a folder that is not
+an installed identity's folder; the app never repoints a login item or MCP
+client configs unless the installer recorded a move into the folder it runs
+from, so a copied exe cannot change them.
+
+`apps/desktop/scripts/capture-windows-dpi.cjs <DoodleNote.exe> <out-dir>
+--profiles <isolated-profiles-dir>` launches the packaged app with
+`--force-device-scale-factor` 1.25, 1.5 and 2, each with a fresh profile,
+captures Home, Settings and (when Bark is enabled in that profile) the pill
+with their native caption buttons, and fails if the window exceeds the work
+area. It opens visible windows. The notification-area icon and its menu are
+drawn by the shell at the system scale, so check them by changing the display
+scale in Windows Settings or on a second monitor with another scale.
+
 ## Production gate
 
 ### Installer follow-up in 0.4.23
@@ -314,6 +1184,23 @@ These changes do not yet establish the cause of the reported NSIS Retry/Cancel
 dialog. Verify the actual installed upgrade and retain the exact dialog text
 plus update lifecycle log if it recurs. The 0.4.22-to-0.4.23 upgrade still runs
 the 0.4.22 updater; the new handoff behavior applies to subsequent updates.
+
+**Visual C++ runtime.** The package does not ship the Microsoft Visual C++
+runtime (`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`), and it is
+not part of Windows: it comes with the Visual C++ Redistributable, which the CI
+runner and Dev04 have but a clean Windows 10/11 install may not. Electron, Koffi,
+the speech engine and the Bark helper do not need it. The package check's
+dependency closure lists who does (CI log, "Visual C++ redistributable … needed
+by"): node-llama-cpp's prebuilt `bins\win-x64`, `bins\win-x64-vulkan` (and the
+nested copy) and `@reflink/reflink-win32-x64-msvc`; any other binary importing
+it fails the check. Without the redistributable, local inference reports "Local
+inference is unavailable … No usable … runtime was found" (node-llama-cpp's
+`NoBinaryFoundError`; dictation, recording and cloud models are unaffected) and
+ipull's optional reflink clone falls back to a copy. Verify on a clean machine
+without the redistributable (e.g. a fresh VM; never uninstall it from a shared
+machine) before deciding between documenting it as a requirement, shipping the
+runtime app-local beside those binaries, or installing the redistributable from
+the installer.
 
 Outstanding production acceptance: code signing, first-attempt installed
 upgrades, varied physical microphones/system audio, long meetings, device

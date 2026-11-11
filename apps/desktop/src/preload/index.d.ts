@@ -19,6 +19,7 @@ import type { NotesApi } from '../shared/notes-api'
 import type { SyncApi } from '../shared/sync-api'
 import type { ThemeApi } from '../shared/theme-api'
 import type { UpdateApi } from '../shared/update-api'
+import type { InstallMigrationApi } from '../shared/install-migration-api'
 
 declare global {
   interface Window {
@@ -37,6 +38,8 @@ declare global {
     detect: DetectApi
     themeNative: ThemeApi
     updates: UpdateApi
+    /** Windows only (see src/shared/install-migration-api.ts). */
+    installMigration?: InstallMigrationApi
     integrations: IntegrationsApi
     audio: AudioApi
     importer: ImporterApi

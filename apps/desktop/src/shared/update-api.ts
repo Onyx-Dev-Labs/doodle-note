@@ -4,11 +4,15 @@ export const UPDATE_INSTALL_CHANNEL = 'update:install'
 export const UPDATE_CANCEL_CHANNEL = 'update:cancel'
 export const UPDATE_STATE_EVENT_CHANNEL = 'update:state-event'
 
+/** Why `supported` is false: a development build, or Windows before updates are activated. */
+export type UpdateUnavailableReason = 'dev-build' | 'windows-not-activated'
+
 export interface UpdateState {
   /** Version currently running. */
   currentVersion: string
   /** False in dev builds — the feed only serves packaged apps. */
   supported: boolean
+  unsupportedReason?: UpdateUnavailableReason
   status:
     | 'idle'
     | 'checking'

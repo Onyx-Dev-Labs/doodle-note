@@ -4,16 +4,20 @@ import type { CalendarState } from '../shared/calendar-api'
 import type { RecordingState } from '../shared/recording-api'
 import { trayTitle, upcomingTrayEvents } from './calendar-events'
 import { recordingMenuAction } from './recording-start-coordinator'
+import { APP_IDENTITY } from './app-identity'
+
+/** The name the tray shows (DoodleNote QA for a QA identity build). */
+const APP_NAME = APP_IDENTITY.productName
 
 /** Windows notification-area tooltips are cut off past 127 characters. */
 const WINDOWS_TOOLTIP_MAX = 127
 
 const WINDOWS_PHASE_TOOLTIP: Record<RecordingState['phase'], string> = {
-  idle: 'DoodleNote',
-  requested: 'DoodleNote — Starting…',
-  starting: 'DoodleNote — Starting…',
-  recording: 'DoodleNote — Recording',
-  finishing: 'DoodleNote — Finishing…'
+  idle: APP_NAME,
+  requested: `${APP_NAME} — Starting…`,
+  starting: `${APP_NAME} — Starting…`,
+  recording: `${APP_NAME} — Recording`,
+  finishing: `${APP_NAME} — Finishing…`
 }
 
 /**
@@ -54,7 +58,7 @@ export class RecordingTray {
         nativeImage.createFromPath(join(resourceDir, name))
       )
       this.tray = new Tray(this.images[0])
-      this.tray.setToolTip('DoodleNote')
+      this.tray.setToolTip(APP_NAME)
       // Windows convention: a left click opens the app; right click shows the menu.
       this.tray.on('click', () => this.open())
       this.render()
@@ -71,7 +75,7 @@ export class RecordingTray {
     })
     const image = this.images[0]
     this.tray = new Tray(image)
-    this.tray.setToolTip('DoodleNote')
+    this.tray.setToolTip(APP_NAME)
     this.render()
     // Also update across midnight, sleep/wake and timezone changes without
     // relying on a calendar refresh or a recording state change.
@@ -101,14 +105,14 @@ export class RecordingTray {
       iconType: 'info',
       title:
         phase === 'finishing'
-          ? 'DoodleNote is saving the recording'
+          ? `${APP_NAME} is saving the recording`
           : phase === 'recording'
-            ? 'DoodleNote is still recording'
-            : 'DoodleNote is starting the recording',
+            ? `${APP_NAME} is still recording`
+            : `${APP_NAME} is starting the recording`,
       content:
         phase === 'finishing'
-          ? 'DoodleNote closes when the recording is saved. Click the DoodleNote icon in the notification area to open it instead.'
-          : 'Recording continues in the background, and DoodleNote closes when it ends. Click the DoodleNote icon in the notification area to return and stop it.',
+          ? `${APP_NAME} closes when the recording is saved. Click the ${APP_NAME} icon in the notification area to open it instead.`
+          : `Recording continues in the background, and ${APP_NAME} closes when it ends. Click the ${APP_NAME} icon in the notification area to return and stop it.`,
       noSound: true
     })
   }
@@ -142,13 +146,13 @@ export class RecordingTray {
     const title = fullIsland && meetings[0] ? trayTitle(meetings[0], now) : ''
     this.tray.setTitle(title, { fontType: 'monospacedDigit' })
     this.tray.setToolTip(
-      [this.recording ? 'DoodleNote — Recording' : 'DoodleNote', title].filter(Boolean).join(' — ')
+      [this.recording ? `${APP_NAME} — Recording` : APP_NAME, title].filter(Boolean).join(' — ')
     )
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
         { ...recordingMenuAction(this.state), click: () => this.start() },
         { type: 'separator' },
-        { label: 'Open DoodleNote', click: () => this.open() },
+        { label: `Open ${APP_NAME}`, click: () => this.open() },
         { type: 'separator' },
         { label: 'Today', enabled: false },
         ...this.meetingItems(meetings),
@@ -166,28 +170,28 @@ export class RecordingTray {
           click: () => this.setFullIsland(true)
         },
         { type: 'separator' },
-        { label: 'Quit DoodleNote', click: () => app.quit() }
+        { label: `Quit ${APP_NAME}`, click: () => app.quit() }
       ])
     )
   }
   private renderWindows(): void {
     if (!this.tray) return
     if (this.savingBeforeQuit) {
-      this.tray.setToolTip('DoodleNote — Saving recording…')
+      this.tray.setToolTip(`${APP_NAME} — Saving recording…`)
       this.tray.setContextMenu(
         Menu.buildFromTemplate([{ label: 'Saving recording before quitting…', enabled: false }])
       )
       return
     }
     if (this.finishingNotes) {
-      this.tray.setToolTip('DoodleNote — Finishing notes…')
+      this.tray.setToolTip(`${APP_NAME} — Finishing notes…`)
       this.tray.setContextMenu(
         Menu.buildFromTemplate([
           { label: 'Finishing notes, then closing…', enabled: false },
           { type: 'separator' },
-          { label: 'Open DoodleNote', click: () => this.open() },
+          { label: `Open ${APP_NAME}`, click: () => this.open() },
           { type: 'separator' },
-          { label: 'Quit DoodleNote', click: () => app.quit() }
+          { label: `Quit ${APP_NAME}`, click: () => app.quit() }
         ])
       )
       return
@@ -207,12 +211,12 @@ export class RecordingTray {
       Menu.buildFromTemplate([
         { ...recordingMenuAction(this.state), click: () => this.start() },
         { type: 'separator' },
-        { label: 'Open DoodleNote', click: () => this.open() },
+        { label: `Open ${APP_NAME}`, click: () => this.open() },
         { type: 'separator' },
         { label: 'Today', enabled: false },
         ...this.meetingItems(meetings),
         { type: 'separator' },
-        { label: 'Quit DoodleNote', click: () => app.quit() }
+        { label: `Quit ${APP_NAME}`, click: () => app.quit() }
       ])
     )
   }

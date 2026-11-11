@@ -17,6 +17,10 @@ import type { DetectState } from '../../shared/detect-api'
 import { useSyncConnection } from './lib/use-sync-connection'
 import type { AgentAccessStatus, McpClientId, McpServerSpec } from '../../shared/integrations-api'
 import type { UpdateState } from '../../shared/update-api'
+import {
+  installMigrationNotice,
+  type InstallMigrationStatus
+} from '../../shared/install-migration-api'
 import { SettingsIcon, type SettingsIconName } from './SettingsIcon'
 import { SettingsCloudAccess } from './SettingsCloudAccess'
 import { Fragment } from 'react'
@@ -400,6 +404,19 @@ export default function ModelsView({
 
   useEffect(() => window.updates.onState(setUpdate), [])
 
+  /* ---- Windows install folder move (Windows only) ---- */
+  const [migration, setMigration] = useState<InstallMigrationStatus | null>(null)
+  useEffect(() => {
+    if (active && window.installMigration) {
+      void window.installMigration
+        .getStatus()
+        .then(setMigration)
+        .catch(() => setMigration(null))
+    }
+  }, [active])
+  useEffect(() => window.installMigration?.onStatus(setMigration), [])
+  const migrationNotice = installMigrationNotice(migration)
+
   const checkForUpdates = async (): Promise<void> => {
     if (checkPending) return
     setCheckPending(true)
@@ -411,7 +428,10 @@ export default function ModelsView({
   }
 
   const updateStatusLine = (u: UpdateState): string => {
-    if (!u.supported) return 'Updates apply to the installed app (not dev builds)'
+    if (!u.supported)
+      return u.unsupportedReason === 'windows-not-activated'
+        ? 'Automatic updates are not on for Windows yet. Get new versions from doodlenote.ai.'
+        : 'Updates apply to the installed app (not dev builds)'
     switch (u.status) {
       case 'checking':
         return 'Checking…'
@@ -1234,6 +1254,14 @@ export default function ModelsView({
                         </button>
                       )}
                     </div>
+                    {migrationNotice && (
+                      <div className="cal-row" role="status">
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">{migrationNotice.title}</span>
+                          <span className="cal-row-sub">{migrationNotice.detail}</span>
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </details>

@@ -1,5 +1,6 @@
 import { createBeforeQuitHandler, finishRecordingBeforeQuit } from './engine-quit'
 import { APP_CHANNEL } from '../shared/app-channel'
+import { APP_IDENTITY, identityMismatch } from './app-identity'
 import { planProfile } from './profile-identity'
 import { createDictationHost } from './dictation-host'
 import { WinDictationCapture } from './win-dictation-capture'
@@ -25,6 +26,7 @@ import {
   nativeTheme,
   Notification,
   protocol,
+  screen,
   session as electronSession
 } from 'electron'
 import { RecordingStartCoordinator } from './recording-start-coordinator'
@@ -43,7 +45,7 @@ import {
 import type { CalendarStartMeetingEvent } from '../shared/calendar-api'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -60,15 +62,41 @@ import { WinEngineHost } from './engine-host-win'
 import { WinBatchTranscriber } from './win-batch-transcriber'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
+import {
+  LOGIN_RUN_KEY,
+  loginItemStateFromRun,
+  runWindowsInstallMigration,
+  runWithRetries
+} from './windows-install-migration'
+import {
+  clearInstallRecord,
+  installMigrationIdentity,
+  installStateKey,
+  installStatusKey,
+  readInstallRecord,
+  STARTUP_APPROVED_RUN_KEY,
+  writeInstallMigrationStatus
+} from './windows-install-record'
+import {
+  INSTALL_MIGRATION_GET_STATUS_CHANNEL,
+  INSTALL_MIGRATION_STATUS_EVENT_CHANNEL,
+  type InstallMigrationStatus
+} from '../shared/install-migration-api'
 import { MediaService } from './media-service'
-import { AgentAccessService } from './agent-access-service'
+import { AgentAccessService, agentAccessRoots } from './agent-access-service'
 import type { McpServerSpec } from '../shared/integrations-api'
 import { MeetingsService } from './meetings-service'
 import { MicWatcher } from './mic-watcher'
 import { NotesService } from './notes-service'
 import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
-import { MAIN_WINDOW_SIZE } from './window-sizing'
+import {
+  keepsMainWindowOnScreen,
+  MAIN_WINDOW_SIZE,
+  mainWindowBoundsFor,
+  refitMainWindow,
+  type DisplayArea
+} from './window-sizing'
 import {
   SESSION_END_CANCEL_RESET_MS,
   SESSION_END_FINISH_TIMEOUT_MS,
@@ -168,8 +196,9 @@ function resolveMcpServerSpec(): McpServerSpec {
  * on first launch. Models are discovered in place by NotesService.
  */
 function migrateDevUserData(): void {
-  // A development build never adopts another profile's meetings or settings.
-  if (!app.isPackaged || !profile.adoptLegacyData) return
+  // A development or QA identity build never adopts another profile's meetings or
+  // settings (planProfile: production identity only).
+  if (!app.isPackaged || !profile.adoptLegacyData || APP_IDENTITY.name !== 'production') return
   try {
     const newDir = app.getPath('userData')
     const oldDir = join(newDir, '..', 'desktop')
@@ -189,12 +218,24 @@ function migrateDevUserData(): void {
 if (process.env.DOODLE_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.DOODLE_DEBUG_PORT)
 }
+// A Windows package must carry the identity its code was built for (production or
+// QA, src/main/app-identity.ts); a mismatch would write the other one's login item
+// and MCP entries. The packaged app name is the package name in app.asar.
+if (process.platform === 'win32' && app.isPackaged && APP_CHANNEL === 'release') {
+  const mismatch = identityMismatch(app.getName())
+  if (mismatch) {
+    dialog.showErrorBox(APP_IDENTITY.productName, mismatch)
+    process.exit(1)
+  }
+}
+
 // Where this build keeps its state. The production lineage keeps the existing
 // rule (DOODLE_USER_DATA relocates unpackaged runs only). A development build
 // owns a distinct, explicitly named profile, because that variable cannot
 // isolate a packaged app. Must run before anything resolves a path or locks.
 const profile = planProfile({
   channel: APP_CHANNEL,
+  identity: APP_IDENTITY.name,
   isPackaged: app.isPackaged,
   appData: app.getPath('appData'),
   home: app.getPath('home'),
@@ -338,12 +379,65 @@ function broadcastEngineEvent(event: EngineEvent): void {
   broadcast(ENGINE_EVENT_CHANNEL, event)
 }
 
+/**
+ * Windows: keep the main window usable when it moves to another display or
+ * scaling changes (mixed-DPI setups, a laptop undocked from a monitor), without
+ * ever shrinking a window that is fully visible, e.g. one spanning two monitors.
+ * See refitMainWindow and mainWindowBoundsFor. macOS is never touched.
+ */
+function keepMainWindowOnScreen(window: BrowserWindow): void {
+  if (!keepsMainWindowOnScreen(process.platform)) return
+  const area = (display: Electron.Display): DisplayArea => ({
+    id: display.id,
+    workArea: display.workArea
+  })
+  const centerOf = (bounds: Electron.Rectangle): DisplayArea =>
+    area(
+      screen.getDisplayNearestPoint({
+        x: Math.round(bounds.x + bounds.width / 2),
+        y: Math.round(bounds.y + bounds.height / 2)
+      })
+    )
+  let previous: DisplayArea | null = centerOf(window.getBounds())
+  const refit = (): void => {
+    if (window.isDestroyed() || window.isMaximized() || window.isFullScreen()) return
+    if (window.isMinimized()) return
+    const bounds = window.getBounds()
+    const center = centerOf(bounds)
+    const limits = mainWindowBoundsFor(center.workArea)
+    window.setMinimumSize(limits.minWidth, limits.minHeight)
+    const next = refitMainWindow({
+      bounds,
+      displays: screen.getAllDisplays().map(area),
+      center,
+      previous
+    })
+    previous = center
+    if (next) window.setBounds(next)
+  }
+  screen.on('display-metrics-changed', refit)
+  screen.on('display-removed', refit)
+  window.on('moved', refit)
+  window.on('closed', () => {
+    screen.off('display-metrics-changed', refit)
+    screen.off('display-removed', refit)
+  })
+}
+
 function createWindow(): void {
+  // Windows opens on the display under the pointer, sized to fit its work area at
+  // any scale; macOS keeps its fixed default.
+  const bounds =
+    process.platform === 'win32'
+      ? mainWindowBoundsFor(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea)
+      : {
+          width: MAIN_WINDOW_SIZE.defaultWidth,
+          height: MAIN_WINDOW_SIZE.defaultHeight,
+          minWidth: MAIN_WINDOW_SIZE.minWidth,
+          minHeight: MAIN_WINDOW_SIZE.minHeight
+        }
   const window = new BrowserWindow({
-    width: MAIN_WINDOW_SIZE.defaultWidth,
-    height: MAIN_WINDOW_SIZE.defaultHeight,
-    minWidth: MAIN_WINDOW_SIZE.minWidth,
-    minHeight: MAIN_WINDOW_SIZE.minHeight,
+    ...bounds,
     // Matches the active palette so launch never flashes the wrong color.
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee',
     show: false,
@@ -361,6 +455,7 @@ function createWindow(): void {
   })
 
   mainWindow = window
+  keepMainWindowOnScreen(window)
   window.on('close', (event) => {
     if (libraryActivity.moving) {
       event.preventDefault()
@@ -551,7 +646,8 @@ app.whenReady().then(async () => {
     }
   })
 
-  electronApp.setAppUserModelId('com.doodlenote.desktop')
+  // Also names the Windows login item (Electron reads the Run value by this id).
+  electronApp.setAppUserModelId(APP_IDENTITY.appUserModelId)
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
@@ -822,6 +918,10 @@ app.whenReady().then(async () => {
     userData: app.getPath('userData'),
     logsDir: app.getPath('logs'),
     helperPath: resolveDictationHelperBinary(),
+    // A QA identity build keeps its own Bark helper state beside production's
+    // (Windows: mute-recovery mutex and state file); production and dev use the
+    // channel's default.
+    helperIdentity: APP_IDENTITY.name === 'production' ? null : APP_IDENTITY.appId,
     packaged: app.isPackaged,
     // Bark needs a speech engine and a helper for typing: the Swift engine and helper
     // on macOS, the Parakeet worker and the C# helper on Windows. It is off until the
@@ -985,7 +1085,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => detectState())
   ipcMain.handle(DETECT_SET_PREFS_CHANNEL, (_event, update: DetectPrefsUpdate): DetectState => {
     if (typeof update?.loginItem === 'boolean') {
-      app.setLoginItemSettings({ openAtLogin: update.loginItem })
+      app.setLoginItemSettings({ openAtLogin: update.loginItem, name: APP_IDENTITY.loginItemName })
     }
     if (typeof update?.micDetect === 'boolean') {
       micWatcher.setEnabled(update.micDetect)
@@ -1003,7 +1103,7 @@ app.whenReady().then(async () => {
       await recipeRunner?.stop()
       await notesService?.dispose()
     },
-    { enabled: profile.updatesEnabled }
+    { enabled: profile.updatesEnabled && APP_IDENTITY.updatesAllowed }
   )
   // Make a development build unmistakable in the Dock and Cmd-Tab.
   if (APP_CHANNEL === 'dev') app.dock?.setBadge('DEV')
@@ -1074,9 +1174,22 @@ app.whenReady().then(async () => {
     () => join(libraryRoot(), 'meetings'),
     resolveMcpServerSpec(),
     // The opt-in file and client configs normally live in the real home
-    // directory and are shared by every DoodleNote. A development build gets a
-    // sandboxed home inside its own profile so it can never rewrite them.
-    APP_CHANNEL === 'dev' ? join(app.getPath('userData'), 'agent-access-home') : undefined
+    // directory (and %APPDATA%) and are shared by every DoodleNote. A development
+    // or QA identity build gets a sandboxed home inside its own profile holding all
+    // of them, so it can never read or rewrite them, and its MCP server spec names
+    // the sandbox's opt-in file.
+    agentAccessRoots({
+      platform: process.platform,
+      env: process.env,
+      home: app.getPath('home'),
+      sandbox:
+        APP_CHANNEL === 'dev' || APP_IDENTITY.isolatesAgentAccess
+          ? {
+              home: join(app.getPath('userData'), 'agent-access-home'),
+              identity: APP_CHANNEL === 'dev' ? 'dev' : APP_IDENTITY.name
+            }
+          : undefined
+    })
   )
   const previousLibrary = storage?.status().recoveryPath
   if (previousLibrary) {
@@ -1090,6 +1203,87 @@ app.whenReady().then(async () => {
     }
   }
   agentAccessService.registerIpc()
+  // Windows: when the installer recorded that it moved Programs\desktop to
+  // Programs\DoodleNote for this exe, repoint what still launches the old exe
+  // (login item, MCP clients); see the module. No record, nothing changes. The
+  // record and the app's status are read and written by the speech worker
+  // (WinEngineHost.registry): no PowerShell or reg.exe. Each attempt that finds a
+  // record, or cannot read it, is recorded (AppMigration in the identity's
+  // InstallStatus key, install-migration-status.json, Settings), and retried in
+  // this session while it asks for it.
+  if (process.platform === 'win32') {
+    const registry = (engine as WinEngineHost).registry
+    const markerPath = join(app.getPath('userData'), 'install-migration.json')
+    const statusPath = join(app.getPath('userData'), 'install-migration-status.json')
+    const recordKey = installStateKey(APP_IDENTITY.appId)
+    const statusKey = installStatusKey(APP_IDENTITY.appId)
+    const readStatusFile = (): InstallMigrationStatus | null => {
+      if (!existsSync(statusPath)) return null
+      const parsed = JSON.parse(readFileSync(statusPath, 'utf8')) as InstallMigrationStatus
+      return parsed && typeof parsed.state === 'string' ? parsed : null
+    }
+    let migrationStatus: InstallMigrationStatus | null = null
+    try {
+      migrationStatus = readStatusFile()
+    } catch {
+      migrationStatus = null
+    }
+    ipcMain.handle(INSTALL_MIGRATION_GET_STATUS_CHANNEL, () => migrationStatus)
+    const attempt = (): ReturnType<typeof runWindowsInstallMigration> =>
+      runWindowsInstallMigration({
+        platform: process.platform,
+        isPackaged: app.isPackaged,
+        execPath: process.execPath,
+        readRecord: () =>
+          readInstallRecord(registry, recordKey, installMigrationIdentity(APP_IDENTITY)),
+        clearRecord: () => clearInstallRecord(registry, recordKey),
+        exists: existsSync,
+        readMarker: () => (existsSync(markerPath) ? readFileSync(markerPath, 'utf8') : null),
+        writeMarker: (contents) => writeFileSync(markerPath, contents),
+        loginItem: {
+          // The Run value is read as written and compared 8.3-aware; Electron's own
+          // lookup compares plain strings, so the Task Manager state is read from
+          // StartupApproved first (see loginItemStateFromRun).
+          stateFor: (isLegacyPath) =>
+            loginItemStateFromRun(
+              () => registry.readString(LOGIN_RUN_KEY, APP_IDENTITY.loginItemName),
+              () => registry.readBinary(STARTUP_APPROVED_RUN_KEY, APP_IDENTITY.loginItemName),
+              (program) =>
+                app
+                  .getLoginItemSettings({ path: program })
+                  .launchItems?.find((entry) => entry.path.toLowerCase() === program.toLowerCase())
+                  ?.enabled,
+              isLegacyPath
+            ),
+          registerCurrent: (enabled) =>
+            app.setLoginItemSettings({
+              openAtLogin: true,
+              enabled,
+              name: APP_IDENTITY.loginItemName
+            })
+        },
+        repointMcpClients: (isStale, only) => agentAccessService.repointStaleClients(isStale, only),
+        readStatus: readStatusFile,
+        writeStatus: async (status) => {
+          migrationStatus = status
+          broadcast(INSTALL_MIGRATION_STATUS_EVENT_CHANNEL, status)
+          let fileError: unknown = null
+          try {
+            writeFileSync(statusPath, JSON.stringify(status) + '\n')
+          } catch (error) {
+            fileError = error
+          }
+          await writeInstallMigrationStatus(registry, statusKey, status)
+          if (fileError) throw fileError
+        },
+        log: (message) => console.log(message)
+      })
+    void runWithRetries(
+      attempt,
+      (run, ms) => setTimeout(run, ms).unref(),
+      (message) => console.log(message)
+    )
+  }
 
   const sourceIndex = new SourceIndexService(
     () => join(libraryRoot(), 'meetings'),

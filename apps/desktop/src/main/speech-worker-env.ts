@@ -38,3 +38,25 @@ export function boundedTestStallMs(raw: string | undefined, cap: number): number
 /** The caps: a model load is seconds, a test backlog well under a minute. */
 export const MAX_CONFIRM_STALL_MS = 10_000
 export const MAX_ASR_STALL_MS = 30_000
+
+/**
+ * The identity whose registry values the worker may touch (windows-registry.ts appRegistryScope),
+ * passed on its command line by the process that forks it (engine-host-win.ts): never read from
+ * the environment (inherited) or from a message. The worker module itself carries no identity, so
+ * engine-win.js is byte-identical in every identity's package (test-windows-package.cjs parity).
+ */
+const WORKER_IDENTITY_ARG = '--doodlenote-registry-identity='
+const APP_ID = /^[A-Za-z][A-Za-z0-9.-]{0,127}$/
+
+export function workerIdentityArgs(appId: string): string[] {
+  if (!APP_ID.test(appId)) throw new Error(`not an app id: ${appId}`)
+  return [`${WORKER_IDENTITY_ARG}${appId}`]
+}
+
+/** The appId from the worker's command line; null when absent, repeated or malformed. */
+export function workerIdentityFrom(argv: readonly string[]): string | null {
+  const found = argv.filter((arg) => arg.startsWith(WORKER_IDENTITY_ARG))
+  if (found.length !== 1) return null
+  const appId = found[0].slice(WORKER_IDENTITY_ARG.length)
+  return APP_ID.test(appId) ? appId : null
+}

@@ -1,0 +1,334 @@
+[
+  {
+    "name": "quoted header with ] after our table",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n\n[projects.\"C:/work/[demo]\"]\ntrust_level = \"trusted\"\n",
+    "expected": "[projects.\"C:/work/[demo]\"]\ntrust_level = \"trusted\"\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "literal-string header with ]] after our table",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n[projects.'C:\\work\\[a]]']\ntrust_level = \"trusted\"\n",
+    "expected": "[projects.'C:\\work\\[a]]']\ntrust_level = \"trusted\"\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "escaped quote and ] in a header",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n[projects.\"say \\\"]\\\" now\"]\nx = 1\n",
+    "expected": "[projects.\"say \\\"]\\\" now\"]\nx = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "dotted quoted keys with spaces in a header",
+    "input": "model = \"o3\"\n\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n[ projects . \"a.b\" . 'c]' ]\nx = 1\n",
+    "expected": "model = \"o3\"\n[ projects . \"a.b\" . 'c]' ]\nx = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "array-of-tables header with ] after our table",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n[[profiles.\"x]y\"]]\nname = \"a\"\n[[profiles.\"x]y\"]]\nname = \"b\"\n",
+    "expected": "[[profiles.\"x]y\"]]\nname = \"a\"\n[[profiles.\"x]y\"]]\nname = \"b\"\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "] inside basic and literal strings in our table",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = [\"]\", ']]', \"a\\\"]\", '[x]']\nenv = { K = \"]}\", L = '}' }\n[projects.\"/x\"]\ntrust = true\n",
+    "expected": "[projects.\"/x\"]\ntrust = true\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "] inside strings and keys of another table",
+    "input": "[projects.\"/x\"]\n\"a]b\" = \"]\"\n'c]' = [']', \"[\" ]\n\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": "[projects.\"/x\"]\n\"a]b\" = \"]\"\n'c]' = [']', \"[\" ]\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "multi-line basic string in our table that looks like tables",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nnote = \"\"\"\n[projects.fake]\nx = \"\\\"\"\"\n\"\"\"\n[projects.real]\nx = 1\n",
+    "expected": "[projects.real]\nx = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "multi-line literal string elsewhere that contains our header",
+    "input": "[profiles.notes]\ntext = '''\n[mcp_servers.doodle-note]\ncommand = \"not a table\"\n'''\n\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": "[profiles.notes]\ntext = '''\n[mcp_servers.doodle-note]\ncommand = \"not a table\"\n'''\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "multi-line strings with quote runs and line-ending backslashes",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\na = \"\"\"x\"\"\"\"\nb = '''y'''''\nc = \"\"\"\\\n   [not.a.table] \\\n\"\"\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "comments with brackets",
+    "input": "# [mcp_servers.doodle-note]\n[profiles.x] # [mcp_servers.doodle-note]\nmodel = \"o3\" # ]]\n\n[mcp_servers.doodle-note] # [added by DoodleNote]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\" # ] }\n",
+    "expected": "# [mcp_servers.doodle-note]\n[profiles.x] # [mcp_servers.doodle-note]\nmodel = \"o3\" # ]]\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "CRLF with a bracketed quoted header",
+    "input": "[mcp_servers.doodle-note]\r\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\r\nargs = []\r\n\r\n[projects.\"C:/work/[demo]\"]\r\ntrust_level = \"trusted\"\r\n",
+    "expected": "[projects.\"C:/work/[demo]\"]\r\ntrust_level = \"trusted\"\r\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "BOM before our table",
+    "input": "\ufeff[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n[projects.\"C:/[x]\"]\ntrust = true\n",
+    "expected": "\ufeff[projects.\"C:/[x]\"]\ntrust = true\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "BOM before other settings",
+    "input": "\ufeffmodel = \"o3\"\n\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": "\ufeffmodel = \"o3\"\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "prefix collisions are other servers",
+    "input": "[mcp_servers.doodle-note-qa]\ncommand = \"qa\"\n[mcp_servers.doodle-note-qa.env]\nA = \"1\"\n[mcp_servers.\"doodle-note.qa\"]\ncommand = \"dotted name\"\n[mcp_servers]\n\"doodle-note-dev\".args = []\ndoodle-notes = { command = \"s\" }\n\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n[mcp_servers.doodle-note.qa]\nx = 1\n",
+    "expected": "[mcp_servers.doodle-note-qa]\ncommand = \"qa\"\n[mcp_servers.doodle-note-qa.env]\nA = \"1\"\n[mcp_servers.\"doodle-note.qa\"]\ncommand = \"dotted name\"\n[mcp_servers]\n\"doodle-note-dev\".args = []\ndoodle-notes = { command = \"s\" }\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "our name spelled with a unicode escape is still ours",
+    "input": "[mcp_servers.\"doodle\\u002Dnote\"]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "quoted inline command key",
+    "input": "[mcp_servers]\ndoodle-note = { \"command\" = \"C:\\\\old\\\\DoodleNote.exe\", args = [] }\nother = { command = \"npx\" }\n",
+    "expected": "[mcp_servers]\nother = { command = \"npx\" }\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "literal-quoted inline command key",
+    "input": "[mcp_servers]\n'doodle-note' = { 'command' = 'C:\\old\\DoodleNote.exe' }\n",
+    "expected": "[mcp_servers]\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "quoted command key in our table",
+    "input": "[mcp_servers.doodle-note]\n\"command\" = 'C:\\old\\DoodleNote.exe'\n",
+    "expected": "",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "values of every kind around our table",
+    "input": "when = 1979-05-27 07:32:00Z\nd = 1979-05-27\nt = 07:32:00.5\nn = [ +1_000, -0.5e-3, 0xDEAD_beef, 0o7, 0b1, inf, -nan, true ]\nnested = [ [1, 2], [ \"a\", { x = 1 } ] , ] # trailing comma\n\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\ngrid = [\n  [1, 2], # ]\n  [3],\n]\n\n[[keep]]\nz = { a.b = 1, \"c\" = [ ] }\n",
+    "expected": "when = 1979-05-27 07:32:00Z\nd = 1979-05-27\nt = 07:32:00.5\nn = [ +1_000, -0.5e-3, 0xDEAD_beef, 0o7, 0b1, inf, -nan, true ]\nnested = [ [1, 2], [ \"a\", { x = 1 } ] , ] # trailing comma\n[[keep]]\nz = { a.b = 1, \"c\" = [ ] }\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "dotted definitions at the root",
+    "input": "mcp_servers.doodle-note.command = \"C:\\\\old\\\\DoodleNote.exe\"\nmodel = \"o3\"\nmcp_servers.other.command = \"npx\"\n",
+    "expected": "model = \"o3\"\nmcp_servers.other.command = \"npx\"\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "dotted definitions under a parent table",
+    "input": "[mcp_servers]\ndoodle-note.command = \"C:\\\\old\\\\DoodleNote.exe\"\ndoodle-note.args = [\"x\"]\n\"doodle-note\".env.A = \"1\"\nother.command = \"npx\"\n",
+    "expected": "[mcp_servers]\nother.command = \"npx\"\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "no entry of ours is a no-op",
+    "input": "[projects.\"C:/work/[demo]\"]\ntrust_level = \"trusted\"\n",
+    "expected": "[projects.\"C:/work/[demo]\"]\ntrust_level = \"trusted\"\n",
+    "command": null,
+    "valid": true
+  },
+  {
+    "name": "url entry has no command",
+    "input": "[mcp_servers.doodle-note]\nurl = \"http://127.0.0.1:1/mcp\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": null,
+    "valid": true
+  },
+  {
+    "name": "non-string command cannot be read",
+    "input": "[mcp_servers.doodle-note]\ncommand = [\"C:\\\\old\\\\DoodleNote.exe\"]\n",
+    "expected": "",
+    "command": {
+      "throws": true
+    },
+    "valid": true
+  },
+  {
+    "name": "our server inside a parent inline table is refused",
+    "input": "mcp_servers = { doodle-note = { command = \"C:\\\\old\\\\DoodleNote.exe\" }, other = { command = \"npx\" } }\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": true
+  },
+  {
+    "name": "our server dotted inside a parent inline table is refused",
+    "input": "mcp_servers = { \"doodle-note\".command = \"C:\\\\old\\\\DoodleNote.exe\" }\n[x]\ny = 1\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": true
+  },
+  {
+    "name": "unterminated quoted header after our table is refused",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n[projects.\"C:/work/[demo]]\ntrust_level = \"trusted\"\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "unterminated string in another table is refused",
+    "input": "[projects.\"/x\"]\nname = \"oops\n\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "text that is not TOML is refused",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\nthis is not toml\n[keep]\nz = 1\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "unterminated multi-line string is refused",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\nnote = \"\"\"\n[keep]\nz = 1\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "\\U escape (8 hex digits) in our command is decoded",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\Doodle\\U0001F600.exe\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\Doodle\ud83d\ude00.exe",
+    "valid": true
+  },
+  {
+    "name": "\\U escape in our table name is still ours",
+    "input": "[mcp_servers.\"doodle\\U0000002Dnote\"]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "\\u escape (4 hex digits) in our command is decoded",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\Doodle\\u00e9.exe\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\Doodle\u00e9.exe",
+    "valid": true
+  },
+  {
+    "name": "\\U with too few hex digits is refused",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\x\\U0001F60.exe\"\n[keep]\nz = 1\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "\\U beyond Unicode is refused",
+    "input": "[keep]\nz = 1\nname = \"\\U00110000\"\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "\\u surrogate is refused",
+    "input": "[keep]\nz = 1\nname = \"\\uD800\"\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "\\x escape (TOML 1.1 only) is refused",
+    "input": "[keep]\nz = 1\nname = \"\\x41\"\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "\\e escape (TOML 1.1 only) is refused",
+    "input": "[keep]\nz = 1\nname = \"\\e[0m\"\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "line-ending backslash in a multi-line basic command",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"\"\"C:\\\\old\\\\\\\n    DoodleNote.exe\"\"\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "line-ending backslash with trailing spaces and blank lines",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"\"\"\nC:\\\\old\\\\\\   \n\n   DoodleNote.exe\"\"\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "literal string command keeps its backslashes",
+    "input": "[mcp_servers.doodle-note]\ncommand = 'C:\\old\\DoodleNote.exe'\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "multi-line literal command drops only the first newline",
+    "input": "[mcp_servers.doodle-note]\ncommand = '''\nC:\\old\\DoodleNote.exe'''\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "escapes are not read inside a literal string",
+    "input": "[mcp_servers.doodle-note]\ncommand = 'C:\\old\\u0041\\x41.exe'\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\u0041\\x41.exe",
+    "valid": true
+  }
+]

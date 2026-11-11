@@ -6,6 +6,11 @@ const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { _electron } = require(process.env.DOODLE_PLAYWRIGHT_MODULE || 'playwright')
 
+// The production package's own APP_GUID (electron-builder's UUID v5 of com.doodlenote.desktop);
+// the worker may touch nothing else. Another (all-zero) GUID must be refused.
+const PRODUCTION_GUID = 'f85f8dcf-6782-5a3e-a989-3eae169d6efb'
+const OTHER_GUID = '00000000-0000-0000-0000-000000000000'
+
 async function main() {
   assert.equal(process.platform, 'win32', 'Run Windows acceptance in Windows')
   const executablePath = resolve(process.argv[2])
@@ -54,7 +59,11 @@ async function main() {
           if (!event) return
           if (event.event === 'error') return finish(new Error(event.message))
           if (event.event === 'status' && event.stage === 'serve_ready') {
-            serve = { model: event.model, calibrationRtf: event.calibrationRtf, captionMode: event.captionMode }
+            serve = {
+              model: event.model,
+              calibrationRtf: event.calibrationRtf,
+              captionMode: event.captionMode
+            }
             worker.postMessage({ t: 'start', channels: ['system'], sessionId: 1 })
           }
           if (event.event === 'final') final = event
@@ -79,7 +88,100 @@ async function main() {
     assert.equal(stream.serve.model, 'sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming')
     assert.ok(stream.serve.calibrationRtf > 0, JSON.stringify(stream.serve))
     assert.ok(['interim', 'utterance'].includes(stream.serve.captionMode))
-    console.log(JSON.stringify({ executablePath, profile, preflight: result, stream }))
+    // Round 7: the same packaged worker reads and writes the install folder move's registry
+    // values for the app (windows-registry.ts): no PowerShell or reg.exe in the app's path.
+    // Round 9: its scope is its own identity only, so this smoke only reads the production
+    // identity's own values (absent on a fresh runner; nothing is written) and checks that
+    // everything else is refused before any Win32 call. The write and delete paths run for
+    // real in the windows-installer-e2e job (the installed QA app writes its status and
+    // consumes its record) and in windows-registry.test.ts.
+    const registry = await app.evaluate(
+      async ({ utilityProcess, app }, [guid, other]) => {
+        // As engine-host-win.ts forks it: the identity on its command line
+        // (speech-worker-env.ts workerIdentityArgs); and once without one.
+        const workers = []
+        const open = (args) => {
+          const worker = utilityProcess.fork(`${app.getAppPath()}\\out\\main\\engine-win.js`, args)
+          workers.push(worker)
+          let next = 1
+          const pending = new Map()
+          worker.on('message', (message) => {
+            if (message.t !== 'helper' || message.op !== 'reg') return
+            pending.get(message.id)?.(message)
+            pending.delete(message.id)
+          })
+          return (body) =>
+            new Promise((resolve, reject) => {
+              const id = next++
+              const timer = setTimeout(
+                () => reject(new Error('registry request timed out')),
+                60_000
+              )
+              pending.set(id, (reply) => {
+                clearTimeout(timer)
+                resolve(reply)
+              })
+              worker.postMessage({ t: 'reg', id, ...body })
+            })
+        }
+        const ask = open(['--doodlenote-registry-identity=com.doodlenote.desktop'])
+        const anonymous = open([])
+        const status = `Software\\DoodleNote-InstallStatus\\${guid}`
+        const run = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+        const approved = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run'
+        try {
+          return {
+            record: await ask({ op: 'read', subKey: `Software\\${guid}`, name: 'MigrationRecord' }),
+            status: await ask({ op: 'read', subKey: status, name: 'AppMigration' }),
+            // Round 8: the login item's Run value (a dotted name, the appId) is readable.
+            runValue: await ask({ op: 'read', subKey: run, name: 'com.doodlenote.desktop' }),
+            // Round 10: its Task Manager state (REG_BINARY, as hex, or null).
+            approved: await ask({
+              op: 'readBinary',
+              subKey: approved,
+              name: 'com.doodlenote.desktop'
+            }),
+            refused: [
+              await ask({ op: 'write', subKey: status, values: [['LastResult', 'x']] }),
+              await ask({ op: 'read', subKey: `Software\\${other}`, name: 'MigrationRecord' }),
+              await ask({
+                op: 'write',
+                subKey: `Software\\DoodleNote-InstallStatus\\${other}`,
+                values: [['AppMigration', 'x']]
+              }),
+              await ask({ op: 'delete', subKey: `Software\\${other}`, name: 'MigrationRecord' }),
+              await ask({ op: 'read', subKey: `Software\\${guid}`, name: 'InstallLocation' }),
+              await ask({ op: 'read', subKey: run, name: 'com.doodlenote.desktop.qa' }),
+              await ask({ op: 'readBinary', subKey: approved, name: 'com.doodlenote.desktop.qa' }),
+              await ask({ op: 'read', subKey: approved, name: 'com.doodlenote.desktop' }),
+              await ask({
+                op: 'read',
+                subKey: 'Software\\Microsoft\\Windows\\CurrentVersion',
+                name: 'ProgramFilesDir'
+              }),
+              // Without an identity on its command line the worker may touch nothing.
+              await anonymous({ op: 'read', subKey: `Software\\${guid}`, name: 'MigrationRecord' })
+            ]
+          }
+        } finally {
+          for (const worker of workers) worker.kill()
+        }
+      },
+      [PRODUCTION_GUID, OTHER_GUID]
+    )
+    for (const read of [registry.record, registry.status, registry.runValue])
+      assert.ok(
+        read.ok && (read.value === null || typeof read.value === 'string'),
+        JSON.stringify(registry)
+      )
+    assert.ok(
+      registry.approved.ok &&
+        (registry.approved.value === null || /^([0-9a-f]{2})+$/.test(registry.approved.value)),
+      JSON.stringify(registry)
+    )
+    for (const refused of registry.refused)
+      assert.deepEqual([refused.ok, refused.code], [false, 'SCOPE'], JSON.stringify(registry))
+    console.log(JSON.stringify({ executablePath, profile, preflight: result, stream, registry }))
   } finally {
     await app?.close()
   }

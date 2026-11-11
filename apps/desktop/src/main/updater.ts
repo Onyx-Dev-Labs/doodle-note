@@ -7,7 +7,7 @@ import {
   UPDATE_INSTALL_CHANNEL,
   UPDATE_STATE_EVENT_CHANNEL
 } from '../shared/update-api'
-import { applyUpdatePolicy } from './update-policy'
+import { applyUpdatePolicy, updateAvailability, WINDOWS_UPDATES_ACTIVATED } from './update-policy'
 import { UpdateCoordinator } from './update-coordinator'
 import { join } from 'node:path'
 import { writeUpdateDiagnostic } from './update-diagnostics'
@@ -54,10 +54,17 @@ export function initAutoUpdater(
   log('launch')
   app.on('before-quit', () => log('before-quit'))
   app.on('quit', () => log('quit'))
+  // Windows checks nothing until updates are activated at build time (update-policy.ts).
+  const availability = updateAvailability({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    profileUpdatesEnabled: options.enabled,
+    windowsUpdatesActivated: WINDOWS_UPDATES_ACTIVATED
+  })
   const coordinator = new UpdateCoordinator(
     autoUpdater,
     app.getVersion(),
-    app.isPackaged && options.enabled,
+    availability.enabled,
     (state) => {
       if (state.status !== previousStatus) log(state.status, state.latestVersion)
       previousStatus = state.status
@@ -125,7 +132,10 @@ export function initAutoUpdater(
     void installNow()
   })
 
-  if (!app.isPackaged || !options.enabled) return
+  if (!availability.enabled) {
+    coordinator.state = { ...coordinator.state, unsupportedReason: availability.reason }
+    return
+  }
 
   applyUpdatePolicy(autoUpdater)
   autoUpdater.autoDownload = false

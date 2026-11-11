@@ -26,6 +26,19 @@ function helperIntegrity(): string {
   }
 }
 
+// The QA identity (src/main/app-identity.ts) exists for the Windows installer and
+// migration tests only: a macOS (or any non-Windows) build must never carry it, so
+// `pnpm package` with DOODLENOTE_QA_IDENTITY=1 set fails here, before anything is built.
+if (process.env.DOODLENOTE_QA_IDENTITY === '1' && process.platform !== 'win32') {
+  throw new Error(
+    'DOODLENOTE_QA_IDENTITY=1 is for Windows QA builds only (pnpm package:win:qa on Windows); unset it to build for this platform'
+  )
+}
+// A QA identity build never contacts an update feed.
+if (process.env.DOODLENOTE_QA_IDENTITY === '1' && process.env.DOODLENOTE_WINDOWS_UPDATES === 'on') {
+  throw new Error('DOODLENOTE_QA_IDENTITY=1 builds cannot turn on DOODLENOTE_WINDOWS_UPDATES')
+}
+
 export default defineConfig({
   main: {
     define: {
@@ -46,6 +59,14 @@ export default defineConfig({
         process.env.DOODLENOTE_CHANNEL === 'dev' ? 'dev' : 'release'
       ),
       __DOODLENOTE_HELPER_INTEGRITY__: helperIntegrity(),
+      // Windows automatic updates ship off; a release flips this (docs/WINDOWS-RELEASE-QA.md).
+      __DOODLENOTE_WINDOWS_UPDATES__: JSON.stringify(
+        process.env.DOODLENOTE_WINDOWS_UPDATES === 'on' ? 'on' : 'off'
+      ),
+      // The app identity (src/main/app-identity.ts); package with electron-builder.qa.cjs too.
+      __DOODLENOTE_IDENTITY__: JSON.stringify(
+        process.env.DOODLENOTE_QA_IDENTITY === '1' ? 'qa' : 'production'
+      ),
       __DOODLENOTE_GOOGLE_CLIENT_SECRET__: JSON.stringify(
         process.env.DOODLENOTE_GOOGLE_CLIENT_SECRET?.trim() ?? ''
       )

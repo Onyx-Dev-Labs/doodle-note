@@ -128,6 +128,13 @@ win:
   # Ship CPU + Vulkan llama binaries (Vulkan covers most Windows GPUs for
   # local note generation); CUDA variants add >500MB for little test value.
   files:
+    # Platform files do not replace the shared allowlist: electron-builder keeps
+    # the top-level files (out/**) as a matcher of its own, and gives a platform
+    # list made only of exclusions an implicit **/* first, so those exclusions
+    # alone shipped src/, scripts/, docs/ and tooling. Starting the list with
+    # out/** (as mac does) keeps this matcher to the built app.
+    # scripts/test-windows-package.cjs fails CI if they return.
+    - out/**
     - "!**/node_modules/@node-llama-cpp/mac-*/**"
     - "!**/node_modules/@node-llama-cpp/linux-*/**"
     - "!**/node_modules/@node-llama-cpp/win-arm64/**"
@@ -135,12 +142,31 @@ win:
     - "!**/node_modules/@node-llama-cpp/win-x64-cuda-ext/**"
     - "!**/node_modules/sherpa-onnx-darwin-*/**"
     - "!**/node_modules/sherpa-onnx-linux-*/**"
-  # Unsigned for now (no Authenticode cert) — SmartScreen will warn on
-  # install; testers click "More info → Run anyway".
+    # Only the x64 Windows builds of other native modules can load (or be
+    # Authenticode-signed); macOS/Linux/ARM copies were shipping unpacked.
+    - "!**/node_modules/@koromix/koffi-{darwin,linux,freebsd,openbsd,android}-*/**"
+    - "!**/node_modules/@koromix/koffi-win32-{arm64,ia32}/**"
+    - "!**/node_modules/@reflink/reflink-{darwin,linux}-*/**"
+    - "!**/node_modules/@reflink/reflink-win32-arm64-msvc/**"
+  # Signing: scripts/sign-windows.cjs signs every exe/dll/node electron-builder
+  # offers (app exe, Electron DLLs, unpacked native modules, installer and
+  # uninstaller) with Microsoft Artifact Signing when its CI secrets exist, and
+  # logs "signing skipped: no credentials" otherwise (unsigned, as before).
+  # package:win signs the Bark helper itself; electron-builder never offers it.
+  # Unsigned builds make SmartScreen warn on install.
+  signExts: [".dll", ".node"]
+  signtoolOptions:
+    sign: ./scripts/sign-windows.cjs
+    # Artifact Signing signs SHA-256 only; one call per file.
+    signingHashAlgorithms: [sha256]
 nsis:
   oneClick: true
   perMachine: false
   deleteAppDataOnUninstall: false
+  # Moves installs from the package-named Programs\desktop folder to
+  # Programs\DoodleNote. appId (and so the uninstall key) and the app profile
+  # (%APPDATA%\desktop) are deliberately unchanged.
+  include: build/windows-installer.nsh
   artifactName: ${productName}-${version}-setup.${ext}
 npmRebuild: false
 # Auto-update feed: electron-updater reads latest-mac.yml from here.

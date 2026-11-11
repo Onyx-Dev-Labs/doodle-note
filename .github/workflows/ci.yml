@@ -87,18 +87,17 @@ jobs:
 
   # A Linux typecheck cannot prove that Electron packaged the Windows native
   # addons. Build the actual NSIS updater on every PR and retain it for native
-  # Windows smoke testing. CSC_LINK/CSC_KEY_PASSWORD sign it automatically
-  # once the repository's Authenticode certificate secrets are configured.
-  # Same-repo PRs and pushes to main only. Fork PRs still get the Ubuntu
-  # typecheck/test job; they must not produce a downloadable installer
-  # artifact from untrusted code.
+  # Windows smoke testing. Same-repo PRs and pushes to main only. Fork PRs still
+  # get the Ubuntu typecheck/test job; they must not produce a downloadable
+  # installer artifact from untrusted code.
+  #
+  # Always unsigned: this job runs PR-controlled scripts, so it references no
+  # secrets at all. Signing runs only in windows-sign.yml, on main or a release
+  # tag, inside the protected windows-signing environment.
   windows-package:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
     timeout-minutes: 45
-    env:
-      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -139,8 +138,28 @@ jobs:
           engine/.build/windows/dictation-helper-tests.exe
           if ($LASTEXITCODE -ne 0) { throw "Windows dictation helper tests failed" }
 
+      # No credentials reach this job: sign-windows.cjs logs "signing skipped:
+      # no credentials" and the build is unsigned.
       - name: Build Windows installer
         run: pnpm --filter desktop package:win
+
+      # app.asar must hold only out/** and runtime node_modules: no src/,
+      # scripts/, docs/, tooling, tests or app sourcemaps. Every DLL a packaged
+      # .node/.dll/.exe imports (PE import and delay-load tables) must be in the
+      # package beside it or beside the exe unless it is a Windows/VC++/driver DLL,
+      # ggml's run-time CPU and Vulkan backends must be there, and the check must
+      # report a ggml-base.dll treated as absent (negative control). The QA package
+      # check below runs the same closure.
+      - name: Check Windows app.asar contents
+        timeout-minutes: 5
+        run: node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release/win-unpacked
+
+      # The install folder migration's path and process guards, compiled with
+      # electron-builder's makensis and run against real junctions, a held file and
+      # real processes in a temporary sandbox.
+      - name: Check Windows installer migration guards
+        timeout-minutes: 10
+        run: node apps/desktop/scripts/test-windows-installer-guards.cjs
 
       - name: Test recorder with packaged Electron runtime
         run: node apps/desktop/scripts/test-electron-runtime.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
@@ -236,11 +255,15 @@ jobs:
           if (-not $installer) { throw "Windows installer was not generated" }
           if (-not (Test-Path "$($installer.FullName).blockmap")) { throw "Updater blockmap was not generated" }
           $signature = Get-AuthenticodeSignature $installer.FullName
-          if ($env:CSC_LINK -and $signature.Status -ne "Valid") {
-            throw "Signing credentials were supplied but the installer signature is $($signature.Status)"
-          }
           Write-Host "Installer: $($installer.Name)"
           Write-Host "Authenticode: $($signature.Status)"
+          if ($signature.Status -ne "NotSigned") {
+            # Whatever signed it, a signed installer means every shipped PE must be
+            # validly signed too (installer, helper, every exe/dll/node).
+            & apps/desktop/scripts/verify-windows-signature.ps1
+          } else {
+            Write-Host "signing skipped: no credentials (unsigned CI build; signature verification not applicable)"
+          }
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -249,4 +272,110 @@ jobs:
             apps/desktop/release/DoodleNote-*-setup.exe
             apps/desktop/release/DoodleNote-*-setup.exe.blockmap
             apps/desktop/release/latest.yml
+          retention-days: 7
+
+      # The QA identity package (the one the upgrade test installs) must ship
+      # exactly the production package's files: the same app.asar entries and the
+      # same app.asar.unpacked files, byte for byte (SHA-256 of every asar entry and
+      # every unpacked file), apart from the identity files test-windows-package.cjs
+      # allows (IDENTITY_DIFFERENCES: package.json "name"; in out/main/index.js the
+      # identity block and the Bark helper digest), and every other file of the two
+      # win-unpacked folders byte for byte as well, apart from PACKAGE_DIFFERENCES
+      # (the exe's product-name strings and ASAR integrity record; the helper's
+      # csc.exe time stamp and module version id; its manifest's digests, which
+      # must describe its own helper) and app-update.yml (production only).
+      # Before comparing, each package is checked on its own (round 9): its exe's
+      # product-name strings and ASAR integrity record, its bundle's identity and
+      # helper digest, its helper manifest and module version id are its own, so
+      # a file copied from the other package (identical, so never "a difference")
+      # is still caught.
+      # --negative-control then changes one byte in an unpacked file, an asar entry,
+      # out/main/index.js, resources\mcp\cli.js, the exe and the helper (incl. one
+      # inside each allowance's neighbourhood), copies the production exe and
+      # helper manifest into the QA package, and adds a feed file to the QA
+      # package, and fails unless each is caught exactly (bytes put back).
+      # Built last: it rebuilds out/ with the QA identity. Built as the full
+      # installer, not --dir: the NSIS target is what adds resources\elevate.exe,
+      # and the QA installer is what the upgrade test installs.
+      - name: Check the QA package ships exactly the production package's files
+        timeout-minutes: 15
+        run: |
+          node apps/desktop/scripts/package-win-qa.cjs
+          if ($LASTEXITCODE -ne 0) { throw "QA package build failed" }
+          node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked --negative-control
+          if ($LASTEXITCODE -ne 0) { throw "The QA package does not ship the production package's files" }
+
+  # A real installer lifecycle of the QA identity on this throwaway runner: the
+  # legacy-layout QA package installed /S, the current QA package /S --updated over
+  # it, the app's first launch consuming the installer's record, uninstall /S; an
+  # upgrade killed right after electron-builder's "uninstall old version" (which ran
+  # no uninstaller: the legacy command was parked), whose next run's stock step runs
+  # the new copy's uninstaller and writes the deleted journal back; /S without
+  # --updated while the legacy app runs (exit 2); a held file keeping the journal
+  # armed across two runs; (round 9, D) an update of the new layout killed the moment
+  # the stock uninstaller has deleted Software\{GUID}, once with a move's journal live
+  # and once with its record, each written back by the next run before it plans
+  # (round 10: the log's wrote= list names what was written back, and every order is
+  # asserted as a subsequence). Registry, folders, Run value,
+  # shortcuts and MCP configs are checked after each step (each step timed in the
+  # job summary). It stands in for the installer items of the desktop pass while
+  # Smart App Control blocks fresh unsigned executables on the QA machine
+  # (docs/WINDOWS-RELEASE-QA.md "Installer end-to-end in CI"). Never production.
+  # The legacy and kill-step installers are built from the same win-unpacked
+  # (--prepackaged, stored rather than compressed, to save time): all three carry
+  # the current QA app's bytes ("legacy" is the installer layout, not an older app
+  # version); the kill-step one includes build/windows-installer-test-steps.nsh,
+  # which no release uses.
+  windows-installer-e2e:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10.33.2
+
+      - name: Install with Windows native dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the QA installer
+        timeout-minutes: 15
+        run: |
+          node apps/desktop/scripts/package-win-qa.cjs
+          if ($LASTEXITCODE -ne 0) { throw "QA installer build failed" }
+
+      - name: Build the legacy-layout and kill-step QA installers
+        timeout-minutes: 8
+        working-directory: apps/desktop
+        env:
+          DOODLENOTE_QA_IDENTITY: '1'
+          npm_config_user_agent: pnpm
+        # Quoted: pwsh splits a bare -c.key=value native argument at the dot.
+        run: |
+          $env:DOODLENOTE_QA_LEGACY_LAYOUT = '1'
+          node node_modules/electron-builder/cli.js --win nsis --x64 --prepackaged release-qa/win-unpacked --config electron-builder.qa.cjs --publish never '-c.compression=store'
+          if ($LASTEXITCODE -ne 0) { throw "legacy-layout installer build failed" }
+          Remove-Item Env:DOODLENOTE_QA_LEGACY_LAYOUT
+          node node_modules/electron-builder/cli.js --win nsis --x64 --prepackaged release-qa/win-unpacked --config electron-builder.qa.cjs --publish never '-c.compression=store' '-c.nsis.include=build/windows-installer-test-steps.nsh' '-c.directories.output=release-qa-steps'
+          if ($LASTEXITCODE -ne 0) { throw "kill-step installer build failed" }
+          Get-ChildItem release-qa*/*-setup.exe | ForEach-Object { "$($_.FullName) $($_.Length)" }
+
+      - name: Installer lifecycle end to end (QA identity)
+        timeout-minutes: 25
+        run: |
+          $setup = { param($dir) (Get-ChildItem "apps/desktop/$dir/*-setup.exe" | Select-Object -First 1).FullName }
+          node apps/desktop/scripts/test-windows-installer-e2e.cjs --legacy (& $setup release-qa-legacy) --current (& $setup release-qa) --steps (& $setup release-qa-steps) --evidence "$env:RUNNER_TEMP/installer-e2e"
+          if ($LASTEXITCODE -ne 0) { throw "The installer end-to-end lifecycle failed" }
+
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-e2e-${{ github.sha }}
+          path: ${{ runner.temp }}/installer-e2e
+          if-no-files-found: ignore
           retention-days: 7
