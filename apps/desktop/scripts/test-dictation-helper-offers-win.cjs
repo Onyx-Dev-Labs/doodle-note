@@ -4063,7 +4063,7 @@ async function main() {
   }
 
   // 55. Round 36 (Astra P3): the delivery's own kept-records check is BOUNDED. A retry holds the recovery lock, stalled
-  // inside it, before the delivery starts: the check cannot finish, so the paste is refused ("clipboard-busy") after the
+  // inside it, before the delivery starts: the check cannot finish, so the paste is refused ("own-busy") after the
   // 5 s cap, nothing emptied.
   {
     await begin('55')
@@ -4093,10 +4093,10 @@ async function main() {
       await h.req('clipboard-dismiss', { record: o.record })
     await h.stop()
     check(
-      'the delivery\'s kept-records check is bounded: the recovery lock held by a stalled retry, the paste is refused ("clipboard-busy") after about 5 s, nothing emptied (bytes and sequence)',
+      'the delivery\'s kept-records check is bounded: the recovery lock held by a stalled retry, the paste is refused ("own-busy") after about 5 s, nothing emptied (bytes and sequence)',
       !!inside &&
         !!live &&
-        live.result === 'clipboard-busy' &&
+        live.result === 'own-busy' &&
         took >= 4500 &&
         took < 8000 &&
         JSON.stringify(after) === JSON.stringify(before) &&
@@ -4107,7 +4107,7 @@ async function main() {
 
   // 56. Round 37 (Astra P2, Opus): ONE kept-records check at a time, shared by the deliveries, and a check every delivery
   // gave up on does nothing. A retry holds the recovery lock, stalled inside it; three deliveries in a row during that
-  // stall each refuse ("clipboard-busy") within their own allowance with nothing emptied, and all three wait on the SAME
+  // stall each refuse ("own-busy") within their own allowance with nothing emptied, and all three wait on the SAME
   // check (one check thread in all: the second and third join it). Once the lock is free that check, which no delivery
   // waits for any more, skips. A fourth dictation then writes and holds its "paste": the clipboard holds our text, then
   // the restore gives the user's copy back; no offer for it (only the earlier kept record, dismissed at the end).
@@ -4168,9 +4168,9 @@ async function main() {
       await h.req('clipboard-dismiss', { record: o.record })
     await h.stop()
     check(
-      'one kept-records check at a time: three deliveries during one stall each refuse within their own allowance ("clipboard-busy", nothing emptied) and share ONE check thread; that check, abandoned by all, skips once it gets the lock',
+      'one kept-records check at a time: three deliveries during one stall each refuse within their own allowance ("own-busy", nothing emptied) and share ONE check thread; that check, abandoned by all, skips once it gets the lock',
       !!inside &&
-        refused.every((r) => r.result === 'clipboard-busy' && r.took >= 4500 && r.took < 8000) &&
+        refused.every((r) => r.result === 'own-busy' && r.took >= 4500 && r.took < 8000) &&
         JSON.stringify(during) === JSON.stringify(before) &&
         aliveStalled.length === 1 &&
         aliveStalled[0] === 1 &&
@@ -4335,7 +4335,7 @@ async function main() {
   // 59. Round 38 (Astra P2, Opus option b): a late write (its delivery answered "late" while it stalls right after its
   // EmptyClipboard, inside its open) is an in-flight transaction no one else may open the clipboard over. Meanwhile the
   // user's Restore of an older offer answers "busy" (nothing touched, the card kept) and a second dictation refuses
-  // ("clipboard-busy", after waiting at most about 1 s; no save, nothing touched). Released, the late write puts the
+  // ("own-busy", after waiting at most about 1 s; no save, nothing touched). Released, the late write puts the
   // user's copy back itself ("restored"), and the same Restore then succeeds.
   {
     await begin('59')
@@ -4379,14 +4379,14 @@ async function main() {
       await h.req('clipboard-dismiss', { record: o.record })
     await h.stop()
     check(
-      'while a late write is in flight (held after its EmptyClipboard), the user\'s Restore answers "busy" and a second dictation refuses ("clipboard-busy" after at most about 1 s), neither touching the clipboard; the late write then puts the user\'s copy back itself, and the same Restore succeeds',
+      'while a late write is in flight (held after its EmptyClipboard), the user\'s Restore answers "busy" and a second dictation refuses ("own-busy" after at most about 1 s), neither touching the clipboard; the late write then puts the user\'s copy back itself, and the same Restore succeeds',
       !!offer &&
         !!first &&
         /^late\|/.test(String(first.result)) &&
         !!refusedRestore &&
         refusedRestore.result === 'busy' &&
         !!second &&
-        second.result === 'clipboard-busy' &&
+        second.result === 'own-busy' &&
         took >= 900 &&
         took < 3000 &&
         meanwhile.some((l) =>
@@ -4407,6 +4407,59 @@ async function main() {
         !!left &&
         left.offers.length === 0,
       `${JSON.stringify(first)}; restore ${JSON.stringify(refusedRestore)}; ${JSON.stringify(second)} in ${took} ms; late ${JSON.stringify(ended)}; after late ${afterLate.text}; ${JSON.stringify(done)}; text ${back.text}; ${JSON.stringify(left)}`
+    )
+  }
+
+  // 60. Round 39 (Opus nit): a late write that never ends would keep every delivery and Restore refused (round 38). A
+  // late write held right after its EmptyClipboard past the watchdog (shortened to 2 s in the test build; 30 s in the
+  // product) makes the helper leave to be replaced ("restarting", reason clipboard-write-stuck, logged); a delivery
+  // meanwhile is refused ("helper-busy"); released, the late write puts the user's copy back, the helper exits with its
+  // busy code (3) and leaves no record.
+  {
+    await begin('60')
+    copyMulti(user)
+    const a = start(
+      testops,
+      { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_LATE_WATCHDOG_MS: '2000' },
+      { gates: ['EMPTIED'], realBudget: true }
+    )
+    await a.ready
+    const first = await a.req('__clipboard-txn', { text: 'dictated text WD', holdMs: 300 })
+    await atLine(
+      a,
+      'the late write held after its EmptyClipboard',
+      /test-trace: gate EMPTIED#1 waiting/
+    )
+    const restarting = await a.waitEvent((e) => e.event === 'restarting')
+    const logged = a.logs.some((l) =>
+      /a late clipboard write has not ended 2000 ms after it was abandoned .*; restarting the helper/.test(
+        l
+      )
+    )
+    const second = await a.req('__clipboard-txn', { text: 'dictated text WD2', holdMs: 300 })
+    a.open('EMPTIED')
+    const ended = await a.waitEvent((e) => e.event === 'clipboard' && e.phase === 'late-restore')
+    const exited = await until(() => !alive(a.child), 20000)
+    // It left on its own: no stop (its input is not written to after its exit); its output is read to the end.
+    if (exited) await a.waitLog(/(?!)/, { ms: 3000 })
+    else await a.stop()
+    const back = observe()
+    check(
+      'a late write that does not end within the watchdog makes the helper restart ("clipboard-write-stuck", logged); a delivery meanwhile is refused ("helper-busy"); released, the late write puts the user\'s copy back, the helper exits with code 3 and leaves no record',
+      !!first &&
+        /^late\|/.test(String(first.result)) &&
+        !!restarting &&
+        restarting.reason === 'clipboard-write-stuck' &&
+        logged &&
+        !!second &&
+        second.result === 'helper-busy' &&
+        !!ended &&
+        ended.clipboard === 'restored' &&
+        exited &&
+        a.child.exitCode === 3 &&
+        back.text === user &&
+        recordFiles().length === 0,
+      `${JSON.stringify(first)}; ${JSON.stringify(restarting)}; logged ${logged}; ${JSON.stringify(second)}; ${JSON.stringify(ended)}; exit ${a.child.exitCode}; text ${back.text}; ${recordFiles().length} files`
     )
   }
 
