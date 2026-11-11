@@ -93,7 +93,7 @@ function fixture(idleTimeoutMs = 600_000, diagnostics?: NotesDiagnostic[]) {
       const sequence = this.options.contextSequence
       await sequence.adaptStateToTokens(tokens.slice(0, -1), false)
       record.skipped.push(sequence.nextTokenIndex)
-      sequence.counts.usedInputTokens += tokens.length - sequence.nextTokenIndex
+      sequence.counts.usedInputTokens += Math.max(0, tokens.length - sequence.nextTokenIndex - 1)
       sequence._contextTokens.push(...tokens.slice(sequence.nextTokenIndex))
       await gate
       options.signal.throwIfAborted()
@@ -278,7 +278,10 @@ test('diagnostics report actual evaluated/skipped tokens and lifecycle timings w
   assert.equal(prefill.length, 2)
   assert.equal(prefill[0]!.skippedTokens, 0)
   assert.ok(prefill[1]!.skippedTokens! >= 'Shared system'.length)
-  assert.equal(prefill[1]!.promptTokens, prefill[1]!.evaluatedTokens! + prefill[1]!.skippedTokens!)
+  assert.equal(
+    prefill[1]!.promptTokens,
+    prefill[1]!.evaluatedTokens! + prefill[1]!.skippedTokens! + 1
+  )
   assert.equal(diagnostics.filter((event) => event.event === 'generation')[0]!.generatedTokens, 1)
   assert.equal(diagnostics.filter((event) => event.event === 'context').length, 1)
   assert.doesNotMatch(JSON.stringify(diagnostics), /PRIVATE|Different|Shared/)

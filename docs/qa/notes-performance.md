@@ -42,8 +42,9 @@ file. It records timestamps, model/backend/layers, load/hash/context timings,
 prompt/evaluated/skipped tokens, prefill and decode rates, warm-up decisions,
 fallback stages and timeouts. Rates count native tokens, not text chunks. Prefill
 includes the first-token latency; decode rate excludes that first token. Skipped
-tokens come from wrapped prompt length minus the sequence's actual input-token
-meter, not a character estimate. Model load and warm prefill also produce metrics.
+tokens are bounded by the sequence's exact token match and the wrapped prompt
+length minus actual evaluated input tokens. This avoids counting the native
+sampling-token offset as a cache hit on a cold sequence. Model load and warm prefill also produce metrics.
 No transcript, notes, prompt, file path, raw stack or raw exception message is
 written. Exception messages are classified into fixed operational messages because
 native/provider exceptions can contain user input; unknown details are omitted.

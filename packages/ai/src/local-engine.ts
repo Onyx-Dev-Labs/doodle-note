@@ -373,17 +373,26 @@ export class LocalNotesEngine implements NotesEngine {
               })
             signal.throwIfAborted()
             const sequence = this.sequence!
-            const metrics = this.options.onDiagnostic
+            const promptTokens = this.options.onDiagnostic
+              ? session.chatWrapper
+                  .generateContextState({
+                    chatHistory: [
+                      ...session.getChatHistory(),
+                      { type: 'user', text: prompt?.user ?? userMessage },
+                      { type: 'model', response: [] }
+                    ]
+                  })
+                  .contextText.tokenize(this.model!.tokenizer)
+              : undefined
+            const metrics = promptTokens
               ? {
-                  promptTokens: session.chatWrapper
-                    .generateContextState({
-                      chatHistory: [
-                        ...session.getChatHistory(),
-                        { type: 'user', text: prompt?.user ?? userMessage },
-                        { type: 'model', response: [] }
-                      ]
-                    })
-                    .contextText.tokenize(this.model!.tokenizer).length,
+                  promptTokens: promptTokens.length,
+                  // The native input meter can exclude a final sampling token even
+                  // on a cold sequence. A cache hit also requires an actual match.
+                  prefixMatchTokens: Math.min(
+                    sequence.compareContextTokens(promptTokens).firstDifferentIndex,
+                    Math.max(0, promptTokens.length - 1)
+                  ),
                   before: sequence.tokenMeter.getState(),
                   started: Date.now(),
                   firstTokenAt: 0
@@ -398,7 +407,10 @@ export class LocalNotesEngine implements NotesEngine {
                 metrics.firstTokenAt = Date.now()
                 const evaluatedTokens = sequence.tokenMeter.diff(metrics.before).usedInputTokens
                 const prefillMs = metrics.firstTokenAt - metrics.started
-                const skippedTokens = Math.max(0, metrics.promptTokens - evaluatedTokens)
+                const skippedTokens = Math.min(
+                  metrics.prefixMatchTokens,
+                  Math.max(0, metrics.promptTokens - evaluatedTokens)
+                )
                 this.diagnostic({
                   event: 'prefill',
                   contextSize: context.contextSize,
