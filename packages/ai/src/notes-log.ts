@@ -27,6 +27,7 @@ export interface NotesDiagnostic {
     | 'memory'
     | 'no-model'
     | 'no-meeting'
+    | 'cpu-prefill'
   cached?: boolean
   prefixReused?: boolean
   gpuLayers?: number

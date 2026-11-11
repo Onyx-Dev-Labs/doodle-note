@@ -104,6 +104,13 @@ export class LocalNotesEngine implements NotesEngine {
   async warm(systemPrompt: string, signal?: AbortSignal): Promise<void> {
     return this.exclusive(async () => {
       await withGenerationDeadline(signal, 'preparing', (active) => this.prepareModel(active))
+      // Dev04 CPU prefill did not yield to cancellation within two minutes,
+      // even at one thread. Never start that speculative work beside capture.
+      // Foreground CPU inference/fallback remains unchanged.
+      if (this.llama?.gpu === false) {
+        this.diagnostic({ event: 'warmup', reason: 'cpu-prefill' })
+        return
+      }
       await withGenerationDeadline(signal, 'writing', async (active) => {
         const { LlamaChatSession } = await loadNodeLlamaCpp()
         await this.obtainContext(this.options.contextSize ?? 16384, active)

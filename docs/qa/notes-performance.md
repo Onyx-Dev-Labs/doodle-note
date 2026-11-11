@@ -23,7 +23,11 @@ a conservative heuristic, not a measured allocation guarantee. Qwen 4B weights
 alone are roughly 2.33 GB; its 16K KV context and native runtime add memory. Warm-up
 holds these earlier than Generate would and releases them after ten idle minutes.
 GPU/CPU contention can still affect timing; llama priority is not an OS real-time
-guarantee. The field CPU-prefill pathology is deliberately unchanged.
+guarantee. The field CPU-prefill pathology is deliberately unchanged for foreground work.
+CPU-only warm-up loads weights but skips speculative prefill: on Dev04, Qwen 0.5B
+failed to yield within two minutes at default settings and at one thread. The
+`cpu-prefill` log reason records this guard. Vulkan/Metal warm-up still preloads.
+This avoids starting the known non-yielding CPU work while capture is active.
 
 Prefix savings require identical tokens. Template or speaker-roster changes
 invalidate the suffix beginning at the first difference; the current prompt puts

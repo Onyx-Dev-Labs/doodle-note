@@ -23,7 +23,7 @@ assert.ok(
   chatSource.includes('await this.llamaChat.sequence.adaptStateToTokens(this.tokens, false)')
 )
 
-function fixture(idleTimeoutMs = 600_000, diagnostics?: NotesDiagnostic[]) {
+function fixture(idleTimeoutMs = 600_000, diagnostics?: NotesDiagnostic[], gpu?: false) {
   const record = {
     loads: 0,
     contexts: [] as number[],
@@ -118,6 +118,7 @@ function fixture(idleTimeoutMs = 600_000, diagnostics?: NotesDiagnostic[]) {
     'node-llama-cpp': {
       LlamaChatSession: Session,
       getLlama: async () => ({
+        gpu,
         loadModel: async () => {
           record.loads++
           return {
@@ -285,5 +286,17 @@ test('diagnostics report actual evaluated/skipped tokens and lifecycle timings w
   assert.equal(diagnostics.filter((event) => event.event === 'generation')[0]!.generatedTokens, 1)
   assert.equal(diagnostics.filter((event) => event.event === 'context').length, 1)
   assert.doesNotMatch(JSON.stringify(diagnostics), /PRIVATE|Different|Shared/)
+  await f.engine.dispose()
+})
+
+test('CPU warm-up loads weights but skips non-yielding speculative prefill', async () => {
+  const diagnostics: NotesDiagnostic[] = []
+  const f = fixture(600_000, diagnostics, false)
+  await f.engine.warm('Shared template')
+  assert.equal(f.record.loads, 1)
+  assert.equal(f.record.contexts.length, 0)
+  assert.ok(diagnostics.some((event) => event.event === 'warmup' && event.reason === 'cpu-prefill'))
+  await f.engine.runRaw('Shared template', 'Foreground remains available')
+  assert.equal(f.record.contexts.length, 1)
   await f.engine.dispose()
 })
