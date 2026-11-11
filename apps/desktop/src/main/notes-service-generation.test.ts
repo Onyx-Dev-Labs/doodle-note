@@ -149,9 +149,23 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
       )
     )
     service.pickEngine = async () => ({
-      generateNotes: async () => ({ markdown: 'complete', engine: 'fixture', elapsedMs: 1 })
+      generateNotes: async (
+        _input: unknown,
+        _tokens: unknown,
+        progress: (event: ai.NotesProgress) => void
+      ) => {
+        progress({ phase: 'reading' })
+        progress({ phase: 'writing' })
+        return { markdown: 'complete', engine: 'fixture', elapsedMs: 1 }
+      }
     })
     assert.equal((await enhance({ ...request, runId: 'retry' })).markdown, 'complete')
+    assert.deepEqual(
+      broadcasts
+        .filter(({ payload }) => payload.runId === 'retry')
+        .map(({ payload }) => payload.phase),
+      ['preparing', 'reading', 'writing']
+    )
     assert.equal(request.rawNotesMarkdown, 'Keep this')
     assert.deepEqual(request.segments, [])
     // Recipe-only engine access shares busy ownership with existing summaries and Ask.

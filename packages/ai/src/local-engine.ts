@@ -63,6 +63,7 @@ export const DEFAULT_MODELS_DIR = path.join(os.homedir(), '.cache', 'doodle-note
 export class LocalNotesEngine implements NotesEngine {
   readonly id: string
   readonly label: string
+  readonly reportsPrefillProgress = true
 
   private llama: Llama | null = null
   private model: LlamaModel | null = null
@@ -266,6 +267,7 @@ export class LocalNotesEngine implements NotesEngine {
         async (signal) => {
           signal.throwIfAborted()
           const { LlamaChatSession } = await loadNodeLlamaCpp()
+          control?.onPhase?.('reading')
           const started = Date.now()
           const contextSize = control?.contextSize ?? this.options.contextSize ?? 16384
 
@@ -319,6 +321,12 @@ export class LocalNotesEngine implements NotesEngine {
                     .contextText.tokenize(this.model!.tokenizer).length
               })
             signal.throwIfAborted()
+            let writing = false
+            const firstToken = (): void => {
+              if (writing) return
+              writing = true
+              control?.onPhase?.('writing')
+            }
             const result = await session.promptWithMeta(prompt?.user ?? userMessage, {
               signal,
               maxTokens: Math.min(
@@ -326,7 +334,9 @@ export class LocalNotesEngine implements NotesEngine {
                 GENERATION_LIMITS[control?.phase ?? 'writing'].maxTokens
               ),
               temperature: control?.temperature ?? 0.3,
+              onToken: firstToken,
               onTextChunk: (text) => {
+                firstToken()
                 control?.onActivity?.()
                 onToken?.(text)
               }

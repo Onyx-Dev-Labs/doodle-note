@@ -67,6 +67,8 @@ export interface AskAnswer extends MergedNotes {
 export interface GenerationControl {
   signal?: AbortSignal
   phase?: 'condensing' | 'writing'
+  /** Local prefill starts after preparation; writing begins at the first generated token. */
+  onPhase?: (phase: 'reading' | 'writing') => void
   /** Activity counts only; intermediate text never leaves the engine. */
   onActivity?: () => void
   /**
@@ -81,7 +83,7 @@ export interface GenerationControl {
 }
 
 export interface NotesProgress {
-  phase: 'condensing' | 'writing'
+  phase: 'reading' | 'condensing' | 'writing'
   /** 1-based part counter, present while condensing. */
   current?: number
   total?: number
@@ -101,13 +103,10 @@ export interface NotesEngine {
    * Transcript budget (chars) for a single-pass merge; longer transcripts
    * are condensed first (map-reduce.ts). Unset = the local-context default.
    */
+  readonly reportsPrefillProgress?: boolean
   readonly singlePassThresholdChars?: number
   /** Complete bounded request, used by versioned recipes. No input truncation. */
-  runBounded?(
-    system: string,
-    prompt: string,
-    control?: GenerationControl
-  ): Promise<MergedNotes>
+  runBounded?(system: string, prompt: string, control?: GenerationControl): Promise<MergedNotes>
   /** One raw generation — the primitive the notes orchestration composes. */
   runRaw(
     system: string,
