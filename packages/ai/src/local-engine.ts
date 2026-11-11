@@ -6,7 +6,7 @@ import {
 } from './generation-control'
 import os from 'node:os'
 import path from 'node:path'
-import type { Llama, LlamaModel } from 'node-llama-cpp'
+import type { Llama, LlamaModel, LlamaContext, LlamaContextSequence } from 'node-llama-cpp'
 import { buildAskSystemPrompt, buildAskUserMessage } from './ask-prompt'
 import {
   buildGlobalAskPrompt,
@@ -54,6 +54,8 @@ export interface LocalEngineOptions {
   onDownloadProgress?: (fraction: number) => void
   /** Tokens of context; transcripts are trimmed upstream to fit. */
   contextSize?: number
+  /** Release native model/context memory after inactivity (default ten minutes). */
+  idleTimeoutMs?: number
 }
 
 export const DEFAULT_MODELS_DIR = path.join(os.homedir(), '.cache', 'doodle-note', 'models')
@@ -65,6 +67,12 @@ export class LocalNotesEngine implements NotesEngine {
   private llama: Llama | null = null
   private model: LlamaModel | null = null
   private modelPath: string | null = null
+  private context: LlamaContext | null = null
+  private sequence: LlamaContextSequence | null = null
+  private requestedContextSize: number | null = null
+  private operations: Promise<void> = Promise.resolve()
+  private pendingOperations = 0
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
   /** Default compute failed once (load or context) — stay on CPU from then on. */
   private forceCpu = false
   private readonly options: LocalEngineOptions
@@ -77,7 +85,7 @@ export class LocalNotesEngine implements NotesEngine {
 
   /** Download (if needed) and load the model. Safe to call more than once. */
   async prepare(signal?: AbortSignal): Promise<void> {
-    return this.prepareModel(signal)
+    return this.exclusive(() => this.prepareModel(signal))
   }
 
   private async acquireRuntime(
@@ -201,13 +209,18 @@ export class LocalNotesEngine implements NotesEngine {
     return this.runRaw(GLOBAL_ASK_SYSTEM_PROMPT, '', onToken, undefined, input)
   }
 
-  async runBounded(system: string, prompt: string, control?: GenerationControl): Promise<MergedNotes> {
+  async runBounded(
+    system: string,
+    prompt: string,
+    control?: GenerationControl
+  ): Promise<MergedNotes> {
     return this.runRaw(system, prompt, undefined, control, undefined, true)
   }
 
   /**
-   * One generation against the loaded model. Fresh context per call: no state
-   * bleeds between runs, and the model weights stay loaded across calls.
+   * A new session has only this request's history. The retained sequence uses
+   * llama's adaptStateToTokens(tokens, false): keep the exact common prefix,
+   * erase the divergent suffix before evaluation. Never reuse chat history.
    */
   async runRaw(
     systemPrompt: string,
@@ -217,97 +230,163 @@ export class LocalNotesEngine implements NotesEngine {
     globalAskInput?: GlobalAskInput,
     bounded = false
   ): Promise<AskAnswer> {
-    await withGenerationDeadline(control?.signal, 'preparing', (signal) => this.prepare(signal))
-    return withGenerationDeadline(control?.signal, control?.phase ?? 'writing', async (signal) => {
-      signal.throwIfAborted()
-      const { LlamaChatSession } = await loadNodeLlamaCpp()
-      const started = Date.now()
-      const contextSize = control?.contextSize ?? this.options.contextSize ?? 16384
+    return this.exclusive(async () => {
+      await withGenerationDeadline(control?.signal, 'preparing', (signal) =>
+        this.prepareModel(signal)
+      )
+      return withGenerationDeadline(
+        control?.signal,
+        control?.phase ?? 'writing',
+        async (signal) => {
+          signal.throwIfAborted()
+          const { LlamaChatSession } = await loadNodeLlamaCpp()
+          const started = Date.now()
+          const contextSize = control?.contextSize ?? this.options.contextSize ?? 16384
 
-      let context: Awaited<ReturnType<LlamaModel['createContext']>>
-      try {
-        context = await this.model!.createContext({ contextSize })
-      } catch (err) {
-        signal.throwIfAborted()
-        if (this.forceCpu) throw err
-        // Context creation failed on the default compute layer; try CPU without
-        // assuming the cause was GPU memory exhaustion.
-        console.error('[local-engine] default context creation failed, reloading CPU-only:', err)
-        this.forceCpu = true
-        await this.model?.dispose()
-        this.model = null
-        this.llama = null
-        await this.prepareModel(signal, err)
-        context = await this.model!.createContext({ contextSize })
-      }
-      try {
-        signal.throwIfAborted()
-        const session = new LlamaChatSession({
-          contextSequence: context.getSequence(),
-          systemPrompt,
-          // Gemma requires explicit admission before folding system rules into its user turn.
-          forceAddSystemPrompt: true
-        })
-        const prompt = globalAskInput
-          ? buildGlobalAskPrompt(globalAskInput, {
-              contextWindowTokens: context.contextSize,
-              outputReserveTokens: GENERATION_LIMITS.writing.maxTokens,
-              safetyMarginTokens: 256,
-              accounting: 'model-tokenizer',
-              countInputTokens: (_system, user) =>
-                session.chatWrapper
-                  .generateContextState({
-                    chatHistory: [
-                      ...session.getChatHistory(),
-                      { type: 'user', text: user },
-                      { type: 'model', response: [] }
-                    ]
-                  })
-                  .contextText.tokenize(this.model!.tokenizer).length
+          const context = await this.obtainContext(contextSize, signal)
+          let activeSession: InstanceType<NodeLlamaCpp['LlamaChatSession']> | undefined
+          try {
+            signal.throwIfAborted()
+            const session = new LlamaChatSession({
+              contextSequence: this.sequence!,
+              systemPrompt,
+              // Gemma requires explicit admission before folding system rules into its user turn.
+              forceAddSystemPrompt: true
             })
-          : undefined
-        if (bounded) assertRequestFits(systemPrompt, userMessage, {
-          contextWindowTokens: context.contextSize,
-          outputReserveTokens: Math.min(
-            control?.maxTokens ?? Infinity,
-            GENERATION_LIMITS.writing.maxTokens
-          ),
-          safetyMarginTokens: 256,
-          accounting: 'model-tokenizer',
-          countInputTokens: (_system, user) => session.chatWrapper.generateContextState({
-            chatHistory: [...session.getChatHistory(), { type: 'user', text: user }, { type: 'model', response: [] }]
-          }).contextText.tokenize(this.model!.tokenizer).length
-        })
-        signal.throwIfAborted()
-        const result = await session.promptWithMeta(prompt?.user ?? userMessage, {
-          signal,
-          maxTokens: Math.min(
-            control?.maxTokens ?? Infinity,
-            GENERATION_LIMITS[control?.phase ?? 'writing'].maxTokens
-          ),
-          temperature: control?.temperature ?? 0.3,
-          onTextChunk: (text) => {
-            control?.onActivity?.()
-            onToken?.(text)
+            activeSession = session
+            const prompt = globalAskInput
+              ? buildGlobalAskPrompt(globalAskInput, {
+                  contextWindowTokens: context.contextSize,
+                  outputReserveTokens: GENERATION_LIMITS.writing.maxTokens,
+                  safetyMarginTokens: 256,
+                  accounting: 'model-tokenizer',
+                  countInputTokens: (_system, user) =>
+                    session.chatWrapper
+                      .generateContextState({
+                        chatHistory: [
+                          ...session.getChatHistory(),
+                          { type: 'user', text: user },
+                          { type: 'model', response: [] }
+                        ]
+                      })
+                      .contextText.tokenize(this.model!.tokenizer).length
+                })
+              : undefined
+            if (bounded)
+              assertRequestFits(systemPrompt, userMessage, {
+                contextWindowTokens: context.contextSize,
+                outputReserveTokens: Math.min(
+                  control?.maxTokens ?? Infinity,
+                  GENERATION_LIMITS.writing.maxTokens
+                ),
+                safetyMarginTokens: 256,
+                accounting: 'model-tokenizer',
+                countInputTokens: (_system, user) =>
+                  session.chatWrapper
+                    .generateContextState({
+                      chatHistory: [
+                        ...session.getChatHistory(),
+                        { type: 'user', text: user },
+                        { type: 'model', response: [] }
+                      ]
+                    })
+                    .contextText.tokenize(this.model!.tokenizer).length
+              })
+            signal.throwIfAborted()
+            const result = await session.promptWithMeta(prompt?.user ?? userMessage, {
+              signal,
+              maxTokens: Math.min(
+                control?.maxTokens ?? Infinity,
+                GENERATION_LIMITS[control?.phase ?? 'writing'].maxTokens
+              ),
+              temperature: control?.temperature ?? 0.3,
+              onTextChunk: (text) => {
+                control?.onActivity?.()
+                onToken?.(text)
+              }
+            })
+            signal.throwIfAborted()
+            requireCompleteOutput(result.stopReason, control?.phase ?? 'writing')
+            return {
+              ...(prompt ? { coverage: prompt.coverage } : {}),
+              markdown: result.responseText.trim(),
+              engine: this.id,
+              elapsedMs: Date.now() - started
+            }
+          } catch (error) {
+            // Aborted/failed evaluation may leave partial native state. Drop it.
+            await this.disposeContext()
+            throw error
+          } finally {
+            activeSession?.dispose({ disposeSequence: false })
           }
-        })
-        signal.throwIfAborted()
-        requireCompleteOutput(result.stopReason, control?.phase ?? 'writing')
-        return {
-          ...(prompt ? { coverage: prompt.coverage } : {}),
-          markdown: result.responseText.trim(),
-          engine: this.id,
-          elapsedMs: Date.now() - started
         }
-      } finally {
-        await context.dispose()
-      }
+      )
     })
   }
 
+  /** The single sequence must never be evaluated, resized or disposed concurrently. */
+  private exclusive<T>(work: () => Promise<T>, keepWarm = true): Promise<T> {
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
+    this.pendingOperations++
+    const result = this.operations.then(work)
+    this.operations = result
+      .then(
+        () => {},
+        () => {}
+      )
+      .finally(() => {
+        this.pendingOperations--
+        if (keepWarm && this.pendingOperations === 0 && this.model) {
+          this.idleTimer = setTimeout(
+            () => {
+              this.idleTimer = null
+              void this.dispose().catch(() => {})
+            },
+            this.options.idleTimeoutMs ?? 10 * 60_000
+          )
+          this.idleTimer.unref?.()
+        }
+      })
+    return result
+  }
+
+  private async obtainContext(contextSize: number, signal: AbortSignal): Promise<LlamaContext> {
+    if (this.context && this.requestedContextSize === contextSize) return this.context
+    await this.disposeContext()
+    try {
+      this.context = await this.model!.createContext({ contextSize })
+    } catch (error) {
+      signal.throwIfAborted()
+      if (this.forceCpu) throw error
+      console.error('[local-engine] default context creation failed, reloading CPU-only:', error)
+      this.forceCpu = true
+      await this.model?.dispose()
+      this.model = null
+      this.llama = null
+      await this.prepareModel(signal, error)
+      this.context = await this.model!.createContext({ contextSize })
+    }
+    this.requestedContextSize = contextSize
+    this.sequence = this.context.getSequence()
+    return this.context
+  }
+
+  private async disposeContext(): Promise<void> {
+    const context = this.context
+    this.context = null
+    this.sequence = null
+    this.requestedContextSize = null
+    await context?.dispose()
+  }
+
   async dispose(): Promise<void> {
-    await this.model?.dispose()
-    this.model = null
-    this.llama = null
+    return this.exclusive(async () => {
+      await this.disposeContext()
+      await this.model?.dispose()
+      this.model = null
+      this.llama = null
+    }, false)
   }
 }

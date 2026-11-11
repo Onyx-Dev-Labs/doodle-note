@@ -18,6 +18,7 @@ test('local adapter counts the actual wrapper/allocation, enforces reserve and d
   let counted = 0
   const tokenizer = (text: string) => Array.from(new TextEncoder().encode(text))
   class Session {
+    dispose() {}
     readonly system: string
     constructor(options: { systemPrompt: string }) {
       this.system = options.systemPrompt
@@ -100,6 +101,8 @@ test('local adapter counts the actual wrapper/allocation, enforces reserve and d
       assert.ok(name in deps, `unexpected dependency ${name}`)
       return deps[name]
     },
+    setTimeout,
+    clearTimeout,
     console,
     Date
   })
@@ -117,16 +120,16 @@ test('local adapter counts the actual wrapper/allocation, enforces reserve and d
   assert.equal(result.coverage?.contextWindowTokens, 8192, 'allocated context, not requested 16384')
   assert.equal(result.coverage?.accounting, 'model-tokenizer')
   assert.ok(counted > 1)
-  assert.equal(disposed, 1)
+  assert.equal(disposed, 0)
   await assert.rejects(
     engine.askAcrossMeetings({ ...input, question: 'x'.repeat(25_000) }),
     /question is too long/
   )
   assert.equal(generated, 1, 'oversized question never reaches generation or another provider')
-  assert.equal(disposed, 2, 'failed budget releases native context')
+  assert.equal(disposed, 1, 'failed budget releases native context')
   const recipe = await engine.runBounded!('Recipe system', 'Full synthetic meeting')
   assert.equal(recipe.markdown, 'Synthetic answer')
   await assert.rejects(engine.runBounded!('Recipe system', '界'.repeat(25_000)), /exceed/)
   assert.equal(generated, 2, 'oversized recipe never reaches inference')
-  assert.equal(disposed, 4, 'recipe success and budget rejection both dispose contexts')
+  assert.equal(disposed, 2, 'budget rejection disposes the retained context')
 })

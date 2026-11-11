@@ -110,6 +110,7 @@ function fixture(
         }
       },
       LlamaChatSession: class {
+        dispose() {}
         async promptWithMeta(
           _prompt: string,
           settings: { onTextChunk: (text: string) => void }
@@ -137,6 +138,8 @@ function fixture(
       },
       Error,
       AggregateError,
+      setTimeout,
+      clearTimeout,
       console: { error: () => {} },
       Date
     }
@@ -244,8 +247,9 @@ for (const stage of ['load', 'context'] as const) {
     assert.equal((await f.run()).markdown, 'Synthetic answer')
     assert.deepEqual(f.selected, ['default', 'cpu'])
     assert.deepEqual(f.tokens, ['Synthetic answer'])
-    assert.deepEqual(f.contextsDisposed, ['cpu'])
+    assert.deepEqual(f.contextsDisposed, [])
     await f.engine.dispose()
+    assert.deepEqual(f.contextsDisposed, ['cpu'])
     assert.deepEqual(f.disposed, stage === 'context' ? ['default', 'cpu'] : ['cpu'])
   })
 }
