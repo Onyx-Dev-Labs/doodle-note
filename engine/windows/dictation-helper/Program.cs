@@ -111,6 +111,8 @@ namespace DoodleNote.DictationHelper
             Bounded.Saturated += delegate { Restart("helper-busy", "provider calls are stuck past the cap"); };
             // Clipboard readers stuck on owners that never render: no clipboard save is possible any more.
             ClipboardReaderClient.Exhausted += delegate { Restart("clipboard-readers", "clipboard readers are waiting on owners that do not render"); };
+            // Round 39: a late clipboard write that never ends (deliveries and Restores wait for it: round 38).
+            ClipboardText.LateWriteStuck += delegate (int ms) { Restart("clipboard-write-stuck", "a late clipboard write has not ended in " + ms + " ms"); };
             Ui.Install();
             // A clipboard transaction an earlier helper could not finish (it ended before its restore).
             PendingClipboard.RecoverLeftover("start");

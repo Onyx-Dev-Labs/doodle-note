@@ -1187,6 +1187,25 @@ namespace DoodleNote.DictationHelper
 
     internal static class ClipboardText
     {
+        /// <summary>
+        /// Round 39 (Opus nit): a late write that never ends would keep every delivery and Restore refused (round 38).
+        /// One that has not ended LateWriteWatchdogMs after it was abandoned raises this (once): the helper then leaves to
+        /// be replaced, the usual restart between deliveries; its record lets the next helper judge it by content.
+        /// </summary>
+        public static event Action<int> LateWriteStuck;
+        public const int LateWriteWatchdogMs = 30000;
+
+        static void WatchLateWrite(LateWrite job)
+        {
+            int ms = TestMode.Int("DICTATION_HELPER_TEST_LATE_WATCHDOG_MS", LateWriteWatchdogMs); // test build only: shorter
+            job.Watchdog = new Timer(delegate
+            {
+                if (job.Outcome != null) return; // it ended
+                Wire.Log("a late clipboard write has not ended " + ms + " ms after it was abandoned (" + job.Timeline() + "); restarting the helper");
+                Action<int> stuck = LateWriteStuck;
+                if (stuck != null) stuck(ms);
+            }, null, ms, Timeout.Infinite);
+        }
 
         const uint CF_UNICODETEXT = 13;
 
@@ -1262,6 +1281,8 @@ namespace DoodleNote.DictationHelper
             /// <summary>The rollback's result once done (null while it still runs), and what the clipboard then holds.</summary>
             public volatile string Outcome;
             public string Holds;
+            /// <summary>Round 39: the watchdog's timer (kept referenced while the write is abandoned).</summary>
+            public Timer Watchdog;
 
             // Round 30: each step of the write and when it was reached, so a write that runs past its budget is
             // logged with where it was (CI run 42842819157 could only infer it).
@@ -1358,6 +1379,7 @@ namespace DoodleNote.DictationHelper
             {
                 Wire.Log("the clipboard write ran past its " + budgetMs + " ms budget (" + job.Timeline() + "); not pasting: when it ends, the user's saved content goes back instead of ours");
                 late = job;
+                WatchLateWrite(job);
                 ownership = new ClipboardOwnership();
                 return false;
             }
