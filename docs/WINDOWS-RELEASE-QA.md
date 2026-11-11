@@ -485,12 +485,21 @@ past it, "own-busy" since round 39, nothing emptied). There is ONE delivery chec
 outstanding check while it still waits for the lock, or waits (within its own allowance) for a running one before
 starting the next; a check that no delivery waits for any more does nothing once it gets the lock, and stops between
 records (CI case 56: three deliveries during one stall, one check thread; case 57: the retention check during a held
-write). Round 38 (Opus, Astra P2): the delivery's wait for a look already inside never runs past its remaining allowance
-(in 50 ms slices; "deadline", nothing emptied), and the deadline is checked again right before the write (CI case 58).
+write). Round 38 (Opus, Astra P2): the delivery's wait for a look already inside stops once its allowance is gone
+("deadline", nothing emptied); stated exactly (round 39, Astra P3): it polls in slices of up to 50 ms plus scheduling
+delay, so it can end about that much after the allowance (CI 58a allows under 900 ms for a 400 ms allowance), and it
+is the deadline check right after the wait, before the write, that keeps a paste that no longer fits from writing (CI
+case 58b: the delivery's own deadline expired right after the wait, the production predicate refuses; its mutant,
+the check removed, is caught: it writes). The late-write wait (below) polls the same way.
 Round 38, option (b) of the two offered for the late write (refuse while it is outstanding, not a process-wide open
 lock): a late rollback is SEVERAL opens (its confirmation, then its put-back) with our late text on the clipboard in
 between, so a lock around each open would still let a delivery save our own text as the user's in a gap; refusing
-for the whole late transaction closes that too, and is a counter check with no lock order (it cannot deadlock). The queued steps run before the helper exits, inside
+for the whole late transaction closes that too, and is a counter check with no lock order (it cannot deadlock).
+(Opus, round 38: the save itself runs in the READER process, which a process-wide lock in this one would not cover
+at all.) Stated exactly (Astra, round 38): the write's count goes up right AFTER its thread starts (LateBegin follows
+thread.Start), so it is not literally up before the write's first open; that is safe because until the write is
+abandoned the request that started it still owns the request queue (no delivery or Restore can start), and its record
+is already in flight (no automatic look opens the clipboard). The queued steps run before the helper exits, inside
 its usual exit wait; past it, a record left behind is judged by content at the next start. The background writer
 serializes every write (one queue, in order) on immutable snapshots, and a record settled meanwhile is never written
 again, so an older queued write can never overwrite the settlement or recreate a deleted state. Every state write goes
@@ -705,9 +714,11 @@ PR (a window cannot re-set formats after it is destroyed).
 EmptyClipboard audit, stated exactly: three sites in the RELEASE build (our write, the live transaction's restore,
 the user's Restore); the test build has a fourth (the __seed op).
 
-Known limitation: the user's Restore checks only its own record for being in flight, not whether another delivery
-is under way. If one is, that live transaction's own confirmation or paste-gate look sees the changed clipboard and
-keeps its record as an offer.
+The user's Restore and the deliveries share the request queue, so a Restore never runs while a delivery is under
+way; since round 38 it also answers "busy" while an earlier dictation's late write (whose delivery already returned)
+still runs. (Until round 38 this said the Restore checked only its own record and could run during another delivery.)
+Test-build exception: the __seed op (TestSeed) opens and empties the clipboard without the late-write exclusion; it
+is compiled out of the release helper.
 
 Test-build hooks are compiled out of the release helper. One of them, the keyboard-layout hook used by CI 31, is
 CI-only: it activates another input language for the write thread and activates the previous one again when the
