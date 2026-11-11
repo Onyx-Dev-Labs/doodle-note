@@ -109,7 +109,8 @@ export interface HelperDelivery {
   clipboardNotice?: 'not-saved'
   /**
    * Windows (round 23): why: too-large, unrendered, nothing-savable, owner-unresponsive, zero-sequence,
-   * no-record, deadline, no-window, unreadable.
+   * no-record, deadline, no-window, unreadable, clipboard-changed, clipboard-busy (another app), empty-failed, and
+   * (round 39) own-busy (DoodleNote's own recovery check or look, or an earlier dictation's late write, still busy).
    */
   clipboardNoticeReason?: string
 }

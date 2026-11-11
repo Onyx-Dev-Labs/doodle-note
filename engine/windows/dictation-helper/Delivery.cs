@@ -564,7 +564,7 @@ namespace DoodleNote.DictationHelper
             {
                 bool lateDeadline = stillInTime != null && !stillInTime();
                 Wire.Log("an earlier dictation's late clipboard write is still running (its put-back not done); not pasting (nothing touched)");
-                deliveryNoSave = lateDeadline ? "deadline" : "clipboard-busy";
+                deliveryNoSave = lateDeadline ? "deadline" : "own-busy"; // round 39: ours, not another app's
                 return deliveryNoSave;
             }
             // An earlier transaction that could not be put back gets its chance first (before our write). Round 36 (Astra
@@ -574,7 +574,7 @@ namespace DoodleNote.DictationHelper
             {
                 bool pastDeadline = stillInTime != null && !stillInTime();
                 Wire.Log("the kept-records check before the paste did not finish " + (pastDeadline ? "within the delivery's deadline" : "within " + DeliveryRecoveryCapMs + " ms") + " (the recovery lock busy, or a slow disk); not pasting (nothing emptied)");
-                deliveryNoSave = pastDeadline ? "deadline" : "clipboard-busy";
+                deliveryNoSave = pastDeadline ? "deadline" : "own-busy"; // round 39: ours, not another app's
                 return deliveryNoSave;
             }
             // That check can take a while with several kept records (each opens the clipboard): the paste starts only if it
@@ -651,7 +651,7 @@ namespace DoodleNote.DictationHelper
                 bool lookDeadline = stillInTime != null && !stillInTime();
                 Wire.Log(lookDeadline ? "the paste no longer fits the deadline while a recovery look holds the clipboard; not pasting (nothing emptied)" : "a recovery look still holds the clipboard; not pasting (nothing emptied)");
                 PendingClipboard.Finish(record, "untouched");
-                deliveryNoSave = lookDeadline ? "deadline" : "clipboard-busy";
+                deliveryNoSave = lookDeadline ? "deadline" : "own-busy"; // round 39: ours, not another app's
                 return deliveryNoSave;
             }
             // Round 38 (Opus, Astra P2): and the deadline is checked again right before the write (the look may have been
@@ -1187,6 +1187,7 @@ namespace DoodleNote.DictationHelper
 
     internal static class ClipboardText
     {
+
         const uint CF_UNICODETEXT = 13;
 
         /// <summary>

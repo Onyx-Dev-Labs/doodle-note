@@ -425,6 +425,11 @@ export const CLIPBOARD_NOT_SAVED_MESSAGES: ReadonlyMap<string, string> = new Map
     'Another app was using your clipboard when DoodleNote went to paste, so it did not paste with it. Your clipboard was left as it was.'
   ],
   [
+    // Round 39 (Opus): DoodleNote's own clipboard work, never another app's (kept distinct from clipboard-busy).
+    'own-busy',
+    'DoodleNote was still putting your clipboard back from an earlier dictation, or checking one it kept, so it did not paste with it. Your clipboard was left as it was. Try again in a moment.'
+  ],
+  [
     'empty-failed',
     'Windows did not let DoodleNote clear your clipboard to paste, so it did not paste with it. Your clipboard was left as it was.'
   ],
