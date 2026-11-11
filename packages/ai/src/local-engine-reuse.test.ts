@@ -23,9 +23,16 @@ assert.ok(
   chatSource.includes('await this.llamaChat.sequence.adaptStateToTokens(this.tokens, false)')
 )
 
-function fixture(idleTimeoutMs = 600_000, diagnostics?: NotesDiagnostic[], gpu?: false) {
+function fixture(
+  idleTimeoutMs = 600_000,
+  diagnostics?: NotesDiagnostic[],
+  gpu?: false,
+  failFirstContext = false,
+  gpuLayers = 1
+) {
   const record = {
     loads: 0,
+    prefillCalls: 0,
     contexts: [] as number[],
     disposed: 0,
     modelsDisposed: 0,
@@ -52,9 +59,23 @@ function fixture(idleTimeoutMs = 600_000, diagnostics?: NotesDiagnostic[], gpu?:
     get nextTokenIndex() {
       return this._contextTokens.length
     }
-    model = { fileInsights: { isRecurrent: false }, fileInfo: { metadata: {} } }
+    model = {
+      fileInsights: { isRecurrent: false },
+      fileInfo: { metadata: {} }
+    }
     compareContextTokens = LlamaContextSequence.prototype.compareContextTokens
     adaptStateToTokens = LlamaContextSequence.prototype.adaptStateToTokens
+    async evaluateWithoutGeneratingNewTokens(
+      tokens: number[],
+      options: { evaluationPriority: number }
+    ) {
+      assert.equal(options.evaluationPriority, 1)
+      assert.ok(tokens.length <= 64)
+      record.prefillCalls++
+      await gate
+      this._contextTokens.push(...tokens)
+      this.counts.usedInputTokens += tokens.length
+    }
     async _eraseContextTokenRanges(ranges: Array<{ start: number; end: number }>) {
       for (const { start, end } of ranges) this._contextTokens.splice(start, end - start)
     }
@@ -81,6 +102,7 @@ function fixture(idleTimeoutMs = 600_000, diagnostics?: NotesDiagnostic[], gpu?:
     chatWrapper = {
       generateContextState: ({ chatHistory }: { chatHistory: Array<{ text?: string }> }) => ({
         contextText: {
+          values: [`${chatHistory[0]!.text}\n<user>${chatHistory[1]!.text}\n<assistant>`],
           tokenize: () => [
             ...Buffer.from(`${chatHistory[0]!.text}\n<user>${chatHistory[1]!.text}\n<assistant>`)
           ]
@@ -117,16 +139,29 @@ function fixture(idleTimeoutMs = 600_000, diagnostics?: NotesDiagnostic[], gpu?:
     'node:path': path,
     'node-llama-cpp': {
       LlamaChatSession: Session,
-      getLlama: async () => ({
-        gpu,
+      LlamaText: (values: string[]) => ({
+        tokenize: () => [...Buffer.from(values.join(''))]
+      }),
+      getLlama: async (options: { gpu?: false }) => ({
+        gpu: options.gpu === false ? false : gpu,
         loadModel: async () => {
           record.loads++
           return {
+            gpuLayers,
             dispose: async () => {
               record.modelsDisposed++
             },
-            createContext: async ({ contextSize }: { contextSize: number }) => {
+            createContext: async ({
+              contextSize,
+              createSignal
+            }: {
+              contextSize: number
+              createSignal: AbortSignal
+            }) => {
+              assert.ok(createSignal)
               record.contexts.push(contextSize)
+              if (failFirstContext && record.contexts.length === 1)
+                throw new Error('injected context failure')
               const sequence = new Sequence()
               return {
                 contextSize,
@@ -221,7 +256,9 @@ test('overlapping calls and disposal wait for the active native operation; abort
     })
   )
   const abort = new AbortController()
-  const first = f.engine.runRaw('rules', 'first', undefined, { signal: abort.signal })
+  const first = f.engine.runRaw('rules', 'first', undefined, {
+    signal: abort.signal
+  })
   const rejected = assert.rejects(first, /cancel/)
   const second = f.engine.runRaw('rules', 'second')
   const disposal = f.engine.dispose()
@@ -265,7 +302,7 @@ test('warm-up preloads at low priority and foreground prepare joins the same mod
   release()
   await Promise.all([warm, prepare])
   await f.engine.runRaw('Shared template rules', 'Actual transcript')
-  assert.ok(f.record.skipped[1]! >= 'Shared template rules'.length)
+  assert.ok(f.record.skipped[0]! >= 'Shared template rules'.length)
   assert.equal(f.record.contexts.length, 1)
   await f.engine.dispose()
 })
@@ -298,5 +335,33 @@ test('CPU warm-up loads weights but skips non-yielding speculative prefill', asy
   assert.ok(diagnostics.some((event) => event.event === 'warmup' && event.reason === 'cpu-prefill'))
   await f.engine.runRaw('Shared template', 'Foreground remains available')
   assert.equal(f.record.contexts.length, 1)
+  await f.engine.dispose()
+})
+
+test('context fallback skips CPU prefill and preserves foreground generation', async () => {
+  const f = fixture(600_000, undefined, undefined, true)
+  await f.engine.warm('Shared template')
+  assert.equal(f.record.loads, 2)
+  assert.equal(f.record.contexts.length, 2)
+  assert.equal(f.record.prefillCalls, 0)
+  assert.match((await f.engine.runRaw('Shared template', 'Foreground')).markdown, /Foreground/)
+  await f.engine.dispose()
+})
+
+test('GPU runtime with zero offloaded layers skips speculative prefill', async () => {
+  const f = fixture(600_000, undefined, undefined, false, 0)
+  await f.engine.warm('Shared template')
+  assert.equal(f.record.prefillCalls, 0)
+  assert.equal(f.record.contexts.length, 0)
+  await f.engine.dispose()
+})
+
+test('context creation and fallback precede Reading', async () => {
+  const f = fixture(600_000, undefined, undefined, true)
+  await f.engine.runRaw('rules', 'user', undefined, {
+    onPhase: (phase) => {
+      if (phase === 'reading') assert.equal(f.record.contexts.length, 2)
+    }
+  })
   await f.engine.dispose()
 })

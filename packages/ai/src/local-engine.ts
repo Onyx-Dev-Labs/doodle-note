@@ -63,6 +63,9 @@ export interface LocalEngineOptions {
 
 export const DEFAULT_MODELS_DIR = path.join(os.homedir(), '.cache', 'doodle-note', 'models')
 
+// 64 / the owner's measured 47 tok/s = 1.36 s of non-preemptible work.
+export const WARM_PREFILL_BATCH_TOKENS = 64
+
 export class LocalNotesEngine implements NotesEngine {
   readonly id: string
   readonly label: string
@@ -89,7 +92,10 @@ export class LocalNotesEngine implements NotesEngine {
 
   private diagnostic(event: NotesDiagnostic): void {
     try {
-      this.options.onDiagnostic?.({ ...event, modelId: this.options.modelId ?? this.id })
+      this.options.onDiagnostic?.({
+        ...event,
+        modelId: this.options.modelId ?? this.id
+      })
     } catch {
       /* Observability must never interrupt native work. */
     }
@@ -107,13 +113,18 @@ export class LocalNotesEngine implements NotesEngine {
       // Dev04 CPU prefill did not yield to cancellation within two minutes,
       // even at one thread. Never start that speculative work beside capture.
       // Foreground CPU inference/fallback remains unchanged.
-      if (this.llama?.gpu === false) {
+      if (this.llama?.gpu === false || this.model?.gpuLayers === 0) {
         this.diagnostic({ event: 'warmup', reason: 'cpu-prefill' })
         return
       }
       await withGenerationDeadline(signal, 'writing', async (active) => {
-        const { LlamaChatSession } = await loadNodeLlamaCpp()
+        const { LlamaChatSession, LlamaText } = await loadNodeLlamaCpp()
         await this.obtainContext(this.options.contextSize ?? 16384, active)
+        // Context allocation can reload the model on CPU. Check the actual result.
+        if (this.llama?.gpu === false || this.model?.gpuLayers === 0) {
+          this.diagnostic({ event: 'warmup', reason: 'cpu-prefill' })
+          return
+        }
         const session = new LlamaChatSession({
           contextSequence: this.sequence!,
           systemPrompt,
@@ -125,7 +136,42 @@ export class LocalNotesEngine implements NotesEngine {
             ? this.sequence!.tokenMeter.getState()
             : undefined
           const started = Date.now()
-          await session.preloadPrompt('', { signal: active, evaluationPriority: 1 })
+          // Match the pinned chat wrapper's user-prefix rendering (including BOS
+          // and special tokens), stopping before user content. preloadPrompt uses
+          // this same marker/truncation technique but evaluates without a signal.
+          let marker = '__doodlenote_warm_user_boundary__'
+          while (systemPrompt.includes(marker)) marker += '_'
+          const { contextText } = session.chatWrapper.generateContextState({
+            chatHistory: [...session.getChatHistory(), { type: 'user', text: marker }]
+          })
+          const boundary = contextText.values.findIndex(
+            (value) => typeof value === 'string' && value.includes(marker)
+          )
+          if (boundary < 0) return // Unknown wrapper: keep only the loaded weights.
+          const text = contextText.values[boundary] as string
+          const prefix = LlamaText([
+            ...contextText.values.slice(0, boundary),
+            text.slice(0, text.indexOf(marker))
+          ]).tokenize(this.model!.tokenizer)
+          // The last text token can merge with future user text. Leave it for
+          // foreground evaluation, and never trigger a speculative context shift.
+          const tokens = prefix.slice(
+            0,
+            Math.max(0, Math.min(prefix.length - 1, this.context!.contextSize - 256))
+          )
+          const sequence = this.sequence!
+          await sequence.adaptStateToTokens(tokens, false)
+          for (
+            let offset = sequence.nextTokenIndex;
+            offset < tokens.length;
+            offset += WARM_PREFILL_BATCH_TOKENS
+          ) {
+            active.throwIfAborted()
+            await sequence.evaluateWithoutGeneratingNewTokens(
+              tokens.slice(offset, offset + WARM_PREFILL_BATCH_TOKENS),
+              { evaluationPriority: 1 }
+            )
+          }
           active.throwIfAborted()
           if (before) {
             const evaluatedTokens = this.sequence!.tokenMeter.diff(before).usedInputTokens
@@ -161,7 +207,10 @@ export class LocalNotesEngine implements NotesEngine {
   ): Promise<Llama> {
     const { getLlama, NoBinaryFoundError } = await loadNodeLlamaCpp()
     try {
-      const llama = await getLlama({ ...(cpuOnly ? { gpu: false } : {}), build: 'never' })
+      const llama = await getLlama({
+        ...(cpuOnly ? { gpu: false } : {}),
+        build: 'never'
+      })
       signal?.throwIfAborted()
       this.diagnostic({ event: 'runtime', backend: llama.gpu || 'cpu' })
       return llama
@@ -325,11 +374,11 @@ export class LocalNotesEngine implements NotesEngine {
         async (signal) => {
           signal.throwIfAborted()
           const { LlamaChatSession } = await loadNodeLlamaCpp()
-          control?.onPhase?.('reading')
           const started = Date.now()
           const contextSize = control?.contextSize ?? this.options.contextSize ?? 16384
 
           const context = await this.obtainContext(contextSize, signal)
+          control?.onPhase?.('reading')
           let activeSession: InstanceType<NodeLlamaCpp['LlamaChatSession']> | undefined
           try {
             signal.throwIfAborted()
@@ -516,7 +565,10 @@ export class LocalNotesEngine implements NotesEngine {
     await this.disposeContext()
     const started = Date.now()
     try {
-      this.context = await this.model!.createContext({ contextSize })
+      this.context = await this.model!.createContext({
+        contextSize,
+        createSignal: signal
+      })
     } catch (error) {
       signal.throwIfAborted()
       if (this.forceCpu) throw error
@@ -527,7 +579,10 @@ export class LocalNotesEngine implements NotesEngine {
       this.model = null
       this.llama = null
       await this.prepareModel(signal, error)
-      this.context = await this.model!.createContext({ contextSize })
+      this.context = await this.model!.createContext({
+        contextSize,
+        createSignal: signal
+      })
     }
     this.diagnostic({
       event: 'context',
