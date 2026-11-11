@@ -945,7 +945,10 @@ app.whenReady().then(async () => {
     meetingBusy: () => recording.busy || libraryActivity.moving,
     setMicHeld: (held) => {
       // Our own capture must not look like a Zoom call to the meeting detector.
-      if (held) micWatcher.setSuppressed(true)
+      if (held) {
+        void notesService?.cancelNotesWarmup()
+        micWatcher.setSuppressed(true)
+      }
       else if (!recording.busy) micWatcher.setSuppressed(false)
     },
     showMainWindow: focusMainWindow,
