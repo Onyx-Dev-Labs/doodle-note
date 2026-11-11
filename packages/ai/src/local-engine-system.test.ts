@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import os from 'node:os'
 import path from 'node:path'
@@ -17,7 +18,7 @@ import type { LocalNotesEngine } from './local-engine'
 // model/context/tokenizer/generation are synthetic; no runtime/model imports.
 const entry = import.meta.resolve('node-llama-cpp')
 const pure = (relative: string): Promise<any> => import(new URL(relative, entry).href)
-const lifecycle = await import(createRequire(entry).resolve('lifecycle-utils'))
+const lifecycle = await import(pathToFileURL(createRequire(entry).resolve('lifecycle-utils')).href)
 const { GemmaChatWrapper } = await pure('./chatWrappers/GemmaChatWrapper.js')
 const { QwenChatWrapper } = await pure('./chatWrappers/QwenChatWrapper.js')
 const { Llama3ChatWrapper } = await pure('./chatWrappers/Llama3ChatWrapper.js')
