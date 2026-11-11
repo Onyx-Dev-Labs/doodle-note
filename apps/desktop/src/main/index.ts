@@ -709,10 +709,12 @@ app.whenReady().then(async () => {
   let captureId: string | undefined
   const session = new TranscriptSession(
     (event) => {
+      if ((event.event === 'capture-finalized' || event.event === 'error') && captureMeetingId)
+        notesService?.endNotesPrediction(captureMeetingId)
       broadcastEngineEvent(event)
-      if ((event.event === 'segments' || event.event === 'capture-finalized') && captureMeetingId) {
+      if (event.event === 'segments' && captureMeetingId) {
         const snapshot = session.snapshot(captureMeetingId)
-        if (snapshot)
+        if (snapshot && snapshot.phase !== 'ended')
           notesService?.observeNotesTranscript(captureMeetingId, [
             ...captureBase,
             ...snapshot.segments
@@ -798,6 +800,16 @@ app.whenReady().then(async () => {
     // for snapshot/renderer ownership, and never send filesystem diagnostics to UI.
     const event = captureEventForSession(rawEvent, captureId)
     if (!event) return
+    // Invalidate deferred re-warming before terminal handling can flush segments.
+    // Active warm work remains available for a subsequent Generate to join.
+    if (
+      captureMeetingId &&
+      (event.event === 'done' ||
+        event.event === 'exit' ||
+        event.event === 'error' ||
+        event.event === 'spawn-error')
+    )
+      notesService?.endNotesPrediction(captureMeetingId)
     broadcastEngineEvent(event)
     session.handle(event)
     if (event.event === 'audio') audioService.onAudioSaved(event)
@@ -805,7 +817,6 @@ app.whenReady().then(async () => {
     recording.handle(event)
     if (event.event === 'ready' && captureMeetingId && recording.snapshot().phase === 'recording')
       notesService?.warmNotesModel(captureMeetingId, captureSource)
-    if (event.event === 'spawn-error') void notesService?.cancelNotesWarmup()
     if (!recording.busy) micWatcher.setSuppressed(false)
   })
 

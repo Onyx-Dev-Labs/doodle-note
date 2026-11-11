@@ -20,6 +20,8 @@ import * as meetingOwnership from './meeting-write-ownership'
 import * as engineQuit from './engine-quit'
 import { NotesGenerationJobs } from './notes-generation-job'
 import { TranscriptSession } from './transcript-session'
+import { captureEventForSession } from './capture-event'
+import type { EngineEvent } from '../shared/engine-events'
 
 interface CloudCall {
   options: Record<string, unknown>
@@ -65,7 +67,7 @@ interface Service {
 /** The real NotesService with only Electron and the hosted engine replaced. */
 function createService(
   dir: string,
-  hold?: { release?: () => void },
+  hold?: { release?: () => void; settleAfterAbort?: boolean },
   local?: LocalRig,
   power = { battery: false, free: 32 * 1024 ** 3 },
   actualMeetings?: meetings.MeetingFileStore,
@@ -114,7 +116,7 @@ function createService(
             'abort',
             () => {
               this.record.canceled = true
-              reject(signal.reason)
+              if (!hold.settleAfterAbort) reject(signal.reason)
             },
             { once: true }
           )
@@ -1016,6 +1018,230 @@ test('production transcript callback observes committed non-echo speakers and re
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// Both production callbacks and the real session; only host/model boundaries are stubbed.
+function captureWarmupRig(hold?: { release?: () => void; settleAfterAbort?: boolean }): {
+  service: Service
+  rig: LocalRig
+  clock: ReturnType<typeof debounceClock>
+  live: TranscriptSession
+  send(event: EngineEvent): void
+  speak(): void
+  cleanup(): Promise<void>
+} {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const clock = debounceClock()
+  const { service } = createService(dir, hold, rig, undefined, undefined, clock.timers)
+  service.settings = {
+    engineChoice: 'local',
+    activeLocalModelId: spec.id,
+    autoGenerateNotesAfterStop: false
+  }
+  const liveSessions: TranscriptSession[] = []
+  let send!: (event: EngineEvent) => void
+  const context = {
+    TranscriptSession: class extends TranscriptSession {
+      constructor(...args: ConstructorParameters<typeof TranscriptSession>) {
+        super(...args)
+        liveSessions.push(this)
+      }
+    },
+    captureMeetingId: 'synthetic',
+    pendingCaptureMeetingId: 'synthetic',
+    captureSource: 'both',
+    pendingCaptureSource: 'both',
+    captureId: 'capture',
+    captureBase: [],
+    captureBaseEcho: 0,
+    notesService: service,
+    libraryRoot: () => dir,
+    join: path.join,
+    assertLibrary: () => {},
+    persistCaptureTranscript: () => {},
+    meetingsService: { get: () => ({ segments: [] }) },
+    process,
+    engine: { onEvent: (callback: typeof send) => (send = callback) },
+    dictation: undefined,
+    randomUUID: () => 'capture',
+    captureEventForSession,
+    broadcastEngineEvent: () => {},
+    audioService: { onAudioSaved: () => {} },
+    logEngineEvent: () => {},
+    recording: { handle: () => {}, snapshot: () => ({ phase: 'recording' }), busy: true },
+    micWatcher: { setSuppressed: () => {} }
+  }
+  productionHook(
+    (node) =>
+      ts.isVariableStatement(node) &&
+      node.declarationList.declarations.some(
+        (d) => ts.isIdentifier(d.name) && d.name.text === 'session'
+      ),
+    context
+  )
+  productionHook(
+    (node, source) =>
+      ts.isCallExpression(node) && node.expression.getText(source) === 'engine.onEvent',
+    context
+  )
+  const live = liveSessions[0]!
+  live.bindMeeting('synthetic')
+  send({ event: 'started', command: 'live', binaryPath: 'synthetic' })
+  send({ event: 'ready' })
+  return {
+    service,
+    rig,
+    clock,
+    live,
+    send,
+    speak() {
+      send({
+        event: 'timings',
+        channel: 'system',
+        tokens: [{ token: ' Hello.', startSec: 0, endSec: 1, confidence: 1 }]
+      })
+      send({ event: 'final', channel: 'system', text: 'Hello.' })
+    },
+    async cleanup() {
+      hold?.release?.()
+      await service.dispose()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  }
+}
+
+const captureTerminals: EngineEvent[] = [
+  { event: 'done' },
+  { event: 'exit', code: 1, signal: null },
+  { event: 'error', message: 'Synthetic capture failure' },
+  { event: 'spawn-error', message: 'Synthetic spawn failure' }
+]
+for (const terminal of captureTerminals) {
+  test(`production ${terminal.event} drops pending re-warm with automatic notes disabled`, async () => {
+    const c = captureWarmupRig()
+    try {
+      await c.service.notesWarm!.work
+      c.speak()
+      assert.equal(c.clock.pending(), 1)
+      c.send(terminal)
+      const pendingAfterEnd = c.clock.pending()
+      c.clock.fire()
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(c.rig.engines[0]!.warmed.length, 1, 'no new warm job after capture ends')
+      assert.equal(pendingAfterEnd, 0, 'terminal event removes the debounce')
+      assert.equal(c.rig.engines[0]!.generated.length, 0, 'no Generate requested')
+    } finally {
+      await c.cleanup()
+    }
+  })
+
+  test(`production ${terminal.event} invalidates re-warm waiting for a bounded batch`, async () => {
+    const hold: { release?: () => void; settleAfterAbort?: boolean } = { settleAfterAbort: true }
+    const c = captureWarmupRig(hold)
+    try {
+      await new Promise((resolve) => setImmediate(resolve))
+      const oldWork = c.service.notesWarm!.work
+      c.speak()
+      c.clock.fire()
+      assert.equal(c.rig.engines[0]!.canceled, true)
+      c.send(terminal)
+      // Native evaluation can finish later than the cancellation request.
+      hold.release!()
+      await oldWork
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(c.rig.engines[0]!.warmed.length, 1, 'settling the batch must not launch a job')
+      assert.equal(c.clock.pending(), 0)
+      assert.equal(c.rig.engines[0]!.generated.length, 0)
+    } finally {
+      await c.cleanup()
+    }
+  })
+
+  test(`Generate after production ${terminal.event} joins the already-running warm job`, async () => {
+    const hold: { release?: () => void } = {}
+    const c = captureWarmupRig(hold)
+    try {
+      await new Promise((resolve) => setImmediate(resolve))
+      c.speak()
+      c.send(terminal)
+      c.clock.fire()
+      let done = false
+      const result = c.service
+        .enhance(
+          {
+            meetingId: 'synthetic',
+            runId: 'after-stop',
+            title: 'Synthetic',
+            rawNotesMarkdown: '',
+            segments: c.live.snapshot('synthetic')!.segments
+          },
+          1
+        )
+        .then((value) => {
+          done = true
+          return value
+        })
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(done, false, 'Generate must wait for the running warm job')
+      assert.equal(c.rig.engines[0]!.canceled, false, 'ending prediction must not abort warm work')
+      hold.release!()
+      assert.equal((await result).markdown, 'Synthetic notes')
+      assert.equal(c.rig.engines[0]!.warmed.length, 1)
+      assert.equal(c.rig.engines[0]!.generated.length, 1)
+    } finally {
+      await c.cleanup()
+    }
+  })
+}
+for (const terminal of captureTerminals.slice(0, 2)) {
+  test(`session-only ${terminal.event} finalization ends prediction before observing the ended snapshot`, async () => {
+    const c = captureWarmupRig()
+    try {
+      await c.service.notesWarm!.work
+      c.speak()
+      assert.equal(c.clock.pending(), 1)
+      const observe = c.service.observeNotesTranscript.bind(c.service)
+      c.service.observeNotesTranscript = (...args) => {
+        assert.notEqual(c.live.snapshot('synthetic')?.phase, 'ended')
+        observe(...args)
+      }
+      c.live.handle(terminal)
+      assert.equal(c.live.snapshot('synthetic')?.phase, 'ended')
+      c.clock.fire()
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(c.rig.engines[0]!.warmed.length, 1)
+    } finally {
+      await c.cleanup()
+    }
+  })
+
+  test(`production ${terminal.event} ends prediction before flushing a new speaker`, async () => {
+    const c = captureWarmupRig()
+    try {
+      await c.service.notesWarm!.work
+      c.send({
+        event: 'timings',
+        channel: 'system',
+        tokens: [{ token: ' Unfinished', startSec: 0, endSec: 1, confidence: 1 }]
+      })
+      assert.equal(c.clock.pending(), 0)
+      const observe = c.service.observeNotesTranscript.bind(c.service)
+      c.service.observeNotesTranscript = (...args) => {
+        observe(...args)
+        assert.equal(c.clock.pending(), 0, 'terminal flush must not schedule a prediction')
+      }
+      c.send(terminal)
+      assert.equal(c.live.snapshot('synthetic')?.phase, 'ended')
+      assert.equal(c.live.snapshot('synthetic')?.segments.length, 1)
+      c.clock.fire()
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(c.rig.engines[0]!.warmed.length, 1)
+    } finally {
+      await c.cleanup()
+    }
+  })
+}
 
 // Drive only debounce timers; model and service promises still settle normally.
 function debounceClock(): {

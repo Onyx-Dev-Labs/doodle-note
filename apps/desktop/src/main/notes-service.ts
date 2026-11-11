@@ -981,6 +981,11 @@ export class NotesService {
     current.timer.unref?.()
   }
 
+  /** End capture prediction, but leave an already-running warm job for Generate to join. */
+  endNotesPrediction(meetingId: string): void {
+    if (this.notesPrediction?.meetingId === meetingId) this.clearNotesPrediction()
+  }
+
   private startNotesWarmup(
     meetingId: string,
     { system, predictedSpeakers }: { system: string; predictedSpeakers: number },
