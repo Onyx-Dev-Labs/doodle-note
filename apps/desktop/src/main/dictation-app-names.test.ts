@@ -52,3 +52,11 @@ test('before the helper answers no built-in app counts as installed; with no hel
   assert.equal(visibleApps(apps, null).hidden, 0)
   assert.equal(visibleApps([], {}).hidden, 0)
 })
+
+test('Windows executable names have friendly fallbacks', async () => {
+  const { fallbackAppName } = await import('../shared/dictation-app-names')
+  const { BUILTIN_STYLE_APPS_WINDOWS } = await import('../shared/dictation-style')
+  for (const ids of Object.values(BUILTIN_STYLE_APPS_WINDOWS))
+    for (const id of ids) assert.ok(fallbackAppName(id), id)
+  assert.equal(fallbackAppName('notepad.exe'), 'Notepad')
+})

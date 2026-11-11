@@ -37,7 +37,9 @@ Two more packaged smokes use the same setup:
 ```sh
 # Real recorder UI: a ~36 s utterance with no pause is transcribed completely
 # across forced cuts, the saved transcript is in time order, and a forced
-# engine backlog (DOODLENOTE_ASR_TEST_STALL_MS, an inert QA hook) shows and
+# engine backlog (DOODLENOTE_ASR_TEST_STALL_MS, a QA hook honoured only unpackaged or in a
+# DOODLENOTE_CHANNEL=dev package, capped at 30 s; any dev-channel package honours it, and dev packages
+# are QA builds with no update feed and no publish target, electron-builder.dev.yml) shows and
 # then clears "Live captions are running behind on this PC".
 node apps/desktop/scripts/smoke-windows-meeting-ui.cjs <packaged-exe> <models> <long.wav> "<phrase>|<phrase>"
 # Model recovery: an updated profile with only the cached Zipformer records at
@@ -328,3 +330,705 @@ misrecognized a synthetic access-code digit. Current builds use the Parakeet
 models above with no refinement pass; the benchmark above replaces one-sentence
 acceptance, but physical microphones and real calls still need the checks in
 this document.
+
+## Bark (dictation) on Windows
+
+Bark is ported to Windows (off by default; Settings → Bark). Speech uses the shared
+Parakeet worker with a mic-only, raw dictation capture; a small C# helper (built with
+the inbox .NET Framework 4.8 compiler and shipped as `resources/engine/dictation-helper.exe`)
+watches the hold-to-talk key and types the text. Delivery is clipboard + Ctrl+V with the
+clipboard restored (privacy markers preserved; a newer copy made during delivery is never
+overwritten).
+
+Typing fallback: it is available in classic Windows text boxes only (the Win32 Edit and
+RichEdit controls, such as Notepad, WordPad and classic dialogs). The class is decided from its
+name alone (an exact list; an unknown name only when RealGetWindowClass names a listed class), and
+no message is sent to a window before it is accepted. So a RichEdit superclass with its own name is
+refused, and so is RichEdit20A (its lengths can count bytes under a DBCS locale). There, each key is confirmed
+before the next one: the field's own text length must move by exactly that key, and the field is
+checked for the password style before every key. Browsers, Electron apps, WebView2/CEF, Firefox,
+Java, Qt, XAML/UWP and Office are reachable only through UI Automation, whose state lags the
+app, so they get no typing fallback. Paste is the only way in, and when a paste cannot be
+confirmed the text is kept on the recovery card for copying. Settings → Bark → Permissions says
+the same.
+
+Line breaks in the typing fallback:
+- An Edit gets a Unicode CR, never a Return key, so no dialog or form can press its default button.
+- A plain Win32 Edit without ES_WANTRETURN does not take a line break in a dialog. Text with a line
+  break is refused there before any key is sent.
+- A RichEdit needs a real Return key. A dialog turns a Return key it is not asked for into OK
+  (IsDialogMessage sends IDOK even without a default button), and a WinForms form into its
+  AcceptButton (managed code; the button need not have BS_DEFPUSHBUTTON). So it is sent only when the
+  box itself has ES_WANTRETURN. Otherwise the text is refused up front ("This box doesn't accept
+  Enter from dictation"), with nothing sent. This includes Windows 11 Notepad (RichEditD2DPT, no
+  ES_WANTRETURN): there a dictation with a line break goes in by paste, never by typing.
+
+Every key is checked just before it is sent: focus, password style, password character and
+read-only. Nothing can be proved about changes the app makes after the key has been queued.
+
+Paste follows the same order: the provider's focus and password reads, the classic box's
+EM_GETPASSWORDCHAR and the wait for held modifiers come first; foreground, focused window, password
+and read-only styles and the clipboard's ownership are checked last, immediately before Ctrl+V,
+with nothing that can block in between. The same limit applies: checks are sampled, a change
+between two samples or after Ctrl+V is queued cannot be seen, and a cross-process check and the
+input it guards are never one atomic step.
+
+Clipboard: the helper writes to the clipboard only over a save that is POSITIVELY established (round 20-21,
+below); otherwise it does not touch the clipboard at all, and the text is typed (classic text boxes) or kept for
+copying. A copy the user makes while we save is never overwritten. How long the save takes is bounded by a slow
+owner's render, not by us. Our own write (open, empty, set,
+close; round 33: clipboard operations only, no journal: see the journal below) runs on its own thread; the paste waits
+for it at most 1 s. Past that (an owner that answered the WM_NULL probe and then stalls in WM_DESTROYCLIPBOARD; until
+round 32 also a journal on a slow disk) the paste gives up (typing may still run), while the write thread itself goes on for as long as its
+step takes. Round 31: a write whose abandonment is observed at the check right before its EmptyClipboard does not
+empty the clipboard at all (nothing to put back: "untouched"); one abandoned later, while EmptyClipboard waits, still
+empties and rolls back. (The check is a point in the write's own sequence, not a scheduling guarantee.) Otherwise, when it ends, the late path puts the user's content back (never pastes ours); if another
+app changed the clipboard meanwhile (added a format, replaced a text form, copied its own content), its change stays
+and the saved content is kept as an offer, until the user's Restore. The app is told either way and updates the
+warning it showed. Round 30: the log says where the write was when the 1 s ran out and when it ended (opened,
+emptied, set, closed, each with its time; until round 32 also its journal steps), never a guessed cause; round 31: the user's Restore logs its own timeline the same way (lock taken, state read, liveness checked,
+payload read, decrypted, opened, looked, emptied, put back, closed, settled, files deleted; round 33: the close before
+every file step). The timelines
+locate time in steps: a "journaled" step is the whole journal call (serializing the state, the file operations, the
+flush, the replace), not the disk's flush alone.
+
+In CI the late path has its own end-to-end cases, forced by test-build gates under the real 1 s budget (before
+emptying; after our write closed; and a change before the late confirmation, checked byte for byte and by sequence);
+every other case runs with a 60 s budget so its outcome is the path it tests, whatever the runner's speed. **The gap,
+stated plainly:** that longer budget means those cases would not notice an ordinary write getting slower. Two checks
+stand in for it: every ordinary write of the run (its timeline) must stay within gross bounds (median under 500 ms,
+none over 5 s; a failure), and a canary runs ten ordinary writes under the real budget: their outcome is checked (an
+"untouched" late result with the clipboard's bytes and sequence unchanged is a correct outcome), their median must
+stay at or under 300 ms (round 32: a failure), and a single write over budget or over 500 ms raises a CI warning, not a
+failure (a slow runner window can take one write past 1 s, as attempt 1 of run 42842819157 did). A regression that
+moves single writes but not the median shows only as that warning.
+
+Each paste is a clipboard transaction with a record: the saved clipboard (DPAPI-encrypted for the
+user, with whether the save was complete, the transaction's random nonce and the dictated text's
+SHA-256) and a plain journal of its stage in %TEMP% under the app identity (record files are matched
+exactly: identity X never reads X-foo's, and a dev and a production identity never see each other's
+records or offers).
+
+**The journal (round 33, an owner-decision item: the journal moved out of the paste's budget; the owner may veto).**
+Two state writes are LOAD-BEARING and durable (flushed to the disk, and published only while the record is not settled
+or given up): the first state and "settled". The offer-only and unrestored facts of a live record are flushed too
+(round 34, stated as the code does it: they are what a later look reports about the record, and flushing them costs
+nothing on the paste, they are queued after the close), but nothing depends on them: no record read from disk grants
+authority (round 18). Every other write is a DIAGNOSTIC (no flush). No stage is a proof of anything, and a sequence number on disk never grants a write (since round 18; the
+confirmed sequence lives in the live transaction): recovery decides by CONTENT, except that "settled" is deleted on
+sight and ONE narrowly scoped equality proof, below (1b), permits a deletion (never a write).
+
+| Write | When | Durable | Inside a clipboard open | In the paste's 1 s | If it fails |
+|---|---|---|---|---|---|
+| the first state, "emptying" ("may be emptied", with the save's capture sequence and window station), then the encrypted payload | Begin, before any EmptyClipboard of ours | yes (both) | no | no (Begin waits about 2 s at most: a sliced wait that also checks the delivery's deadline; round 35: its answer takes no lock that is ever held across a file or clipboard operation, and does no file work: the writer cleans up) | not established: no paste, nothing emptied ("no-record", or "deadline"); the writer removes what it had published |
+| emptied / written (our write), restore-emptied (a restore or the write's own rollback) | after the clipboard is closed, queued to one serialized background writer | no | never | no | nothing changes (logged) |
+| offer-only and unrestored facts of a live record (a keep, a failed restore) | the same writer, after the close | yes (flushed; informational) | never | no | nothing changes (logged); the record still leaves in-flight |
+| the user's Restore: settled, or recovering-emptied when its put-back failed | after its put-back, once the clipboard is closed | settled: yes | never | (not a paste) | settled: logged, the record deleted anyway |
+| settled (a live transaction restored) | on the background writer, before the record is deleted; it stays in flight until then | yes | never | no | logged, deleted anyway |
+
+**Which records are proofs.** The payload on disk is the precondition of our EmptyClipboard (Begin waits for it, about
+2 s at most, outside the 1 s write budget, which now measures clipboard operations only): the user's content is never off the
+clipboard without being on disk (until round 32 a paste went ahead after 250 ms). The first state is "emptying"; there
+is no "saved" stage any more, and the old rule that deleted a non-offer "saved" record as "nothing had been emptied" is
+gone. **The proof that no new loss window opens:** a record is deleted without the user only when (1) its saved
+content is exactly, completely on the clipboard (the content-equality proof, a whole save only), (1b, rounds 34-35) its
+first state still says "emptying" and a COMPLETE look at the clipboard (an incomplete enumeration proves nothing)
+shows the save's capture sequence, in the same logon, boot and WINDOW STATION (sequence numbers are per window station
+and one session can have several; the state names the capture's station, and a state without it, as round 33-34 wrote
+them, gets no such proof): unchanged since the capture, since our EmptyClipboard would have moved it; used only to
+delete, never to write; it covers an INCOMPLETE save, whose content proof cannot hold. One case it does not see, and
+why it costs nothing: if a delayed-render owner exits with formats it never rendered without moving the sequence (CI
+case 53 reports what the CI runner's Windows build does: Windows Server 2025, 10.0.26100, where the sequence MOVED
+from 7765 to 7766 when such an owner exited, so there the proof does not apply; other builds are not observed), the proof can delete a record while that unrendered content has gone,
+but those bytes were never in our payload (a save holds only what renders), so the deletion loses nothing we held, (2) it is "settled" (its restore ran), (3) its payload
+is positively absent, damaged or unrecoverable, or (4) a retention or boot-limit policy ends it. A crash before our
+EmptyClipboard therefore leaves a record deleted by (1b) or (1) at the next start, or, if the user copied something
+meanwhile, a SPURIOUS OFFER (nothing lost; Dismiss deletes it). An unchanged clipboard does not ALWAYS allow the
+deletion: in another logon or boot (1b does not apply) with a live foreign owner whose formats cannot be read without
+rendering, an unreadable format, an incomplete save, or an originally empty save, the content proof fails and the
+record stays an OFFER; for an incomplete one the card says the clipboard may still hold all of it (Dismiss keeps it as
+it is; Restore would put back only the saved part). A crash after the EmptyClipboard, before any further
+journal, leaves "emptying" on disk: the clipboard does not hold the saved content, so it is offered (the old
+stage rule would have deleted it: the CI mutation check proves the case catches that).
+
+**The crash windows.**
+
+| Crash between | On disk | At the next start |
+|---|---|---|
+| the save and Begin's durable writes | nothing, or a lone .state.tmp (swept after 10 minutes) | nothing offered; the clipboard was not touched |
+| Begin's state and its payload's rename | "emptying" + a partial or complete payload .tmp (or none) | a complete .bin.tmp is adopted, then judged as below; a partial one is no usable payload: the state is deleted; nothing was emptied |
+| Begin's writes and our EmptyClipboard | "emptying" + payload | unchanged since the capture: deleted (1b); the saved content still there: deleted (1); the user copied: a spurious offer; an incomplete, empty or unreadable save in another logon or boot: an offer |
+| our EmptyClipboard and its close | "emptying" + payload | offered (the clipboard does not hold the saved content) |
+| our close and the queued "written" | "emptying" (or "written") + payload | offered, never restored on its own (round 18) |
+| a restore's put-back and its queued "settled" (wider since round 33: the close and the queue are in it) | the last diagnostic stage + payload | the saved content back exactly: deleted (1); else offered again: a spurious offer, never a loss |
+| "settled" and the deletion | "settled" | deleted on sight |
+
+A stalled journal never holds the clipboard open (no journal call runs inside an open) and never holds up a
+delivery: only Begin's durable writes are waited for, about 2 s at most (round 34: in slices that also check the
+delivery's own deadline, and given up by a compare-and-swap, never by waiting on the lock the writer holds across its
+renames, nor the recovery lock: CI case 50 stalls each rename, case 52 a recovery retry inside the recovery lock;
+round 36: neither does a privacy-marked, memory-only transaction's settlement, CI case 54), and the delivery's own
+deadline is checked again right after them. The delivery's own kept-records check BEFORE Begin takes the recovery lock
+and does file and clipboard work, which cannot be bounded in place (until round 35 its wait was therefore UNBOUNDED;
+the deadline check after it only prevented a late paste). Round 36: it runs on its own thread, and the delivery waits
+for it only while its deadline allows and at most 5 s; not done by then, the paste is refused ("own-busy" since round 39, or
+"deadline") with nothing emptied, and the check finishes on its own (it never writes the clipboard: CI case 55) (a paste that no longer fits empties nothing).
+Round 37 caveat (Opus, Astra P2), as round 36 shipped it: a check its delivery gave up on still ran once it got the
+lock, and a LATER delivery could be writing by then; it, like the 30-minute retention check (pre-existing), opens the
+clipboard with the helper's SAME window, which takes a running write's open over (the write fails, the record is kept
+as an offer: a spurious offer, not a loss); and every delivery during one stall started another check, so waiting
+checks accumulated without a bound. Round 37 fix: recovery never opens the clipboard while a delivery is in flight.
+Every automatic look (a delivery's check, a retry, the retention check) holds a look lock from before it reads the
+in-flight set to its close, and skips ("a delivery is in flight: no clipboard look now"; kept, checked again later)
+when a delivery is in flight; a delivery, once its record is in flight, waits for a look already inside (at most 1 s;
+past it, "own-busy" since round 39, nothing emptied). There is ONE delivery check at a time, shared: a delivery joins the
+outstanding check while it still waits for the lock, or waits (within its own allowance) for a running one before
+starting the next; a check that no delivery waits for any more does nothing once it gets the lock, and stops between
+records (CI case 56: three deliveries during one stall, one check thread; case 57: the retention check during a held
+write). Round 38 (Opus, Astra P2): the delivery's wait for a look already inside stops once its allowance is gone
+("deadline", nothing emptied); stated exactly (round 39, Astra P3): it polls in slices of up to 50 ms plus scheduling
+delay, so it can end about that much after the allowance (CI 58a allows under 900 ms for a 400 ms allowance), and it
+is the deadline check right after the wait, before the write, that keeps a paste that no longer fits from writing (CI
+case 58b: the delivery's own deadline expired right after the wait, the production predicate refuses; its mutant,
+the check removed, is caught: it writes). The late-write wait (below) polls the same way.
+Round 38, option (b) of the two offered for the late write (refuse while it is outstanding, not a process-wide open
+lock): a late rollback is SEVERAL opens (its confirmation, then its put-back) with our late text on the clipboard in
+between, so a lock around each open would still let a delivery save our own text as the user's in a gap; refusing
+for the whole late transaction closes that too, and is a counter check with no lock order (it cannot deadlock).
+(Opus, round 38: the save itself runs in the READER process, which a process-wide lock in this one would not cover
+at all.) Stated exactly (Astra, round 38): the write's count goes up right AFTER its thread starts (LateBegin follows
+thread.Start), so it is not literally up before the write's first open; that is safe because until the write is
+abandoned the request that started it still owns the request queue (no delivery or Restore can start), and its record
+is already in flight (no automatic look opens the clipboard). The queued steps run before the helper exits, inside
+its usual exit wait; past it, a record left behind is judged by content at the next start. The background writer
+serializes every write (one queue, in order) on immutable snapshots, and a record settled meanwhile is never written
+again, so an older queued write can never overwrite the settlement or recreate a deleted state. Every state write goes
+through its .tmp and is renamed over the state in one call: MoveFileEx in the same directory with REPLACE_EXISTING (plus
+WRITE_THROUGH when durable), which the API documents as a single replacement, with no "~RF" temporary; a process kill
+leaves either the old state (and the .tmp) or the new one (CI case 51 kills around that rename; a rename cannot be
+stopped half-way, so a kill INSIDE it is exercised by timing, not by construction). That is not a proof of power-loss
+safety: same-volume rename durability rests on NTFS's metadata log, which is flushed lazily; a power loss can lose an
+unflushed diagnostic (a zero-filled state is rebuilt as an offer), and a power loss right after an EmptyClipboard could
+undo the first state's rename, leaving the payload without its state (swept after 10 minutes): a power-loss window,
+not a process-kill one. From round 10 (commit 033a56cd, which replaced a delete-then-move with the same kill window:
+a kill between its delete and its move left a record without its state) to round 32 the state was
+replaced with File.Replace, which first moves the old state aside to a "~RF....TMP" temporary: CI found such files left
+by helpers killed during a journal write, and a kill between its steps could leave a record without its state (its
+payload then swept as an orphan after 10 minutes). That window existed only in unreleased Windows builds: no user was
+exposed. Leftovers of the old way (a state copy, no user content) are deleted only when nothing can still be replacing
+through them (rounds 34-35): only while NO other helper process runs at all (any identity, any pid: the copies name
+the helper that wrote a state, not one that may be replacing it, and an open handle is no protection), older than 10
+minutes, naming this session and a helper proven not running, and the record's own state, if present, naming one too;
+anything unknown is kept (round 36: a process whose name cannot be read for any reason other than having exited counts
+as running). The helper's own clipboard reader has the same image name, so it blocks the sweep while it is alive: the
+sweep effectively runs at the helper's start, or whenever no reader is running. A leftover whose record has no state is not rescued (a state copy cannot be told current;
+this concerns unreleased builds only): it is swept like the others. The CI check that no journal write runs inside a
+clipboard open is LOGGING (an ERROR line every state write makes on a thread that holds an open), scanned by the CI
+run: it shows that no state write ran on such a thread in that run, not a guarantee enforced by the code. The crash
+cases kill only after the asynchronous "written" step is logged (so that a kill does not land mid-write by accident);
+case 51 is the one that kills during it.
+
+Every record carries its logon identity: the
+window-station session, the logon session (LUID), Windows' boot counter, the tick count and a per-logon
+random key in a volatile registry value (HKCU\Software\DoodleNote.Bark.Session). Volatile means it is
+removed when the user's hive is unloaded (logoff, reboot); the LUID covers a new logon while the hive
+stayed loaded, and the boot counter a new boot. A key of that name found as a normal (persistent) key
+is replaced by a volatile one. The wall clock is not used. Another session or boot is "different";
+a key created after the record (deleted by a cleaner, or replaced), another LUID in the same session
+(an elevated helper) or anything missing is "unknown", never a reason to delete.
+
+Policy (round 18, an owner decision; a deliberate, conservative behaviour change). Automatic restore authority
+NEVER comes from disk. The only automatic write-back of the user's clipboard is the one made by the live,
+in-memory transaction that wrote the dictated text, in the helper process that wrote it (its restore after the
+paste, or after a failed paste), and only while the clipboard is provably still its write: it was confirmed under
+the clipboard lock and still has our window as owner at the confirmed sequence, or it still holds exactly our
+write (every format compared byte for byte) within the sequence allowance below. Our window owning the clipboard
+is never proof by itself. Every record that the recovery machinery reads back from disk is OFFERED, unconditionally.
+That covers a record after a helper crash, kill or restart, on a retry tick, on a sweep, after an adoption or a
+rebuild, after a failed or interrupted restore, and from another boot, logon or session. Nothing read from disk is
+ever WRITTEN to the clipboard without the user's Restore. Records are not offered, but left or deleted, only as
+the deletion contract below lists: another session's record is left alone; deleted without writing anything are a
+record whose saved content is already exactly on the clipboard (a whole save), one journaled "settled", one whose
+payload is positively absent, damaged or unrecoverable, and those the retention and boot-limit policies end (round
+33: no longer one "that never emptied anything" by its stage: see the journal above). What the user sees: after a helper crash or kill mid-dictation the saved clipboard
+is offered on the card ("Put back what you had copied before?") instead of being put back silently. The user's
+Restore and Dismiss are unchanged.
+
+What "restored" means (stated exactly; unchanged since round 17): EmptyClipboard and every SetClipboardData for the
+saved formats returned success under our own open, and then we closed it (CloseClipboard's result is logged, not
+used: a failed close does not change the answer). It is not a later observation of the
+clipboard: no instantaneous check can guarantee what the clipboard holds afterwards (round 18 tried one after the
+close and reverted it in round 19; see the PR). Every put-back writes one log line with the native result and error
+of EmptyClipboard, each SetClipboardData and CloseClipboard, the sequence around it and the format count after the
+close (no content; neither count nor sequence needs an open, but the log line itself is a synchronous write).
+
+The save (rounds 20-21; the cause of the one loss of the user's clipboard CI ever showed, ESTABLISHED). The reader
+process used to open the clipboard with a NULL window. CI 34 shows on the runner's Windows build that another
+process's OpenClipboard(NULL) then SUCCEEDS while the reader holds it, and the reader's own EnumClipboardFormats
+fails with ERROR_CLIPBOARD_NOT_OPEN (1418): the listing came back empty while Windows counted 5 formats, and that
+empty save let our write destroy the only copy (round 19, CI 25(a)). Caught in round 20 as "listed 0, counted 5,
+enumeration error 1418" before a retry. With its own window the reader keeps its open: the other OpenClipboard
+fails with access denied. So: the reader opens with its own message-only window and proves before trusting any
+result, and before it closes, that it still has the clipboard open; a lost hold is a failed capture. A save is
+ESTABLISHED only when its listing ended with no error, listed exactly as many formats as CountClipboardFormats
+counted in the reader's own open, named every registered format, and the sequence was non-zero and unchanged; and
+then every listed format was saved (a complete framed reply of its declared length, of the kind its format
+allows: "emf" only for CF_ENHMETAFILE, "data" for every other, never above the requested cap) or skipped for a
+named reason (a measured excess over the cap, an explicit format policy, or the round-22 classes below). Listed 0,
+counted 0, no error is a positive empty, the only zero-item save that can report "restored". Provenance (round 22):
+the listed count and the name and reason of everything not kept are written into the record (round 21 claimed this
+but kept the count in memory only), and a save that listed formats but kept none is never "restored". Anything else
+is retried as a whole under the same 1.5 s deadline with a fresh reader, then the paste does not happen (nothing
+emptied, nothing written). With no time left, no listing is requested at all. Stated plainly, the cost: while the reader waits in an owner's
+render it now holds the clipboard with its own window, so another app's OpenClipboard fails meanwhile, as it does
+while any app reads a format rendered on demand. Every other proof (the confirmation, the paste gate, the
+"untouched" check, the size shown on a changed offer) uses one complete enumeration (no error at the end, the
+count matching): an incomplete one proves nothing. A record that cannot go back whole (a registered format whose
+name is lost, a metafile that cannot be rebuilt) is incomplete: a put-back of it is never "restored" and never
+deletes it. A zero sequence is no evidence anywhere (round 22): one function reads the sequence for every check (the
+transaction's start, inside our write, the confirmation, the quick looks before Ctrl+V, both proofs of the restore,
+what a failed restore says the clipboard holds, and the view the user's Restore and the recovery take), and a zero
+there refuses or fails that proof, never matches. Before the transaction a zero means no record is begun and nothing
+is touched; inside or at the confirmation it rejects our write (kept, as an offer); at the user's Restore nothing is
+emptied. Two cases follow from that contract (CI 25d, 25e): over an originally EMPTY clipboard there is
+nothing to set back, so the restore reports "restored", leaves the clipboard empty and deletes the record (also
+the user's Restore of one kept after a kill). A save in which every format was over the cap (16 MiB per
+transaction) is, since round 23, NOT established (the one rule below): nothing is pasted and the clipboard is left
+as it was (round 22 established it as a zero-item "skipped" save that emptied the clipboard and put back nothing).
+
+Owner decision (round 22): skip-with-notice vs refuse for owner-unrendered formats. A listed format whose data the
+save cannot read falls in one of three classes. The rest of the save rule stands unchanged.
+
+THE ONE RULE (round 23, owner decision): if nothing with the user's content goes back, the save is not established
+and nothing is pasted. User content excludes CF_LOCALE, the privacy markers, the presence-only flags, our sentinel
+and bookkeeping (OLE, "Preferred DropEffect"). It covers every skip below (class 3, a cap, a policy) when nothing else
+is kept, and a delayed-render text owner that renders nothing for its text while its CF_LOCALE reads. A positively
+empty clipboard is not this case. Stated plainly: a clipboard holding only an oversize image (a 4K screenshot's DIB
+is about 31.6 MiB, over the 16 MiB cap) now refuses to dictate by paste instead of destroying the screenshot; raising
+the cap is the alternative. The user is told why: "Your clipboard holds something too large to save (such as a large
+screenshot), so DoodleNote did not paste with it and left your clipboard as it was." When the text was NOT inserted,
+it adds "Copy something smaller first, or copy the dictated text from DoodleNote and paste it yourself."; after a
+typing fallback that put the text in it does not (round 24: no double paste). Scope, stated exactly (round 26): every
+REFUSAL BEFORE OUR EMPTYCLIPBOARD, in the save and in the write up to its empty, gives the app a reason, and each has
+its own sentence (round 24): too-large, unrendered,
+nothing-savable, owner-unresponsive, zero-sequence, clipboard-changed (it changed during the save), clipboard-busy
+(another app held it when the write went to open it; round 25), own-busy (round 39: DoodleNote's OWN clipboard work,
+never another app's: the kept-records check before the paste not done in time, a recovery look still inside, or an
+earlier dictation's late write still putting the clipboard back; rounds 36-38 sent clipboard-busy for these, whose
+sentence blamed another app), empty-failed (EmptyClipboard failed; round 25), no-record (the
+transaction, or the write's own first journal, could not be written down), deadline, no-window, unreadable; an
+unknown reason falls back to the plain sentence. Other paths that do not paste report through their own channels,
+not this notice: a target that fails validation, a delivery past its deadline and the guards after our write
+(focus, password, modifiers, the clipboard changing before Ctrl+V) keep the text on the recovery card with their
+own message; a failed input injection is its own failure; an abandoned write and its rollback report the late
+clipboard result; and a foreign clipboard found right before Ctrl+V goes to typing with the clipboard reported
+user-changed. The one rule applies at the user's Restore too (round 24): an
+incomplete record with no user content (an all-skipped record of an earlier build, or one whose only content format
+was lost on read-back) is never restored: the helper answers "nothing-to-restore" before emptying anything, the offer
+counts the user content it holds (`content`, not `formats`, which also counts flags and CF_LOCALE), and its card
+offers no Restore, only Dismiss.
+
+The overlay card (round 24, Astra; Windows only since round 25): on Windows its window grows to fit the title, the
+warning and at least one line of the dictated text (an estimate, at most 300 px); on macOS every card keeps its
+exact pre-round-24 size (pinned by a unit test). The page bounds every block on both: the buttons never shrink, the
+text keeps one line (1lh), and a long warning scrolls inside the card. CI renders every Windows notice variant in
+Electron's Chromium with the BUNDLED font (the check fails unless that face loads; round 25) at the size the app
+gives it, checks that exactly the buttons the view asked for are shown and in view with a line of the text, and
+clicks each button through the overlay window's own URL pattern. An offer card's buttons name the record the page
+shows, and the app acts only on that record (a click never reaches an offer that became current since). A Restore
+that got no answer in time is matched to its later result by its record (round 25: a rebuilt record has no
+delivery). An event that names neither a delivery nor a record never changes a notice.
+
+The clipboard notice model (round 28; dictation-notice.ts, a pure reducer with its own tests). The app keeps ONE notice
+slot, separate from the offer card and from every other panel; the overlay shows the slot's notice while one is
+current. (a) A Restore request completes exactly once, by whichever of its recovered event or its reply comes first
+(the other is consumed; a request whose reply was "no answer in time" completes by its later event), and a completion
+with something to say sets the slot. While a record's Restore is outstanding its card reads "Restoring…" (not
+clickable; Dismiss stays) and a further click is ignored; after the reply a retry works. (b) A later ACCEPTED user
+interaction with the current UI supersedes the notice for good: Dismiss of any card, a click on the card shown, a
+new dictation (a start accepted after its prerequisite checks and the capture ownership), a transform; no path
+shows it again. A stale click naming a withdrawn card is rejected and supersedes nothing. (c) Offer-gone,
+offer-added and offer-list refreshes never change the slot. (d) A newer completion or delivery report replaces an
+older notice. (e) While current, the notice is what the overlay shows, except that a live session, a recovery card
+and an error or status notice keep their priority. It ends only by (b), (d), its own six-second timer (which
+starts when the notice is set: a completion arriving during a recording can expire while hidden and never be
+seen), or, for a delivery's own report only, its withdrawal by that delivery's late result. The overlay page
+rebuilds every button's link on every render from a fixed action (round 29); CI renders same-page transition
+sequences (pending, reply, timeout and retry, Dismiss and its confirmation, repeated pending, expiry) and fails on
+any page error. A permutation test (11,160 orderings of ten scripts, one and two records, timers mocked) runs the
+production client and the service and compares the shown title after EVERY step with an independent model of the
+events (the last notice-bearing completion unless a Dismiss, an accepted start or its expiry came after it); with
+every completion notice suppressed, 6,904 of the orderings fail.
+
+| Class | What | The save | The put-back | What the user is told |
+| --- | --- | --- | --- | --- |
+| 1. Known presence-only flags (matched ignoring case, as RegisterClipboardFormat is) | Clipboard Viewer Ignore (clipboard viewers and history tools skip an entry that carries it: Ditto tests its presence only; KeePass sets it, with data, ClipboardUtil.CfnViewerIgnore; round 23: a copy carrying it is never written to disk, in memory only, like a privacy-marked one); MSDEVColumnSelect, MSDEVLineSelect and VisualStudioEditorOperationsLineCutCopyClipboardTag (Scintilla and Visual Studio: the copy was a column or a whole line; Scintilla's ScintillaWin.cxx checks their presence only) | saved as presence only, never read | set again with no data (presence) | nothing (the copy goes back whole) |
+| 2. Privacy markers | ExcludeClipboardContentFromMonitorProcessing, CanIncludeInClipboardHistory, CanUploadToCloudClipboard, present but not cleanly read (over their cap, none, nosize, unlocked) | established; the marker forces the conservative markers (no reported skip) | the three markers set to "exclude" | nothing (the content stays excluded); such a save is never written to disk |
+| 3. Anything else its owner did not render | none, nosize or unlocked for a listed format under the reader's PROVEN hold with the sequence unchanged, on the second whole-save attempt (the first stays strict) | established with a NAMED, REPORTED skip, only beside user content that does go back (the one rule) | everything else; the result is "skipped" | "Your clipboard was put back except: FileContents (not provided by the app that copied it)." An offer of such a record says so on its card before Restore |
+
+Still NOT ESTABLISHED (no paste): a lost hold, an enumeration error, listed != counted, a sequence change, a framing
+error (malformed, fragmentary, out of order, "<id> end" with nothing between, a negative reply whose error is not a
+number), busy, an owner that does not answer before a render ("unresponsive", after one more ping within the
+remaining budget), an overrun, and the one rule. The cost of class 3, stated plainly: the user's clipboard comes back
+without that format (Explorer's or Outlook's FileContents: a pasted file attachment is then missing; the file list
+CF_HDROP, when the owner offered one, goes back), and the user is told so by name. The alternative (refusing) blocks
+the paste for every copy from such an owner (the text is then typed in a classic text box, or kept on the recovery
+card). Follow-up: capturing FileContents through OleGetClipboard and IDataObject (FILEGROUPDESCRIPTOR and the
+streams) so it can be put back too.
+
+Incomplete records and the user's Restore (round 22). A record of which part could not be saved or read back (a
+class-3 or cap skip, a policy skip, a registered format whose name is lost, an EMF that could not be written down or
+rebuilt) is INCOMPLETE. Its offer says so: "Part of this clipboard could not be saved: <names>. Restore puts back the
+rest." The helper empties nothing for it unless the app's request says the user was shown that (acceptIncomplete);
+otherwise it answers "incomplete" with the names and the card then shows them. When it runs, it puts back everything
+that survived and answers "restored-partially" with the names, which the app shows; that accepted partial Restore
+settles and deletes the record (round 23: the user chose it; before, a record with content lost on read-back stayed
+offered). Round 23: an incomplete record is NEVER "already on the clipboard": its retained part back on the
+clipboard proves nothing more can go back, but it is settled only by an accepted partial Restore, Dismiss or the
+retention, never deleted as untouched nor answered "restored". The names travel with the reply AND with the events
+(recovered, late-restore), and a completed Restore is reported even when its offer was withdrawn before the reply.
+Every name is named: a bitmap, palette or metafile picture that cannot be rebuilt too. The card shows at most three
+(+N more), so its buttons stay in view, and says "None of this clipboard could be saved" when nothing goes back.
+
+The false-negative risk of the strict save, stated plainly: every refusal above is a blocked paste (the dictated text
+is typed in a classic text box, or kept on the recovery card for copying). That is the chosen cost: a paste over a
+save that is not established could destroy the user's clipboard.
+
+Liveness (round 22). Whether another helper still runs is asked of Windows. Only a positive answer that it does not
+(no such process, exited, another start time) lets its records be judged. A query Windows refuses (a protected process
+that reused the pid) is UNKNOWN: the record is kept offer-only and not offered, a Dismiss is refused, and the
+unreadable-payload bounds (24 h, two boots) end it; an invalid state is left to that helper until it is older than the
+retention; a silenced output device is given back after an hour.
+
+Native gates (not runnable in CI; the owner's list, round 22): Excel (a saved and an unsaved workbook), Word,
+PowerPoint shapes, an Outlook message and an attachment, Explorer files (a normal folder and inside a zip), an image
+copied in a browser, Teams, Snipping Tool, KeePass and Bitwarden, a Remote Desktop session, a slow or modal renderer
+with the clipboard lockout measured, and a third-party app that opens the clipboard with a NULL window. Round 23
+(Opus), corrected in round 24 (Astra): copy a column in Notepad++, dictate, let the helper exit or restart, then
+paste in Notepad++. NOT ESTABLISHED: whether the presence-only flags the put-back set (as delayed rendering from the
+helper's window) survive that window being destroyed. Windows documents that unrendered formats are removed when
+their owner goes (WM_RENDERALLFORMATS); after a completed put-back the record is settled and deleted, so nothing
+would be offered: the editor would lose its column or line paste mode (the text itself stays). No mitigation in this
+PR (a window cannot re-set formats after it is destroyed).
+
+EmptyClipboard audit, stated exactly: three sites in the RELEASE build (our write, the live transaction's restore,
+the user's Restore); the test build has a fourth (the __seed op).
+
+The user's Restore and the deliveries share the request queue, so a Restore never runs while a delivery is under
+way; since round 38 it also answers "busy" while an earlier dictation's late write (whose delivery already returned)
+still runs. (Until round 38 this said the Restore checked only its own record and could run during another delivery.)
+Test-build exception: the __seed op (TestSeed) opens and empties the clipboard without the late-write exclusion; it
+is compiled out of the release helper.
+
+Test-build hooks are compiled out of the release helper. One of them, the keyboard-layout hook used by CI 31, is
+CI-only: it activates another input language for the write thread and activates the previous one again when the
+write ends, because on a real desktop with one input method for all apps it could switch the user's language.
+
+The confirmation: a READ that fails under its open rejects the write (the flag below). An open that could not be
+obtained DEFERS: nothing was observed, so nothing is rejected, and any later automatic restore still needs the full
+content check behind the one guard (or the user's Restore).
+
+The one guard. The live transaction carries one flag, set once and never cleared, checked at the top of the only
+in-process path that writes the clipboard after our write (its restore; every caller goes through it: the normal
+restore, the restore after a failed paste or an exception, the late-write thread, the uninspectable path). It is
+set by:
+- a confirmation that rejects our write (not exactly ours, the sequence beyond our close, or a read that failed);
+- every keep-as-offer (an owner change, an owned but changed clipboard);
+- an incomplete put-back;
+- a stage that could not be journaled;
+- the write's own put-back;
+- settlement (the transaction leaving in flight).
+
+The record's persisted offerOnly field is kept in the state schema as an informational fact. Nothing read from disk
+depends on it being written in time.
+
+Text forms (unchanged from round 15 in what is pasted): our write sets only CF_UNICODETEXT (plus the markers and the
+sentinel). Windows sets CF_LOCALE when we close the clipboard (the input language of our write thread) and
+synthesizes CF_TEXT and CF_OEMTEXT from our text on that locale's code pages, exactly as it always did. The locale
+Windows will set is pinned in the live transaction and stated in our sentinel. A look compares CF_LOCALE with the
+pinned value, and CF_TEXT and CF_OEMTEXT with Windows' conversion of our exact text on the pinned locale's default
+ANSI and OEM code pages, up to their terminator. A sentinel that states another locale is not ours. Windows renders
+none of the three inside our own open, so there is nothing to read back there (round 17 found this on the runner;
+round 18 removed the attempt). CI checks:
+- the conversion byte for byte against Windows' own synthesis, under en-US, ru-RU, pl-PL and ja-JP, for non-ASCII,
+  best-fit, unmappable and surrogate-pair text;
+- that the CF_LOCALE Windows stamps is the pinned locale, also when the write thread uses another input language
+  and when another thread uses a third.
+
+A difference on some other system would make a write look changed: a false rejection (nothing pasted, the record
+offered), never a wrong paste.
+
+The sequence allowance (a continuity limitation, stated plainly). The confirmation and the later looks accept a
+sequence up to Windows' close moves plus the three forms it synthesizes (2 + 3) beyond the one sampled inside our
+write. Within that allowance, a foreign rewrite of an existing text format with the SAME bytes is not detected
+(the smallest undetected foreign action is one such replacement after the confirmation). It is harmless by
+content: what is pasted or put back is byte-identical. The allowance is not tightened: that cannot be validated
+natively, and a false rejection would leave an offer after an ordinary dictation.
+
+STRICT STATE. A state file is valid only when it is exactly one this helper writes:
+- every field present, with its type and range;
+- nothing else;
+- a known stage;
+- this format and this record's id.
+
+No default ever stands in for a missing field. Anything else proves nothing and takes one route: `{}`, a missing
+stage, an unknown stage, a missing or mistyped identity, extra fields, or truncated or zeroed bytes.
+- If a payload is there (adopted from .bin.tmp if need be) and names the record, or cannot be decrypted or looked at
+  now, the state is rebuilt. The rebuilt state has stage "unknown" and an UNKNOWN identity (session -1, no logon or
+  key, pid 0), and the record is offered.
+- If the payload is positively absent, the state is removed.
+- An invalid state is checked for its boot first, as a valid one is. One of an earlier boot is rebuilt and offered
+  here; one of this boot that names another session, or a running helper, is left alone.
+
+A rebuilt record has no session, so it is offered, and can be restored or dismissed, in ANY session of this user
+that shares %TEMP%. It is offered in the boot it is rebuilt in only (counted as its second offer boot), and an offer
+tick of this boot that the damaged state still shows is kept. So damage cannot extend the retention as long as that
+timing information is recoverable; a state damaged beyond it starts a new, bounded clock. Its delivery id is lost.
+
+A state journaled "settled" is deleted on sight, never offered. Stated plainly: if journaling "settled" fails AND the
+file deletion fails too, the record keeps its earlier stage and can be offered again after a successful restore (the
+user's Restore of it then finds the saved content already there and deletes it, or asks again). "Settled" is written before a restored record's
+file cleanup, for both the transaction's own restore and the user's Restore, and the offer is withdrawn at the same
+moment.
+
+PRESENCE. File.Exists is false on any error, which is no proof of absence. Every destructive or deletion-deciding
+look uses a three-state probe (GetFileAttributesW):
+- ABSENT only for "file not found" and "path not found";
+- PRESENT when attributes are read;
+- UNKNOWN otherwise.
+
+These act only on ABSENT: "missing payload" cleanup (a state is deleted for a missing payload only when both .bin
+and .bin.tmp are positively absent), adoption, the orphan and stray-.tmp sweeps (an unreadable file time is never
+"old"), the deletion's own checks, and Dismiss. UNKNOWN keeps the record whole. The retention and boot limit are
+DECISIONS: when one ends a record whose file cannot be looked at, the deletion is deferred (reported as such) and a
+later check retries; there is no guaranteed physical bound while a file stays unreadable. A state file that cannot be
+read at all is kept and checked again before any retention processing (its clock cannot be read either). A payload that cannot be looked at,
+read or decrypted now is kept offer-only and bounded by the unreadable-payload policy below, so nothing loops for
+ever.
+
+Every other state is pending:
+- The record is kept, nothing is written, and the app shows "DoodleNote may have changed your clipboard while
+  dictating. Put back what you had copied before?" with Restore and Dismiss (the card's own buttons; the shared
+  dismiss of other cards never touches it). The card names formats and size only, never content. The recovery
+  CARD has no timer (it stays until Restore, Dismiss or its withdrawal); the separate notice after a successful
+  typing fallback, like the other completion notices, keeps its six-second expiry (see the notice rules above).
+- Restore runs as a journaled transaction of its own (offer-only from the start: interrupted, it is offered again),
+  and only while the clipboard is exactly as it was when first offered. The offered sequence is fixed then; a retry
+  never refreshes it. If the clipboard changed, the card says what a restore would overwrite (formats and size) and
+  asks again.
+- Dismiss asks first ("Delete the saved clipboard?"). The card goes only once the helper reports the files deleted,
+  and stays with "The saved copy could not be deleted. Try again." otherwise.
+- An offer whose record vanished another way is withdrawn once its state is positively absent.
+- Every outstanding offer is kept, and the next one shows after one is resolved.
+- Offers load at app start and every hour, whether or not Bark is on (it is the user's clipboard, not a dictation
+  feature; the helper is started for it only when this identity has kept records on disk), and when Bark is turned
+  on.
+
+The full deletion contract, stated plainly.
+- PROOFS (nothing of the user's can be lost):
+  - a completed restore (the live transaction's own, or the user's Restore), reported as restored, partial or
+    skipped;
+  - the clipboard already holding exactly the saved content (any logon of this session; a whole save);
+  - rounds 34-35: the clipboard unchanged since the capture (the first durable state "emptying" with its capture
+    sequence and window station; a complete look in the same logon, boot and window station showing the same
+    sequence), so nothing was emptied (also an incomplete save);
+  - (until round 32: "stage saved = nothing emptied"; round 33 removed that rule: no record is deleted by its stage);
+  - a state whose payload is positively absent (nothing to restore from).
+- THE USER: Dismiss (after "Delete the saved clipboard?").
+- POLICIES (they can delete content the user might still want; chosen limits, not proofs):
+  - retention: 24 h after the record's first offer, on the tick count of that boot (the helper checks every 30
+    minutes, the app every hour);
+  - the boot limit: offered in at most two boots, the boot of its first offer and the next one, then deleted (an
+    offer restarts in the second boot, because sequence numbers restart);
+  - a rebuilt record is offered in the boot it is rebuilt in only;
+  - the unreadable-payload policy: a payload that cannot be decrypted (not bad data: a key or profile not available,
+    e.g. after a password reset), looked at or read now is kept offer-only, its 24 h and boot clock starts at the
+    first failed attempt, and it is then deleted as unrecoverable. Stated plainly, this deletion is SILENT for the
+    user: such a payload was never offered (an offer needs its formats and size) and the app is not told; only the
+    helper's log says so. A deletion the files refuse is deferred and retried on the backoff and the 30-minute
+    sweep;
+  - cleanup of records that cannot be restored from:
+    - a payload whose data is bad;
+    - a payload of an earlier format;
+    - a payload whose id does not match its state;
+    - an orphaned payload (state positively absent, older than 10 minutes: it may be a record the user dismissed
+      whose deletion was cut short);
+    - a stray state .tmp;
+    - a round-8 record;
+    - round 33-34: a transaction Begin gave up on (not established: its files removed by its writer, nothing emptied);
+    - round 34: an earlier build's File.Replace leftover (a state copy) whose replace cannot still be running.
+
+A payload next to an INVALID state is rebuilt and offered; a payload with NO state is an orphan; the two are kept
+distinct. The DURABLE state writes (the first state, "settled", and the offer-only and unrestored facts) go through to
+disk (write-through and flush) before they replace the previous file; the diagnostic ones are not flushed (round 33).
+
+Deletion.
+- Every file of the record is opened with delete access and no sharing.
+- If any file is held by another process, an AV scan or an indexer, or cannot be looked at, nothing is deleted. The
+  record stays whole and is checked again later, and Dismiss reports it not deleted.
+- Otherwise every handle is marked for deletion in the order state .tmp, payload .tmp, state, payload, and their
+  close removes the files.
+
+It is NOT atomic across the helper's death or a failed rollback: marks already set are honoured when the handles
+close, a killed process's included. Stated as the PHYSICAL outcomes, every interruption ends as one of:
+- The whole record (intact). A kill before the state's mark leaves it intact, so a Dismiss that never completed CAN
+  be offered again.
+- A payload without its state. It is never restored from, and it is swept as an orphan once its state is positively
+  absent and it is older than 10 minutes.
+- A state without its payload. A failed rollback can leave one: the marks already set on the payload files stay
+  while the state's is cleared, or a kill lands before a completion re-marks the state. Recovery removes it once both
+  payload files are positively absent.
+
+None of these is an unauthorised deletion: the deletion had already been decided. If a mark fails, the marks already
+set are cleared; if every clear succeeds, nothing is deleted. If a clear fails, the deletion is completed instead:
+every handle is marked again from the beginning in the same order, every re-mark's result is checked and a failed
+one logged. Whatever is left is reported as it is: intact means kept; with the state gone, the offer is withdrawn
+and the payload is an orphan. CI kills a helper between two marks and drives the mixed rollback.
+
+Adoption persists the record's offer-only fact before it moves .bin.tmp into place; if that write fails, the move
+still proceeds (and a rebuild passes no such step). Both are harmless now that nothing on disk grants authority: the
+adopted record is offered either way.
+
+Another session's record (same user, same boot, shared %TEMP%) is left alone by the decision
+procedure, which checks that first, and by Dismiss, which refuses it; the orphan and round-8 sweeps act
+on file evidence alone, and a rebuilt record (unknown identity) is offered in any session. A state or payload
+file that cannot be read for the moment is kept and checked again, and a payload is never deleted while its
+valid state file is kept. Right before Ctrl+V (and before a restore), "user-changed" (someone else's content, left
+alone) is decided only when the clipboard's OWNER changed, and even then the user's saved clipboard is kept
+and offered, never deleted on that guess (another owner proves someone emptied the clipboard, not that the
+user made a newer copy). If our window still owns it but it is not exactly our write (an app added or
+replaced a format without emptying), or the clipboard cannot be opened to look, nothing is pasted and
+nothing is settled: the record is kept and offered. That look (it opens the clipboard and may wait) comes
+before the final checks, which stay the last step before Ctrl+V. The check of kept records before a paste
+opens the clipboard once per record; the paste then starts only if it still fits the delivery's deadline
+(otherwise nothing of the user's is touched and the typing fallback decides; chosen over capping the number
+of offers, which would hide records the user is owed). A restore (the live transaction's or the user's) pings a live foreign
+owner (WM_NULL, 200 ms) before its EmptyClipboard: an owner that is hung or does not answer is not asked
+(busy, kept). It is a sample: an owner can answer the ping and then stall in WM_DESTROYCLIPBOARD, and then
+the restore holds the lock as long as Windows waits on it (about 5 s).
+Offers with Bark off: starting the helper for an offer runs the same
+integrity check as any start, which uses the speech worker (and so loads the speech model until it
+idles); this happens only when this identity has kept records on disk. Retries use the record's own backoff
+(3 s, 10 s, 30 s, 60 s, 120 s): every retry that does not settle the record advances it (a failed attempt, a
+check still pending, a busy clipboard, a file or key not readable now), so nothing loops every second;
+another session's record is not retried at all, and the checks before a delivery and at the next helper
+start never use a step. Payloads without a journal are deleted, never
+restored from, and a settled transaction is never published. Records of earlier formats are removed
+with a log line, never restored from. **Content that carries any clipboard privacy
+marker (as password managers set) is never written to disk**: that transaction stays in memory, so a
+helper killed between our write and the restore cannot give it back, and after a crash there is nothing to offer (the offer card says so). Round 33: the encrypted
+payload is on disk, flushed, before anything is emptied (the paste waits for it about 2 s at most; otherwise no paste,
+"no-record"): the earlier 250 ms window, in which a large clipboard could go ahead before it was on disk, is closed.
+
+Leaving: the app asks the helper to quit by closing its stdin (there is no quit op). On every exit
+path (stdin closed, a restart, an unhandled exception, a console close or logoff event; one atomic step decides which thread runs the exit, and every other starter waits for it to finish) a delivery in progress finishes its restore and
+reply first, and an abandoned clipboard write finishes its rollback: a quit waits up to 3 s for both;
+a restart waits for the delivery to end, and stdin closing meanwhile shortens that to 3 s. Past the
+wait, the transaction record is how the next helper finishes the job. The helper's worst-case exit
+(3 s plus 4 s of bounded clean-up) stays inside the app's 8 s grace. On a console close or logoff event the wait for a delivery is 0.5 s, so the whole exit fits in 4.5 s (Windows ends a console process about 5 s after such an event, and at once when its handler returns, so the handler waits for the exit's completion signal). A restart because provider calls
+are stuck, or because two clipboard readers wait on owners that never render, happens only between
+deliveries. Clipboard readers are never killed on exit. THE BOUND on a reader held in an owner's render (round 22):
+(1) an owner that does not answer a WM_NULL is never asked to render: the helper checks before the save and again
+before emptying, and the reader checks before each read (one more ping within the remaining budget); (2) Windows' own
+WM_RENDERFORMAT timeout (not quantified here: Windows documents no value, and it was not measured); (3) the reader
+reads its stdin on its own thread and ends itself when a read is still outstanding 30 s after its stdin closed (the
+helper abandoned it, or ended); (4) the helper ends an abandoned reader after 120 s on an owner reported hung, or
+after 300 s whatever the owner reports. IsHungAppWindow alone is no bound: an owner that is busy but pumps is never
+"hung". So a reader outlives the helper by at most about 30 s. The cost: a reader ended by (3) or (4) mid-render may
+lose the format being rendered for its owner. An abandoned late write of ours keeps its record in flight until it has
+put the saved content back. Until round 37 this said the user's Restore and the leftover checks "find it busy": WRONG
+for the helper's own opens (round 38, Astra P2): the late write opens with the helper's SAME window, so another open of
+ours does not fail but takes its open over (the rollback then fails; the clipboard can be left empty, the record kept
+as an offer: never a loss), and between its opens our late text is on the clipboard. Since round 38 the leftover checks
+skip while anything is in flight (round 37), the user's Restore answers "busy" (nothing touched, the card kept) while
+a write thread of ours still runs (deliveries and the Restore share the request queue and recovery looks take the
+recovery lock, so a write thread whose delivery returned, a late write and its rollback, is the one opener left; it is
+counted until its rollback is done), and a new delivery waits for a late write at most 1 s
+within its deadline, else refuses ("own-busy" since round 39, nothing touched) (CI case 59). Round 39 (Opus nit): a late write that
+is still unfinished 30 seconds after it was abandoned (one hung EmptyClipboard was observed to return after about
+5.2 s, an observation, not a bound) makes the helper DECIDE to leave and be replaced, the usual restart between
+deliveries ("clipboard-write-stuck", logged); the existing bounded shutdown wait (up to 60 s) then waits for that
+write, and past it the record lets the next helper judge the transaction by content. Worst case: about 90 s of
+refused deliveries (about 30 s refused "own-busy", then up to 60 s "helper-busy") before a fresh helper. A
+privacy-marked save is memory-only (never written down), so it cannot be promised recovery once the process ends
+(CI case 60, with the watchdog shortened in the test build).
+
+If the helper's UI thread itself crashes, the hooks may block input for up to 3 s while the bounded
+shutdown runs; a clipboard transaction in flight is then finished by the next helper from its record.
+Right before Ctrl+V and before each typed key the helper checks that no Shift, Ctrl, Alt or Win key is
+down (a held key would turn Ctrl+V into another shortcut); if one is, nothing is sent.
+
+Known limits of the typing fallback, stated plainly: a custom WinForms control that sets
+ES_WANTRETURN but handles Enter as a dialog key in its own code can still press its AcceptButton (no
+check from outside can see that); and an app whose message loop is ANSI turns characters outside its
+code page (an emoji, for one) into "?" before the box sees them. The read-back then reports the
+delivery as uncertain, but the wrong character is already in the field.
+
+Known limitation: non-Latin scripts and the typing fallback. The paste path handles all of
+Unicode. Typing sends `KEYEVENTF_UNICODE` keys, and surrogate pairs go as one key. Where an IME or
+autocomplete changes the text by anything other than the typed key, typing stops at once and
+reports `uncertain`, with the count of confirmed characters. The host then keeps the text.
+
+The helper is checked inside the Windows speech worker before every spawn, and the app never
+starts PowerShell for it. The worker:
+1. Opens the helper with writing, renaming and deleting denied, and keeps the handle.
+2. Hashes the bytes it read through that handle.
+3. Runs WinVerifyTrust on the same handle.
+4. Lets go only after the spawn has returned and the hold has been confirmed.
+
+If the worker ends before that, the spawn is discarded and the check runs again.
+
+The client confirms that the worker still holds the file immediately before the spawn, and again
+right after it. Until that second answer comes back, the new helper is not used: no request reaches
+it, its output is held back, and no hold key is armed. A worker that is busy (loading a model,
+decoding live captions) is waited for, never treated as a lost hold: a hold ends only by an explicit
+release, the worker's exit, or the worker's own 15 s expiry, each of which the app now sees at once.
+Only an answer confirms the hold: a worker that has not answered after 4 s leaves the spawn
+unconfirmed (it goes ahead, nothing is ended), the hold is reported locked:false and Settings says
+so (one cautious line for both "unconfirmed" and "digest only"), and a late positive answer while the
+lease is still held brings locked:true back. The signature budget, the capped QA hold pause, both
+confirmation caps and the spawn allowance (14.5 s) stay below the worker's expiry (15 s); both come from
+one module, which refuses to load otherwise. That is configured arithmetic, not a wall-clock bound on
+process creation, IPC or the file system: the runtime "unconfirmed" path is the real safety net. A helper ended because its hold was really lost counts against the
+restart allowance, and the next attempt waits the normal backoff. Only a launch that goes all the
+way through (spawned, confirmed, its first status answered) clears the count of lost holds. Killing a helper whose confirmation failed
+cannot undo what it already ran. Creating the process inside the worker would close that gap, but
+it is not done. The reasons are in PR #276, round 7.
+
+Integrity policy (stated plainly):
+- This check is a **corruption guard, not a security boundary**. The per-user install folder is
+  writable by the user, so code running as that user can replace the app itself; Application
+  Control is the real boundary.
+- The digest baked into the build decides. When it matches, the bytes are the build's own.
+- A signature that is untrusted, revoked or explicitly distrusted still gives "ok" when the digest
+  matches. A valid signature adds pinning of the signer's name and thumbprint.
+- A broken signature, or a valid one from the wrong signer, is damaged.
+- After repeated lost holds, the check runs on the digest alone. Settings shows that ("checked by
+  its digest only"), and the held check is tried again once 60 s have passed.
+
+Fresh install: while the preferred Parakeet model downloads in the background a fresh
+install serves the weaker legacy Zipformer; Bark refuses to dictate on it (matching the
+Mac) and the pill/Settings show the download percent, a failure message, and retry on the
+next attempt.
+
+Security review follow-ups verified natively on Dev04 (evidence/step4-fix-2): the hook
+watchdog injects no input (GetLastInputInfo unchanged across an armed-idle span); typing
+stops before a single character reaches a password field focused mid-type; clipboard
+privacy markers survive restore; a concurrent copy is not clobbered; and one helper never
+erases another's live mute-recovery record.
+
+## QA identity, profiles and the update feed (win/bark)
+
+Packaged builds of the production identity (`com.doodlenote.desktop`, profile
+`%APPDATA%\desktop`) ignore `DOODLE_USER_DATA`. A release-lineage QA package built from win/bark
+therefore runs against the real profile. It also reaches the **production update feed**: on win/bark,
+Windows update checks are still wired on. PR #279 adds the build-time update gate
+(`DOODLENOTE_WINDOWS_UPDATES`, off unless set) that closes this.
+
+Until that gate is in the branch under test, run packaged QA on win/bark only with one of these:
+- a `DOODLENOTE_CHANNEL=dev` package, which uses the `%APPDATA%\DoodleNote Dev` profile and the dev
+  identity, with no production feed;
+- the isolated QA identity from PR #279 (`pnpm package:win:qa`).
+
+Never use a release-lineage package. Two such runs on 2026-11-07 changed the October QA profile and
+queried the production feed; evidence/step4/PROFILE-NOTE.md lists exactly what changed.

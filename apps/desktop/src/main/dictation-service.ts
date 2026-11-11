@@ -41,6 +41,7 @@ import type {
   TargetDescription
 } from '../shared/dictation-helper-protocol'
 import { micLooksMuted } from '../shared/dictation-helper-protocol'
+import type { ClipboardOffer, ClipboardOfferRestore } from '../shared/dictation-helper-protocol'
 import {
   buildPillMenu,
   isMessageShown,
@@ -75,6 +76,8 @@ import type { CaptureLease, CaptureOwnership } from './capture-ownership'
 import { MAX_CLEANUP_CHARS, buildTransformRequest, validateTransform } from './dictation-cleanup'
 import {
   RECOVERY_MESSAGES,
+  clipboardProblem,
+  clipboardProblemMessage,
   overlayView,
   panelView,
   type OverlayContext,
@@ -92,7 +95,17 @@ import {
   type TransformChange
 } from './dictation-pipeline'
 import { conflictingShortcuts, diffWords } from '../shared/dictation-transforms'
+import { barkCopy, barkPlatform, type BarkCopy } from '../shared/dictation-platform'
+import type { HelperIntegrityState } from './helper-integrity'
 import type { OverlayAction } from './dictation-overlay'
+import {
+  initialNoticeState,
+  reduceNotice,
+  restorePending,
+  type NoticeEvent,
+  type NoticeState,
+  type NoticeStep
+} from './dictation-notice'
 
 export interface EngineLike {
   tryStartLive(opts: EngineStartOptions): { started: true } | { started: false; reason: string }
@@ -101,15 +114,36 @@ export interface EngineLike {
   readonly warm: boolean
   /** Audio inputs, for the microphone picker. Resolves [] when listing fails. */
   listInputDevices?(): Promise<InputDevice[]>
+  /**
+   * Windows: whether the dictation-quality model (Parakeet) is loaded. Absent on macOS, where
+   * the engine always runs the full model. `ready: false` means Bark should not dictate yet.
+   */
+  dictationModelState?(): {
+    ready: boolean
+    downloadProgress: number | null
+    usingFallback: boolean
+    downloadFailed: boolean
+  }
+  /** Windows: retry a failed background model download when dictation is attempted. */
+  /** Windows: retry a failed model download; what happened decides the words shown. */
+  retryDictationModel?(): 'started' | 'in-progress' | 'unavailable'
 }
 
 export interface HelperLike {
   readonly available: boolean
+  /** Windows only: the helper exists but Windows would not start it. Absent or false on macOS. */
+  readonly blocked?: boolean
   status(): Promise<HelperStatus | null>
   snapshot(snapshotId: string): Promise<TargetDescription | null>
   /** An app bundle's icon as a small PNG data URL; null when it cannot be drawn. */
   appIcon(appPath: string): Promise<string | null>
-  deliver(snapshotId: string, text: string, guards?: DeliveryGuards): Promise<HelperDelivery>
+  /** deliveryId (Windows): the service's name for this delivery; later clipboard results name it. */
+  deliver(
+    snapshotId: string,
+    text: string,
+    guards?: DeliveryGuards,
+    deliveryId?: string
+  ): Promise<HelperDelivery>
   /** The text selected in the snapshot's field; refused for secure fields. */
   selection(snapshotId: string): Promise<SelectionResult>
   /** The name and icon of each installed app among these bundle identifiers. */
@@ -129,6 +163,28 @@ export interface HelperLike {
   onClick(listener: () => void): () => void
   /** Replace the helper process (it re-arms its triggers when it comes back). */
   restart(): void
+  /**
+   * Windows: a delivery's clipboard result arrived after its reply (a late rollback, a recovery of a kept
+   * transaction, or a kept one left pending); it names the delivery when known (see the client).
+   */
+  onClipboardLate?(
+    listener: (clipboard: string, deliveryId?: string, missing?: string[], record?: string) => void
+  ): () => void
+  /** Windows: a kept clipboard transaction offered to the user, and its withdrawal (see the client). */
+  onClipboardOffer?(listener: (offer: ClipboardOffer) => void): () => void
+  onClipboardOfferGone?(listener: (record: string) => void): () => void
+  /** Null when no valid list came: the service keeps what it holds. */
+  clipboardOffers?(): Promise<ClipboardOffer[] | null>
+  restoreClipboardOffer?(
+    record: string,
+    sequence: number,
+    acceptIncomplete?: boolean
+  ): Promise<ClipboardOfferRestore>
+  dismissClipboardOffer?(record: string): Promise<boolean>
+  /** Windows: whether this identity has kept clipboard records on disk (a cheap check; no helper started). */
+  hasKeptClipboard?(): boolean
+  /** Windows: whether a helper that leaves now is started again on its own (absent: assume yes). */
+  willRestart?(): boolean
   /** Ask macOS for Accessibility from the helper. Returns whether it is granted now. */
   requestAccessibility(): Promise<boolean | null>
   /** Ask macOS for Input Monitoring from the helper. Returns whether it is granted now. */
@@ -144,6 +200,8 @@ export interface HelperLike {
   muteOutput(): Promise<boolean>
   restoreOutput(): Promise<void>
   onExit(listener: () => void): () => void
+  /** Windows: the low-level hooks were lost and re-installed (or could not be). */
+  onHooks?(listener: (phase: 'lost' | 'restored' | 'failed') => void): () => void
   dispose(): Promise<void>
 }
 
@@ -171,6 +229,20 @@ export type CleanupRunner = (
 export interface DictationDeps {
   channel: AppChannel
   supported: boolean
+  /** Picks the platform's words (see dictation-platform.ts). Defaults to macOS. */
+  platform?: NodeJS.Platform
+  /**
+   * Windows: the helper's integrity (see helper-integrity.ts). 'unchecked' until Bark first needs
+   * the helper, 'checking' while verifying, then 'ok', 'damaged' or 'absent'. Absent on macOS.
+   */
+  helperIntegrity?(): HelperIntegrityState
+  /**
+   * Windows: whether the helper's last check held its file (false while it runs checked by digest
+   * only, e.g. after repeated lost holds); shown in the Settings status row. Absent on macOS.
+   */
+  helperLocked?(): boolean
+  /** Windows: start (or join) the integrity check; it runs asynchronously. */
+  checkHelperIntegrity?(): void
   settings: {
     get(): DictationSettings
     update(patch: DictationSettingsUpdate): DictationSettings
@@ -319,6 +391,20 @@ export class DictationService {
     after: string
   } | null = null
   private panel: OverlayPanel | null = null
+  /** Windows: every clipboard offer standing now, by record id (the first is shown whenever no other panel is). */
+  private readonly offers = new Map<string, ClipboardOffer>()
+  /** Windows: the clipboard changed since the offer; what a restore would overwrite, and the sequence to ask with. */
+  private offerChanged: {
+    record: string
+    formats: number
+    bytes: number | null
+    sequence: number
+  } | null = null
+  /** Windows: Dismiss was clicked once for this record (the card asks before deleting); and whether a delete failed. */
+  private offerConfirm: { record: string; failed: boolean } | null = null
+  private offerSweep: NodeJS.Timeout | null = null
+  /** Whether Bark was on at the last settings change (turning it on loads the offers). */
+  private barkWasOn = false
   private panelTimer: NodeJS.Timeout | null = null
   private transforming: AbortController | null = null
   private readonly transformKeys = new Map<
@@ -341,8 +427,27 @@ export class DictationService {
   private readonly learner: DictationLearner
   private lastToggleAt = 0
   private readonly unsubscribe: Array<() => void> = []
+  private readonly copy: BarkCopy
+  private readonly windows: boolean
+  /** Windows: the clipboard note for one recovery card (by generation). */
+  private clipboardWarning: { gen: number; message: string } | null = null
+  /**
+   * Round 28: the clipboard NOTICE SLOT and the user's Restore requests, one pure reducer (dictation-notice.ts). The
+   * slot is separate from the offer card and from every other panel: list refreshes and offer events never touch it.
+   */
+  private noticeState: NoticeState = initialNoticeState()
+  private noticeTimer: NodeJS.Timeout | null = null
+  /**
+   * Round 25: offers the helper refused as nothing-to-restore. A list reload (an older helper sends no content count)
+   * never brings their Restore back.
+   */
+  private readonly nothingToRestore = new Set<string>()
+  /** Windows: the delivery the clipboard notice (warning line or panel) is about, when the helper named it. */
+  private clipboardDelivery: string | null = null
 
   constructor(private readonly deps: DictationDeps) {
+    this.copy = barkCopy(deps.platform ?? 'darwin')
+    this.windows = barkPlatform(deps.platform ?? 'darwin') === 'win32'
     this.learner = new DictationLearner({
       read: (id) => deps.helper.watchRead(id),
       stop: (id) => deps.helper.watchStop(id),
@@ -362,6 +467,21 @@ export class DictationService {
       deps.helper.onClick(() => this.onClick()),
       deps.helper.onExit(() => this.onHelperExit())
     )
+    // Windows: a hook loss/re-install changes what the permissions panel shows; refresh it.
+    if (deps.helper.onClipboardLate) {
+      this.unsubscribe.push(
+        deps.helper.onClipboardLate((clipboard, deliveryId, missing, record) =>
+          this.clipboardLate(clipboard, deliveryId, missing, record)
+        )
+      )
+    }
+    if (deps.helper.onClipboardOffer)
+      this.unsubscribe.push(deps.helper.onClipboardOffer((offer) => this.showOffer(offer)))
+    if (deps.helper.onClipboardOfferGone)
+      this.unsubscribe.push(deps.helper.onClipboardOfferGone((record) => this.offerGone(record)))
+    if (deps.helper.onHooks) {
+      this.unsubscribe.push(deps.helper.onHooks(() => void this.status()))
+    }
   }
 
   /* ---- lifecycle ---- */
@@ -371,6 +491,217 @@ export class DictationService {
     await this.applySettings()
     // Off means idle: do not even list microphones until the person turns it on.
     if (this.deps.settings.get().enabled) void this.refreshDevices()
+    // Windows: a clipboard kept by an earlier session (a crash, a restart) is offered again, whether or not Bark is
+    // on: it is the user's clipboard, not a dictation feature. The helper is started for it only when this
+    // identity has kept records on disk (or Bark is on anyway). Also every hour (the retention runs in the helper).
+    if (this.windows) {
+      void this.loadClipboardOffers()
+      this.offerSweep = setInterval(() => void this.loadClipboardOffers(), 60 * 60 * 1000)
+      this.offerSweep.unref?.()
+    }
+  }
+
+  /* ---- clipboard offers (Windows) ---- */
+
+  /** The helper is the source of truth: the list it gives replaces what is held (an offer it no longer has goes). */
+  private async loadClipboardOffers(): Promise<void> {
+    if (!this.deps.helper.clipboardOffers || this.disposed) return
+    const kept = this.deps.helper.hasKeptClipboard?.() ?? false
+    if (!this.deps.settings.get().enabled && !kept && this.offers.size === 0) return
+    let list: ClipboardOffer[] | null
+    try {
+      list = await this.deps.helper.clipboardOffers()
+    } catch {
+      list = null
+    }
+    // Only an affirmative, valid list replaces what is held (a restart or a long delivery never clears offers).
+    if (this.disposed || list === null) return
+    this.offers.clear()
+    for (const offer of list) this.offers.set(offer.record, this.known(offer))
+    this.refreshOfferPanel()
+  }
+
+  /** An offer as the service knows it: one already refused as nothing-to-restore keeps no Restore (round 25). */
+  private known(offer: ClipboardOffer): ClipboardOffer {
+    return this.nothingToRestore.has(offer.record)
+      ? { ...offer, incomplete: true, content: 0 }
+      : offer
+  }
+
+  private showOffer(offer: ClipboardOffer): void {
+    if (this.disposed) return
+    offer = this.known(offer)
+    this.offers.set(offer.record, offer)
+    this.deps.log(
+      `clipboard offer: a kept clipboard (${offer.formats} formats, ${offer.bytes} bytes) can be restored`
+    )
+    this.refreshOfferPanel()
+  }
+
+  private currentOffer(): ClipboardOffer | null {
+    return this.offers.values().next().value ?? null
+  }
+
+  /** Show the current offer unless another panel is up (then it comes when that one closes, see setPanel). */
+  private refreshOfferPanel(): void {
+    // Round 28: it recomputes the card only; the notice slot is never touched by a refresh (rule c).
+    const panel = this.panel
+    if (!panel || panel.kind === 'clipboard-offer') this.setPanel(null)
+  }
+
+  private offerPanel(): OverlayPanel | null {
+    const offer = this.currentOffer()
+    if (!offer) return null
+    const changed = this.offerChanged?.record === offer.record ? this.offerChanged : null
+    const confirm = this.offerConfirm?.record === offer.record ? this.offerConfirm : null
+    return {
+      kind: 'clipboard-offer',
+      offer,
+      ...(changed ? { changed: { formats: changed.formats, bytes: changed.bytes } } : {}),
+      ...(confirm ? { confirmDelete: true, deleteFailed: confirm.failed } : {}),
+      // Round 28: its Restore is outstanding: the card says "Restoring…" and its Restore cannot be clicked.
+      ...(restorePending(this.noticeState, offer.record) ? { pending: true } : {})
+    }
+  }
+
+  private offerGone(record: string): void {
+    if (!this.offers.delete(record)) return
+    if (this.offerChanged?.record === record) this.offerChanged = null
+    if (this.offerConfirm?.record === record) this.offerConfirm = null
+    this.refreshOfferPanel()
+  }
+
+  /** One offer resolved: it leaves, and the list is asked for again (the next outstanding offer shows). */
+  private async offerResolved(record: string): Promise<void> {
+    this.offerGone(record)
+    await this.loadClipboardOffers()
+  }
+
+  /**
+   * Round 24 (Opus): a click on an offer's button acts only on the card the user saw: the page names its record,
+   * and an offer that became current since (an offer-gone made another one current) is never acted on for it.
+   */
+  private shownOffer(record: string | undefined): boolean {
+    const current = this.currentOffer()
+    if (!current || record !== current.record) {
+      this.deps.log(`clipboard offer: a click for another card than the one now current; ignored`)
+      return false
+    }
+    return true
+  }
+
+  /** The user's Restore: only while the clipboard is as it was offered (or as the "changed" card showed). */
+  private async restoreOffer(): Promise<void> {
+    const offer = this.currentOffer()
+    if (!offer || !this.deps.helper.restoreClipboardOffer) return
+    // Rule (a): a click while this record's Restore is pending is ignored (the card shows "Restoring…").
+    if (this.notice({ type: 'request', record: offer.record }).ignored) {
+      this.deps.log(
+        'clipboard offer: a Restore of this record is still outstanding; the click is ignored'
+      )
+      return
+    }
+    this.refreshOfferPanel() // the card now shows its pending state
+    const changed = this.offerChanged?.record === offer.record ? this.offerChanged : null
+    const sequence = changed?.sequence ?? offer.sequence
+    // An incomplete offer's card says what a Restore cannot put back: the click accepts exactly that.
+    let done: ClipboardOfferRestore
+    try {
+      done = await this.deps.helper.restoreClipboardOffer(
+        offer.record,
+        sequence,
+        offer.incomplete === true
+      )
+    } catch {
+      done = { result: 'failed' }
+    }
+    this.deps.log(`clipboard offer: restore ${done.result}`)
+    const completed =
+      done.result === 'restored' ||
+      done.result === 'partial' ||
+      done.result === 'skipped' ||
+      done.result === 'restored-partially'
+    const problem = completed ? clipboardProblem(done.result, undefined) : null
+    // Rule (a): the reply completes the request unless its event did (then it is consumed); "failed" (no answer in
+    // time) leaves it open for its event; any other answer ends it. The card's pending state ends here.
+    this.notice({
+      type: 'reply',
+      record: offer.record,
+      outcome: completed ? 'completed' : done.result === 'failed' ? 'failed' : 'other',
+      notice: problem
+        ? { kind: 'clipboard', problem, ...(done.missing ? { missing: done.missing } : {}) }
+        : null
+    })
+    this.refreshOfferPanel()
+    if (!completed && !this.offers.has(offer.record)) return
+    if (done.result === 'nothing-to-restore') {
+      // Round 24 (Opus, the one rule at Restore): nothing with user content can go back; nothing was emptied.
+      this.nothingToRestore.add(offer.record)
+      this.offers.set(offer.record, {
+        ...offer,
+        incomplete: true,
+        content: 0,
+        missing: done.missing ?? offer.missing
+      })
+      this.refreshOfferPanel()
+      return
+    }
+    if (done.result === 'incomplete') {
+      // The helper found it incomplete but the card had not said so: nothing was emptied; the card says it now.
+      this.offers.set(offer.record, { ...offer, incomplete: true, missing: done.missing ?? [] })
+      this.refreshOfferPanel()
+      return
+    }
+    if (done.result === 'changed' && typeof done.sequence === 'number') {
+      // Ask again, showing what a restore would overwrite now (formats and size only).
+      this.offerChanged = {
+        record: offer.record,
+        formats: done.formats ?? 0,
+        bytes: done.bytes ?? null,
+        sequence: done.sequence
+      }
+      this.refreshOfferPanel()
+      return
+    }
+    // Completed: the offer leaves and the list is asked for again. The notice slot is not touched (rule c).
+    if (completed) {
+      await this.offerResolved(offer.record)
+      return
+    }
+    if (done.result === 'gone') await this.offerResolved(offer.record)
+    // Otherwise (busy, failed): the offer stands; the card stays.
+  }
+
+  /** Dismiss asks first; Delete saved copy then deletes it, and the card goes only once the helper did. */
+  private offerAction(action: 'offer-dismiss' | 'offer-delete' | 'offer-keep'): void {
+    const offer = this.currentOffer()
+    if (!offer) return
+    if (action === 'offer-dismiss') this.offerConfirm = { record: offer.record, failed: false }
+    else if (action === 'offer-keep') this.offerConfirm = null
+    else {
+      void this.deleteOffer(offer)
+      return
+    }
+    this.refreshOfferPanel()
+  }
+
+  private async deleteOffer(offer: ClipboardOffer): Promise<void> {
+    if (this.offerConfirm?.record !== offer.record) return // only after the confirmation
+    let deleted = false
+    try {
+      deleted = (await this.deps.helper.dismissClipboardOffer?.(offer.record)) === true
+    } catch {
+      deleted = false
+    }
+    this.deps.log(`clipboard offer: delete ${deleted ? 'done' : 'failed'}`)
+    if (deleted) {
+      this.offerConfirm = null
+      await this.offerResolved(offer.record)
+      return
+    }
+    // The card stays, saying so; the user can try again.
+    this.offerConfirm = { record: offer.record, failed: true }
+    this.refreshOfferPanel()
   }
 
   async dispose(): Promise<void> {
@@ -389,6 +720,10 @@ export class DictationService {
     }
     this.transformKeys.clear()
     this.transforming?.abort()
+    if (this.offerSweep) clearInterval(this.offerSweep)
+    this.offerSweep = null
+    if (this.noticeTimer) clearTimeout(this.noticeTimer)
+    this.noticeTimer = null
     this.setPanel(null)
     this.lastTranscript = null
     this.lastChange = null
@@ -520,6 +855,7 @@ export class DictationService {
     const settings = this.deps.settings.get()
     if (!settings.enabled || !settings.learnFromEdits) this.learner.discard()
     if (!this.deps.supported || !settings.enabled) {
+      this.barkWasOn = false
       this.dispatch({ type: 'cancel' })
       this.setToggleShortcut('')
       this.setActionShortcut('paste', '', new Set())
@@ -537,6 +873,11 @@ export class DictationService {
       this.render()
       return
     }
+    // Windows: Bark is on, so the helper is about to be needed; verify it now (asynchronously).
+    this.deps.checkHelperIntegrity?.()
+    // Windows: Bark turned (back) on: a clipboard kept meanwhile is offered now.
+    if (this.windows && !this.barkWasOn && this.offerSweep) void this.loadClipboardOffers()
+    this.barkWasOn = true
     this.setToggleShortcut(settings.toggleShortcut)
     const clashes = this.shortcutClashes(settings)
     this.setActionShortcut('paste', settings.pasteLastShortcut, clashes)
@@ -591,7 +932,13 @@ export class DictationService {
     const result = await this.deps.helper.captureMouseButton()
     return result.ok
       ? { ok: true, button: result.button }
-      : { ok: false, message: describeMouseCaptureFailure(result.failure) }
+      : {
+          ok: false,
+          message: describeMouseCaptureFailure(
+            result.failure,
+            barkPlatform(this.deps.platform ?? 'darwin')
+          )
+        }
   }
 
   private setToggleShortcut(accelerator: string): void {
@@ -865,7 +1212,7 @@ export class DictationService {
     this.helperStatus = null
   }
 
-  onOverlayAction(action: OverlayAction, gen: number | null): void {
+  onOverlayAction(action: OverlayAction, gen: number | null, record?: string): void {
     switch (action) {
       case 'pill':
         this.begin('pill')
@@ -890,8 +1237,31 @@ export class DictationService {
         if (gen !== null) void this.copyRecovery(gen)
         break
       case 'dismiss':
+        // Round 28 (rule b): Dismiss of any card ends the current notice for good. A notice that was the card on
+        // screen is all this Dismiss does.
+        if (this.noticeState.current && this.panelFits()) {
+          this.supersedeNotice()
+          break
+        }
+        this.supersedeNotice()
+        // The shared dismiss never touches a clipboard offer (it has its own actions, and Dismiss asks first).
+        if (this.panel?.kind === 'clipboard-offer') break
         if (this.panel) this.setPanel(null)
         else this.dispatch({ type: 'dismiss' })
+        break
+      case 'offer-restore':
+        if (this.panel?.kind === 'clipboard-offer' && this.shownOffer(record)) {
+          this.supersedeNotice() // rule (b): a click on a card
+          void this.restoreOffer()
+        }
+        break
+      case 'offer-dismiss':
+      case 'offer-delete':
+      case 'offer-keep':
+        if (this.panel?.kind === 'clipboard-offer' && this.shownOffer(record)) {
+          this.supersedeNotice() // rule (b)
+          this.offerAction(action)
+        }
         break
       case 'view':
         this.viewLastChange()
@@ -945,6 +1315,56 @@ export class DictationService {
       })
       return
     }
+    const integrity = this.deps.helperIntegrity?.()
+    if (integrity === 'damaged') {
+      this.dispatch({ type: 'notice', level: 'error', message: this.copy.helperDamaged })
+      return
+    }
+    if (integrity === 'unchecked' || integrity === 'checking') {
+      // Windows: the helper is verified before it may run; this usually takes well under a second.
+      this.deps.checkHelperIntegrity?.()
+      this.dispatch({
+        type: 'notice',
+        level: 'info',
+        message: `Checking the ${FEATURE_NAME} helper. Try again in a moment.`
+      })
+      return
+    }
+    if (this.deps.helper.blocked) {
+      this.dispatch({ type: 'notice', level: 'error', message: this.copy.helperBlocked })
+      return
+    }
+    const model = this.deps.engine.dictationModelState?.()
+    if (model && !model.ready) {
+      // A fresh install serves a weaker model while Parakeet downloads; do not dictate on it
+      // (the Mac never dictates on a weaker model either).
+      if (model.downloadFailed) {
+        // Attempting dictation re-triggers the download, rather than waiting for a recording, and
+        // the words say what actually happened.
+        const retry = this.deps.engine.retryDictationModel?.() ?? 'unavailable'
+        this.dispatch({
+          type: 'notice',
+          level: retry === 'in-progress' ? 'info' : 'error',
+          message:
+            retry === 'started'
+              ? `The ${FEATURE_NAME} speech model could not be downloaded. Retrying the download now.`
+              : retry === 'in-progress'
+                ? `The ${FEATURE_NAME} speech model download is being retried. Try again when it finishes.`
+                : `The ${FEATURE_NAME} speech model could not be downloaded. Check your connection and try again.`
+        })
+        return
+      }
+      const percent =
+        model.downloadProgress !== null ? ` ${Math.round(model.downloadProgress * 100)}%` : ''
+      this.dispatch({
+        type: 'notice',
+        level: 'info',
+        message: model.usingFallback
+          ? `Downloading the speech model…${percent} ${FEATURE_NAME} will be ready in a moment.`
+          : `Preparing the speech model.${percent ? ` Downloading…${percent}.` : ''} Try again in a moment.`
+      })
+      return
+    }
     const access = this.deps.microphoneAccess()
     if (access === 'not-determined') {
       // macOS has never been asked: show its dialog from here, so it appears from
@@ -956,8 +1376,7 @@ export class DictationService {
       this.dispatch({
         type: 'notice',
         level: 'error',
-        message:
-          'Microphone access is off. Turn it on in System Settings → Privacy & Security → Microphone.'
+        message: this.copy.microphoneOff
       })
       return
     }
@@ -988,6 +1407,7 @@ export class DictationService {
     this.deferredStart = null
     this.lastStartAt = now
     this.showHiddenPill()
+    this.supersedeNotice() // rule (b): a new dictation
     this.setPanel(null)
     const context: SessionContext = {
       gen,
@@ -1038,7 +1458,7 @@ export class DictationService {
     this.dispatch({
       type: 'notice',
       level: 'info',
-      message: 'Choose Allow in the macOS dialog to let DoodleNote Dev use the microphone.'
+      message: this.copy.microphoneAsk
     })
     let allowed = false
     try {
@@ -1052,8 +1472,7 @@ export class DictationService {
       this.dispatch({
         type: 'notice',
         level: 'error',
-        message:
-          'Microphone access is off. Turn it on in System Settings → Privacy & Security → Microphone.'
+        message: this.copy.microphoneOff
       })
       return
     }
@@ -1081,6 +1500,8 @@ export class DictationService {
       case 'microphone': {
         const access = this.deps.microphoneAccess()
         if (access === 'granted') outcome = 'granted'
+        // Windows has no per-app microphone prompt; the switch is in Windows Settings.
+        else if (barkPlatform(this.deps.platform ?? 'darwin') === 'win32') outcome = 'open-settings'
         else if (access === 'not-determined')
           outcome = (await this.deps.requestMicrophone()) ? 'granted' : 'denied'
         else outcome = 'open-settings'
@@ -1232,9 +1653,13 @@ export class DictationService {
     this.dispatch({
       type: 'engine-failed',
       gen,
-      message: /microphone/i.test(message)
-        ? 'The microphone stopped delivering audio. Check your input device and try again.'
-        : 'The speech engine reported an error. Nothing was inserted.'
+      message:
+        // Pass the capture layer's own specific microphone messages straight through.
+        /no microphone was found|access is turned off|could not be opened/i.test(message)
+          ? message
+          : /microphone/i.test(message)
+            ? 'The microphone stopped delivering audio. Check your input device and try again.'
+            : 'The speech engine reported an error. Nothing was inserted.'
     })
   }
 
@@ -1430,10 +1855,21 @@ export class DictationService {
       edge: this.deps.settings.get().pillEdge,
       showLiveText: this.deps.settings.get().showLiveText,
       showStatusMessages: this.deps.settings.get().showStatusMessages,
-      target: this.overlayTarget()
+      target: this.overlayTarget(),
+      ...(this.clipboardWarning
+        ? {
+            clipboardWarning:
+              this.state.resting?.kind === 'recovery' &&
+              this.state.resting.gen === this.clipboardWarning.gen
+                ? this.clipboardWarning.message
+                : null
+          }
+        : {})
     }
     const base = overlayView(this.state, context)
-    this.deps.overlay.render(this.panel && this.panelFits() ? panelView(this.panel, base) : base)
+    // Round 28 (rule e): the notice slot's notice is what shows while it is current; else the panel or the card.
+    const shown: OverlayPanel | null = this.noticeState.current?.notice ?? this.panel
+    this.deps.overlay.render(shown && this.panelFits() ? panelView(shown, base) : base)
   }
 
   /** The app a live session will type into, when the user wants it shown on the pill. */
@@ -1477,9 +1913,46 @@ export class DictationService {
     return !(resting?.kind === 'notice' && resting.level !== 'success')
   }
 
+  /** The last clipboard notices raised (their sentences; the newest 20), for the log and the tests (round 25). */
+  private readonly noticesRaised: string[] = []
+
+  /**
+   * Round 28: every change to the notice slot goes through the reducer (dictation-notice.ts). A notice it sets is
+   * counted once, gets its own timer (by id: an older timer never ends a newer notice), and is rendered.
+   */
+  private notice(event: NoticeEvent): NoticeStep {
+    const before = this.noticeState.current
+    const step = reduceNotice(this.noticeState, event)
+    this.noticeState = step.state
+    if (step.shown) {
+      const n = step.shown.notice
+      this.noticesRaised.push(clipboardProblemMessage(n.problem, n.missing, n.reason, n.delivered))
+      if (this.noticesRaised.length > 20) this.noticesRaised.shift()
+      if (this.noticeTimer) clearTimeout(this.noticeTimer)
+      const id = step.shown.id
+      this.noticeTimer = setTimeout(() => this.notice({ type: 'expire', id }), NOTICE_MS)
+      this.noticeTimer.unref?.()
+    }
+    if (this.noticeState.current !== before) this.render()
+    return step
+  }
+
+  /** Rule (b): a user interaction ends the current notice for good. */
+  private supersedeNotice(): void {
+    this.notice({ type: 'supersede' })
+  }
+
   private setPanel(panel: OverlayPanel | null, ms = 0): void {
+    // Round 28 (rule b): a panel of the user's own (a transform, a learned word) supersedes the clipboard notice.
+    if (panel && panel.kind !== 'clipboard-offer' && panel.kind !== 'clipboard')
+      this.supersedeNotice()
     if (this.panelTimer) clearTimeout(this.panelTimer)
     this.panelTimer = null
+    // A standing clipboard offer comes back whenever no other panel is shown (it never times out).
+    if (!panel && this.offers.size > 0 && !this.disposed) {
+      panel = this.offerPanel()
+      ms = 0
+    }
     this.panel = panel
     if (panel && ms > 0) {
       this.panelTimer = setTimeout(() => this.setPanel(null), ms)
@@ -1530,7 +2003,8 @@ export class DictationService {
           conflicts: [],
           holdActive: false,
           mouseActive: false,
-          fnKeyAction: null
+          fnKeyAction: null,
+          hooksLive: null
         }
       }
       if (this.state.active?.gen === gen) this.render()
@@ -1662,6 +2136,138 @@ export class DictationService {
     if (context) this.recordLatency(context)
     // A newer session may exist by now; the reducer ignores a stale generation.
     this.dispatch({ type: 'delivery-done', gen, outcome })
+    this.reportClipboard(outcome)
+  }
+
+  /**
+   * Windows only: the user's own clipboard could not be fully put back after a delivery attempt.
+   * Every entry point (dictation, paste last, undo, transforms) reports it here, whatever the
+   * outcome: a panel after a delivery, the recovery card's warning line when one is showing.
+   * Returns the sentence for a caller that shows a plain notice instead (no card), else null.
+   */
+  private reportClipboard(outcome: {
+    kind: string
+    clipboard?: string
+    clipboardHolds?: string
+    clipboardMissing?: string[]
+    clipboardNotice?: string
+    clipboardNoticeReason?: string
+    deliveryId?: string
+    reason?: string
+  }): string | null {
+    // The newest delivery is the one a later clipboard result may still change.
+    if (this.windows) this.clipboardDelivery = outcome.deliveryId ?? null
+    const problem = this.windows
+      ? clipboardProblem(outcome.clipboard, outcome.clipboardHolds, outcome.clipboardNotice)
+      : null
+    if (!problem) return null
+    // Round 22: what the helper named as not put back is said by name.
+    const missing = outcome.clipboardMissing
+    const reason = outcome.clipboardNoticeReason
+    // Round 24 (Opus): the advice depends on whether the text went in (no "paste it yourself" after typing worked).
+    // Round 25: nor after an insertion that MAY have happened (uncertain, or typing that stopped part-way).
+    const delivered = outcome.kind === 'delivered'
+    const mayBeIn =
+      delivered ||
+      outcome.reason === 'insertion-uncertain' ||
+      outcome.reason === 'typing-stopped' ||
+      outcome.reason === 'typing-stopped-secure'
+    const message = clipboardProblemMessage(problem, missing, reason, mayBeIn)
+    if (delivered) {
+      this.notice({
+        type: 'report',
+        notice: {
+          kind: 'clipboard',
+          problem,
+          ...(missing ? { missing } : {}),
+          ...(reason ? { reason } : {}),
+          delivered: true
+        }
+      })
+      return null
+    }
+    const resting = this.state.resting
+    if (resting?.kind === 'recovery') {
+      this.clipboardWarning = { gen: resting.gen, message }
+      this.render()
+      return null
+    }
+    return message
+  }
+
+  /**
+   * Windows: the warning for the last delivery said the clipboard could not be told; its rollback
+   * finished later. The card's line and the panel now say what actually happened (or go away).
+   */
+  private clipboardLate(
+    clipboard: string,
+    deliveryId?: string,
+    missing?: string[],
+    record?: string
+  ): void {
+    // Rule (a): a user's Restore request completes exactly once, by this event or by its reply, whichever comes
+    // first (also one that timed out); a repeated event, or one after the reply, is consumed.
+    if (record) {
+      const late = clipboardProblem(clipboard, undefined)
+      const step = this.notice({
+        type: 'recovered',
+        record,
+        notice: late ? { kind: 'clipboard', problem: late, ...(missing ? { missing } : {}) } : null
+      })
+      if (step.handled) {
+        this.deps.log(
+          `clipboard: a Restore result by its event: ${clipboard}${step.shown ? '' : ' (consumed)'}`
+        )
+        return
+      }
+    }
+    // Round 26 (Astra): an event that names neither a record nor a delivery (an older helper) never changes a
+    // notice, whether or not a delivery has happened yet.
+    if (!record && !deliveryId) {
+      this.deps.log(`clipboard result naming nothing (${clipboard}); no notice changes`)
+      return
+    }
+    // Only the newest delivery's notice changes: a result for an older one never clears (or sets) it. Round 24
+    // (Opus nit): nor does a result that names no delivery while one is current.
+    if (this.clipboardDelivery && deliveryId !== this.clipboardDelivery) {
+      this.deps.log(
+        `clipboard result for an earlier delivery (${clipboard}); the current notice stays`
+      )
+      return
+    }
+    const problem = clipboardProblem(clipboard, undefined)
+    this.deps.log(`clipboard result after the reply: ${clipboard}`)
+    if (this.clipboardWarning) {
+      this.clipboardWarning = problem
+        ? { gen: this.clipboardWarning.gen, message: clipboardProblemMessage(problem, missing) }
+        : null
+      this.render()
+    }
+    // A delivery's own notice still showing says what actually happened now (a new report, or none).
+    if (this.noticeState.current && this.noticeState.current.record === null) {
+      if (problem)
+        this.notice({
+          type: 'report',
+          notice: { kind: 'clipboard', problem, ...(missing ? { missing } : {}) }
+        })
+      else this.notice({ type: 'withdraw-report' })
+    }
+    // A problem nobody was told about yet (a kept transaction left pending, a rollback that failed later):
+    // the recovery card's warning line when that card shows, else the clipboard panel.
+    else if (problem && !this.clipboardWarning) {
+      const resting = this.state.resting
+      if (resting?.kind === 'recovery') {
+        this.clipboardWarning = {
+          gen: resting.gen,
+          message: clipboardProblemMessage(problem, missing)
+        }
+        this.render()
+      } else
+        this.notice({
+          type: 'report',
+          notice: { kind: 'clipboard', problem, ...(missing ? { missing } : {}) }
+        })
+    }
   }
 
   private async deliver(
@@ -1669,7 +2275,17 @@ export class DictationService {
     text: string,
     onStage?: (stage: 'sent') => void,
     guards?: DeliveryGuards
-  ): Promise<DeliveryOutcome & { helper?: HelperDeliveryTimings }> {
+  ): Promise<
+    DeliveryOutcome & {
+      helper?: HelperDeliveryTimings
+      clipboard?: string
+      clipboardHolds?: string
+      clipboardMissing?: string[]
+      clipboardNotice?: string
+      clipboardNoticeReason?: string
+      deliveryId?: string
+    }
+  > {
     if (!context) return { kind: 'recover', reason: 'no-target' }
     const target = await context.target
     if (!target) return { kind: 'recover', reason: 'helper-unavailable' }
@@ -1677,16 +2293,41 @@ export class DictationService {
     if (!target.hasElement) return { kind: 'recover', reason: 'no-target' }
     if (target.secure) return { kind: 'recover', reason: 'secure-field' }
     onStage?.('sent')
-    const result = await this.deps.helper.deliver(context.snapshotId, text, guards)
+    // Windows: named here, so a clipboard result that arrives later can be matched to this delivery.
+    const deliveryId = this.windows ? randomUUID() : undefined
+    const result = await this.deps.helper.deliver(context.snapshotId, text, guards, deliveryId)
     this.deps.log(
       `delivery ${result.outcome}${result.reason ? ` (${result.reason})` : ''} via ${result.method ?? 'none'}, clipboard ${result.clipboard}`
     )
-    const helper = result.timings ? { helper: result.timings } : {}
+    // The helper's clipboard result travels with the outcome to every caller (reportClipboard).
+    const helper = {
+      ...(result.timings ? { helper: result.timings } : {}),
+      clipboard: result.clipboard,
+      ...(result.clipboardHolds ? { clipboardHolds: result.clipboardHolds } : {}),
+      ...(result.clipboardMissing ? { clipboardMissing: result.clipboardMissing } : {}),
+      ...(result.clipboardNotice ? { clipboardNotice: result.clipboardNotice } : {}),
+      ...(result.clipboardNoticeReason
+        ? { clipboardNoticeReason: result.clipboardNoticeReason }
+        : {}),
+      ...(deliveryId ? { deliveryId } : {})
+    }
     if (result.outcome === 'delivered') return { kind: 'delivered', ...helper }
-    if (result.outcome === 'uncertain')
+    if (result.outcome === 'uncertain') {
+      // Windows: the typing fallback stopped part-way, and the helper says why.
+      if (this.windows && result.method === 'type' && typeof result.charsDelivered === 'number')
+        return {
+          kind: 'recover',
+          reason: result.reason === 'secure-field' ? 'typing-stopped-secure' : 'typing-stopped',
+          ...helper
+        }
       return { kind: 'recover', reason: 'insertion-uncertain', ...helper }
-    if (result.outcome === 'refused')
+    }
+    if (result.outcome === 'refused') {
+      // The helper is restarting itself; say so only when a restart will actually happen.
+      if (result.reason === 'helper-busy' && this.deps.helper.willRestart?.() === false)
+        return { kind: 'recover', reason: 'helper-stopped', ...helper }
       return { kind: 'recover', reason: refusalReason(result.reason), ...helper }
+    }
     return { kind: 'recover', reason: 'insertion-failed', ...helper }
   }
 
@@ -1722,11 +2363,19 @@ export class DictationService {
         { snapshotId, target: this.deps.helper.snapshot(snapshotId) },
         text
       )
-      this.dispatch(
-        outcome.kind === 'delivered'
-          ? { type: 'notice', level: 'success', message: 'Pasted.' }
-          : { type: 'notice', level: 'error', message: RECOVERY_MESSAGES[outcome.reason] }
-      )
+      if (outcome.kind === 'delivered') {
+        this.dispatch({ type: 'notice', level: 'success', message: 'Pasted.' })
+        this.reportClipboard(outcome)
+      } else {
+        const note = this.reportClipboard(outcome)
+        this.dispatch({
+          type: 'notice',
+          level: 'error',
+          message: note
+            ? `${RECOVERY_MESSAGES[outcome.reason]} ${note}`
+            : RECOVERY_MESSAGES[outcome.reason]
+        })
+      }
     } finally {
       this.deps.helper.release(snapshotId)
       this.pasting = false
@@ -1861,6 +2510,7 @@ export class DictationService {
       } else {
         this.dispatch({ type: 'keep', text: change.before, reason: outcome.reason })
       }
+      this.reportClipboard(outcome)
     } finally {
       this.deps.helper.release(snapshotId)
       this.broadcast()
@@ -1888,7 +2538,7 @@ export class DictationService {
         message:
           model.path === 'needs-consent'
             ? `Allow sending text to ${model.label} in Settings, ${FEATURE_NAME}, Tidy-up, then try ${def.name} again.`
-            : 'Transforms need a notes model on this Mac or your own provider. Set one up under Notes model.'
+            : this.copy.transformsNeedModel
       })
       return
     }
@@ -1991,6 +2641,7 @@ export class DictationService {
         // Never lose the rewrite: it waits on the card for copying.
         this.dispatch({ type: 'keep', text: verdict.text, reason: outcome.reason })
       }
+      this.reportClipboard(outcome)
     } finally {
       clearTimeout(timeout)
       if (this.transforming === controller) this.transforming = null
@@ -2055,6 +2706,8 @@ export class DictationService {
   /* ---- status ---- */
 
   async status(): Promise<DictationStatus> {
+    // Windows: with Bark off the helper is not started (or verified) just to fill the settings page.
+    if (this.deps.helperIntegrity && !this.deps.settings.get().enabled) return this.snapshotStatus()
     const helper = await this.deps.helper.status()
     if (helper) this.helperStatus = helper
     this.rearmAfterPermissionGrant(helper)
@@ -2105,7 +2758,8 @@ export class DictationService {
       microphone: this.deps.microphoneAccess(),
       accessibility: helper ? helper.accessibility : null,
       inputMonitoring: helper ? helper.inputMonitoring : null,
-      inputMonitoringAccess: helper ? helper.inputMonitoringAccess : null
+      inputMonitoringAccess: helper ? helper.inputMonitoringAccess : null,
+      hooksLive: helper ? (helper.hooksLive ?? null) : null
     }
     return {
       channel: this.deps.channel,
@@ -2113,7 +2767,8 @@ export class DictationService {
       settings,
       phase: this.state.phase,
       permissions,
-      helper: this.deps.helper.available ? 'ready' : 'unavailable',
+      helper: this.helperState(settings.enabled),
+      ...(this.deps.helperLocked ? { helperLocked: this.deps.helperLocked() } : {}),
       toggleShortcut: this.toggleState,
       pasteLastShortcut: this.actionKeys.paste.state,
       copyLastShortcut: this.actionKeys.copy.state,
@@ -2148,6 +2803,26 @@ export class DictationService {
     this.deps.broadcast(this.snapshotStatus())
   }
 
+  /** Windows: the integrity verdict changed; the settings page and the pill reflect it. */
+  helperIntegrityChanged(): void {
+    this.broadcast()
+  }
+
+  /** The helper row. macOS: ready or unavailable, as before Windows support. */
+  private helperState(enabled: boolean): DictationStatus['helper'] {
+    if (!this.deps.helperIntegrity) {
+      // macOS: ready or unavailable as before Windows support (blocked is always false there).
+      if (!this.deps.helper.available) return 'unavailable'
+      return this.deps.helper.blocked ? 'blocked' : 'ready'
+    }
+    const integrity = this.deps.helperIntegrity()
+    if (!this.deps.helper.available || integrity === 'absent') return 'unavailable'
+    if (integrity === 'damaged') return 'damaged'
+    if (this.deps.helper.blocked) return 'blocked'
+    if (!enabled) return 'off'
+    return integrity === 'ok' ? 'ready' : 'checking'
+  }
+
   /** Exposed for tests: the reducer state, never persisted. */
   get phase(): SessionState['phase'] {
     return this.state.phase
@@ -2167,11 +2842,32 @@ function refusalReason(reason: string | undefined): RecoveryReason {
     case 'no-target':
     case 'not-editable':
     case 'accessibility-denied':
+    case 'elevated-target':
     case 'selection-changed':
     case 'text-changed':
       return reason
     case 'helper-unavailable':
       return 'helper-unavailable'
+    // Windows: the paste could not happen and the typing fallback was refused up front.
+    case 'typing-unsupported':
+    case 'typing-unobservable':
+      return 'paste-unavailable'
+    case 'target-unverifiable':
+      return 'target-unverifiable'
+    // Windows: a classic box that does not take a line break from dictation (nothing was typed).
+    case 'line-break-unsupported':
+      return 'line-break-unsupported'
+    // Windows: a modifier was down right before Ctrl+V or a typed key (never sent then).
+    case 'keys-held':
+      return 'keys-held'
+    // Windows: the clipboard changed right before Ctrl+V (nothing pasted; the saved clipboard is kept).
+    case 'clipboard-changed':
+      return 'clipboard-changed'
+    case 'helper-busy':
+      return 'helper-busy'
+    // A delivery the helper refused because the client had already given up: keep the text.
+    case 'deadline-exceeded':
+      return 'insertion-failed'
     default:
       return 'insertion-failed'
   }

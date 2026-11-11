@@ -7,7 +7,6 @@ import type {
   ShortcutState
 } from '../../shared/dictation-api'
 import {
-  MOUSE_SOFTWARE_NOTE,
   PILL_EDGES,
   describeDoubleTap,
   describeFnKey,
@@ -34,15 +33,15 @@ import {
 } from './DictationTidySettings'
 import { DictationDictionarySettings } from './DictationDictionarySettings'
 import { FEATURE_NAME } from '../../shared/dictation-brand'
+import {
+  HOLD_KEY_OPTIONS,
+  barkCopy,
+  barkPlatform,
+  describeWindowsHelper,
+  describeWindowsHooks
+} from '../../shared/dictation-platform'
+import { hostPlatform } from './lib/platform'
 import { Toggle } from './ModelsView'
-
-const HOLD_OPTIONS: Array<{ value: DictationStatus['settings']['holdKey']; label: string }> = [
-  { value: 'off', label: 'Off' },
-  { value: 'rightOption', label: 'Right Option (⌥)' },
-  { value: 'rightControl', label: 'Right Control (⌃)' },
-  { value: 'rightCommand', label: 'Right Command (⌘)' },
-  { value: 'fn', label: 'Fn / Globe' }
-]
 
 function shortcutNote(state: ShortcutState): string {
   switch (state) {
@@ -68,6 +67,9 @@ function seconds(ms: number | null): string {
 }
 
 export function DictationSettings(): React.JSX.Element {
+  const platform = barkPlatform(hostPlatform())
+  const copy = barkCopy(platform)
+  const windows = platform === 'win32'
   const [status, setStatus] = useState<DictationStatus | null>(null)
   const [recording, setRecording] = useState<'toggle' | 'pasteLast' | 'copyLast' | null>(null)
   const [error, setError] = useState('')
@@ -121,9 +123,7 @@ export function DictationSettings(): React.JSX.Element {
           <BarkMark size={44} />
           {FEATURE_NAME}
         </h3>
-        <p className="models-sub">
-          {`${FEATURE_NAME}, DoodleNote's dictation, is available on macOS only for now.`}
-        </p>
+        <p className="models-sub">{copy.unsupported}</p>
       </section>
     )
   }
@@ -149,8 +149,15 @@ export function DictationSettings(): React.JSX.Element {
     why: string,
     state: PermissionState | null
   ): React.JSX.Element => {
-    const action = permissionAction(pane, state)
-    const label = permissionButtonLabel(action)
+    // Windows never prompts for the microphone: the switch is in Windows Settings.
+    const action =
+      windows && state !== null && state !== 'granted'
+        ? 'open-settings'
+        : permissionAction(pane, state)
+    const label =
+      windows && action === 'open-settings'
+        ? `Open ${copy.settingsApp}`
+        : permissionButtonLabel(action)
     const hint = relaunchHint(pane, requested[pane] ?? null)
     return (
       <div className="cal-row">
@@ -181,12 +188,25 @@ export function DictationSettings(): React.JSX.Element {
             className="pill-btn"
             onClick={() => void window.dictation.openPrivacySettings(pane)}
           >
-            Open System Settings
+            {`Open ${copy.settingsApp}`}
           </button>
         )}
       </div>
     )
   }
+  /** Windows: a row that only reports (Windows asks no permission for these). */
+  const infoRow = (title: string, label: string, detail: string): React.JSX.Element => (
+    <div className="cal-row">
+      <span className="cal-row-main">
+        <span className="cal-row-label">{title}</span>
+        <span className="cal-row-sub">
+          {label} · {detail}
+        </span>
+      </span>
+    </div>
+  )
+  const microphoneState = permissions.microphone === 'unknown' ? 'unknown' : permissions.microphone
+  const hooks = describeWindowsHooks(permissions.inputMonitoring, permissions.hooksLive)
   const hiddenNow = status.pillHidden
   const captureMouse = async (): Promise<void> => {
     setCapturing(true)
@@ -228,11 +248,7 @@ export function DictationSettings(): React.JSX.Element {
           <BarkMark size={44} />
           {FEATURE_NAME}
         </h3>
-        <p className="models-sub">
-          {FEATURE_NAME} is DoodleNote&apos;s dictation. Press a shortcut in any app and speak.
-          Speech is recognized on this Mac and the text is typed into the field you were using.
-          Audio is never retained and never leaves this Mac.
-        </p>
+        <p className="models-sub">{copy.intro}</p>
         {status.channel === 'dev' && (
           <p className="models-sub">
             <strong>Development build.</strong> It uses its own profile, library and permissions and
@@ -256,35 +272,50 @@ export function DictationSettings(): React.JSX.Element {
         </div>
       </section>
 
-      <SettingsFold
-        title="Permissions"
-        description="Microphone, Accessibility, and Input Monitoring"
-      >
-        <p className="models-sub">
-          Allow asks macOS directly, which also lists DoodleNote Dev under Privacy &amp; Security.
-          Once you have answered, macOS will not ask again and the button opens System Settings
-          instead.
-        </p>
-        <div className="cal-subcard">
-          {permissionRow(
-            'microphone',
-            'Microphone',
-            'Needed to hear you.',
-            permissions.microphone === 'unknown' ? 'unknown' : permissions.microphone
-          )}
-          {permissionRow(
-            'accessibility',
-            'Accessibility',
-            'Needed to type into other apps. Without it your text is kept for copying.',
-            accessibilityState(permissions.accessibility)
-          )}
-          {permissionRow(
-            'input-monitoring',
-            'Input Monitoring',
-            'Only for hold-to-talk and the mouse button.',
-            permissions.inputMonitoringAccess ?? accessibilityState(permissions.inputMonitoring)
-          )}
-        </div>
+      <SettingsFold title="Permissions" description={copy.permissionsDescription}>
+        <p className="models-sub">{copy.permissionsIntro}</p>
+        {windows ? (
+          <div className="cal-subcard">
+            {permissionRow('microphone', 'Microphone', 'Needed to hear you.', microphoneState)}
+            {infoRow(
+              'Typing into other apps',
+              'No permission needed',
+              'The text goes in through the clipboard and Ctrl+V, and your clipboard is put back afterwards. If pasting fails, DoodleNote can type the text into classic Windows text boxes, such as Notepad; browsers, Electron apps and other apps reachable only through UI Automation get paste only. Line breaks are typed only where the box asks for Enter; otherwise the text is kept so you can paste it yourself. Apps running as administrator cannot be typed into.'
+            )}
+            {infoRow(
+              `${FEATURE_NAME} helper`,
+              status.helper === 'ready'
+                ? 'Ready'
+                : status.helper === 'checking'
+                  ? 'Checking…'
+                  : status.helper === 'off'
+                    ? 'Off'
+                    : status.helper === 'blocked'
+                      ? 'Blocked by Windows'
+                      : status.helper === 'damaged'
+                        ? 'Damaged'
+                        : 'Missing',
+              describeWindowsHelper(status.helper, status.helperLocked)
+            )}
+            {infoRow('Keyboard and mouse hook', hooks.label, hooks.detail)}
+          </div>
+        ) : (
+          <div className="cal-subcard">
+            {permissionRow('microphone', 'Microphone', 'Needed to hear you.', microphoneState)}
+            {permissionRow(
+              'accessibility',
+              'Accessibility',
+              'Needed to type into other apps. Without it your text is kept for copying.',
+              accessibilityState(permissions.accessibility)
+            )}
+            {permissionRow(
+              'input-monitoring',
+              'Input Monitoring',
+              'Only for hold-to-talk and the mouse button.',
+              permissions.inputMonitoringAccess ?? accessibilityState(permissions.inputMonitoring)
+            )}
+          </div>
+        )}
       </SettingsFold>
 
       <SettingsFold title="Shortcuts" description="Keyboard, mouse, and hands-free controls">
@@ -319,13 +350,19 @@ export function DictationSettings(): React.JSX.Element {
               <span className="cal-row-sub">
                 Hold the key while speaking, release to insert.{' '}
                 {status.holdKey === 'needs-permission'
-                  ? 'Allow Input Monitoring first.'
+                  ? copy.holdNeedsPermission
                   : status.holdKey === 'active'
                     ? 'Active.'
                     : ''}
               </span>
               {settings.holdKey === 'fn' && (
                 <span className="cal-row-sub">{describeFnKey(status.fnKeyAction)}</span>
+              )}
+              {windows && settings.holdKey === 'rightOption' && (
+                <span className="cal-row-sub">
+                  On a layout with AltGr, holding Right Alt types nothing on its own, but adding a
+                  letter key produces that layout&apos;s AltGr character instead of dictating.
+                </span>
               )}
             </span>
             <select
@@ -335,7 +372,7 @@ export function DictationSettings(): React.JSX.Element {
                 void update({ holdKey: event.target.value as typeof settings.holdKey })
               }
             >
-              {HOLD_OPTIONS.map((option) => (
+              {HOLD_KEY_OPTIONS[platform].map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -354,14 +391,13 @@ export function DictationSettings(): React.JSX.Element {
                         status.mouseButton === 'active'
                           ? 'Active.'
                           : status.mouseButton === 'needs-permission'
-                            ? 'Allow Input Monitoring first.'
+                            ? copy.mouseNeedsPermission
                             : 'Not available right now.'
                       }`}
               </span>
               {captureMessage && <span className="cal-row-sub">{captureMessage}</span>}
               <span className="cal-row-sub">
-                Middle, back, forward and extra buttons only; left and right click are never used.{' '}
-                {MOUSE_SOFTWARE_NOTE}
+                {copy.mouseButtonsNote} {copy.mouseSoftwareNote}
               </span>
             </span>
             <button
@@ -413,7 +449,7 @@ export function DictationSettings(): React.JSX.Element {
                   {!settings.holdMouseSwallow
                     ? 'Off. The app under the pointer also sees the button (a back button will still go back).'
                     : status.mouseButton === 'active' && !status.mouseSwallowing
-                      ? 'On, but macOS did not allow it, so the app under the pointer still sees the button. Allow Accessibility and Input Monitoring for this app and try again.'
+                      ? copy.swallowRefused
                       : 'On. Only this button is held back; every other button works as usual.'}
                 </span>
               </span>
@@ -672,14 +708,14 @@ export function DictationSettings(): React.JSX.Element {
               <span className="cal-row-label">Speech model</span>
               <span className="cal-row-sub">
                 {status.speech === 'warm'
-                  ? 'Loaded. Dictation starts immediately.'
+                  ? `Loaded. Dictation starts immediately${windows ? `, and stays loaded while ${FEATURE_NAME} is on` : ''}.`
                   : 'Still loading. The first dictation may start slowly.'}
               </span>
             </span>
           </div>
           <div className="cal-row">
             <span className="cal-row-main">
-              <span className="cal-row-label">Last dictation (measured on this Mac)</span>
+              <span className="cal-row-label">{copy.latencyLabel}</span>
               <span className="cal-row-sub">
                 {status.lastLatency
                   ? `start ${seconds(status.lastLatency.startMs)} · stop→text ${seconds(status.lastLatency.stopToFinalMs)} · cleanup ${seconds(status.lastLatency.cleanupMs)} · insert ${seconds(status.lastLatency.insertMs)} · ${status.lastLatency.warm ? 'warm' : 'cold'}`

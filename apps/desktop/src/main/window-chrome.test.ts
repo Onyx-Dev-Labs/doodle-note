@@ -207,3 +207,7 @@ test('automatic notes progress and library writes feed the deferred quit', () =>
   assert.match(indexSource, /recordingTray\?\.showFinishingNotes\(true\)/)
   assert.match(indexSource, /if \(quitting\) return cancelBackgroundFinish\(\)/)
 })
+
+test('index.ts quits on a Windows close that leaves only tagged dictation windows', () => {
+  assert.match(indexSource, /onlyDictationWindowsRemain\(remaining, null\)\) app\.quit\(\)/)
+})

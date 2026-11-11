@@ -13,7 +13,9 @@ declare class AudioWorkletProcessor {
 }
 declare function registerProcessor(
   name: string,
-  processor: new () => AudioWorkletProcessor & {
+  processor: new (options?: {
+    processorOptions?: { frameSamples?: number }
+  }) => AudioWorkletProcessor & {
     process(inputs: Float32Array[][]): boolean
   }
 ): void
@@ -21,12 +23,20 @@ declare function registerProcessor(
 const FRAME_SAMPLES = 4096
 
 class CapturePump extends AudioWorkletProcessor {
-  private frame = new Float32Array(FRAME_SAMPLES)
+  /** Meetings use 4096; dictation asks for smaller frames (processorOptions.frameSamples). */
+  private readonly size: number
+  private frame: Float32Array
   private length = 0
   private active = true
 
-  constructor() {
+  constructor(options?: { processorOptions?: { frameSamples?: number } }) {
     super()
+    const wanted = options?.processorOptions?.frameSamples
+    this.size =
+      typeof wanted === 'number' && wanted >= 128 && wanted <= FRAME_SAMPLES
+        ? wanted
+        : FRAME_SAMPLES
+    this.frame = new Float32Array(this.size)
     this.port.onmessage = (event: MessageEvent<{ type?: string }>) => {
       if (event.data?.type !== 'flush' || !this.active) return
       this.active = false
@@ -42,13 +52,13 @@ class CapturePump extends AudioWorkletProcessor {
     if (!input) return true
     let offset = 0
     while (offset < input.length) {
-      const take = Math.min(FRAME_SAMPLES - this.length, input.length - offset)
+      const take = Math.min(this.size - this.length, input.length - offset)
       this.frame.set(input.subarray(offset, offset + take), this.length)
       this.length += take
       offset += take
-      if (this.length === FRAME_SAMPLES) {
+      if (this.length === this.size) {
         this.post(this.frame)
-        this.frame = new Float32Array(FRAME_SAMPLES)
+        this.frame = new Float32Array(this.size)
         this.length = 0
       }
     }

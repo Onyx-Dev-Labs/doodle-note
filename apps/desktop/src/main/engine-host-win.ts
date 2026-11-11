@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import {
   ENGINE_CAPTURE_CONTROL_CHANNEL,
+  type EngineCaptureControl,
   type EngineCaptureStatus,
   type EngineCommand,
   type EngineEvent,
@@ -10,9 +11,13 @@ import {
 } from '../shared/engine-events'
 import type { EngineEventListener } from './engine-process'
 import { WinSessionRecorder } from './win-audio-recorder'
+import { PARAKEET_UNIFIED } from './windows-asr-models'
 import { join as joinPath } from 'node:path'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
 import { ImportCanceledError } from './import-jobs'
+import type { HeldHelperLike, SignatureCheck } from './helper-integrity'
+import { speechWorkerEnv } from './speech-worker-env'
+import { APP_CHANNEL } from '../shared/app-channel'
 
 const RESTART_DELAY_MS = 3_000
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
@@ -74,6 +79,16 @@ export class WinEngineHost {
   private keepWarm = false
   /** The worker is downloading Parakeet in the background (upgrade fallback). */
   private backgroundDownload = false
+  /** The live model the worker loaded (serve_ready); dictation needs the preferred Parakeet. */
+  private liveModelName: string | null = null
+  /** Background Parakeet download progress 0..1 while the worker runs on the fallback model. */
+  private parakeetDownloadProgress: number | null = null
+  /** The background Parakeet download failed; dictation shows a failure and a retry is offered. */
+  private parakeetDownloadFailed = false
+  /** A deliberate close that must start a fresh worker when its exit arrives (a download retry). */
+  private pendingRestart = false
+  /** A download retry is under way; cleared when the new worker reports progress or a result. */
+  private retryInFlight = false
   /** Frames captured while a reloading worker loads its model. */
   private pendingFrames: Array<{ channel: string; samples: Float32Array; sentAt: number }> = []
   private startAfterReload = false
@@ -84,6 +99,22 @@ export class WinEngineHost {
   private calibration: { calibrationRtf: number; captionMode: string } | null = null
   private stopAfterReload = false
   private readonly idleUnloadMs: number
+  /**
+   * Dictation's capture runs in its own hidden window (raw microphone, no meeting
+   * processing); its control messages go there instead of to every window.
+   */
+  private dictationSink: ((control: EngineCaptureControl) => void) | null = null
+  private sessionProfile: 'dictation' | null = null
+  /** The session asked for microphone `level` events (dictation's meter). */
+  private sessionLevels = false
+  /** Bark's helper check: requests awaiting the worker's reply, keyed `${id}:${op}`. */
+  private readonly helperPending = new Map<
+    string,
+    { child: UtilityProcess; resolve: (reply: Record<string, unknown> | null) => void }
+  >()
+  /** Holds open in the current worker (they end with it). */
+  private readonly helperHeld = new Set<number>()
+  private nextHelperId = 1
 
   constructor(
     private readonly broadcast: (channel: string, payload: unknown) => void,
@@ -150,30 +181,140 @@ export class WinEngineHost {
     return this.sessionActive
   }
 
+  /** True while the worker has its model loaded, so a start is immediate. */
+  get warm(): boolean {
+    return this.ready && this.child !== null && !this.unloaded
+  }
+
+  /**
+   * Whether dictation may run on the live model. Bark needs the preferred Parakeet, which gives
+   * the accuracy the Mac does; a fresh install serves the weaker legacy Zipformer while Parakeet
+   * downloads in the background, and Bark refuses until it is ready (matching the Mac, which never
+   * dictates on a weaker model).
+   */
+  dictationModelState(): {
+    ready: boolean
+    downloadProgress: number | null
+    usingFallback: boolean
+    downloadFailed: boolean
+  } {
+    const onParakeet = this.liveModelName === PARAKEET_UNIFIED.name
+    const usingFallback = this.liveModelName !== null && !onParakeet
+    return {
+      ready: this.warm && onParakeet,
+      downloadProgress: this.parakeetDownloadProgress,
+      usingFallback,
+      downloadFailed: this.parakeetDownloadFailed
+    }
+  }
+
+  /**
+   * Retry the background Parakeet download after a failure, when dictation is attempted (not only
+   * after a recording). A running worker is closed and, when its exit arrives, a fresh one starts
+   * (pendingRestart), which re-checks and re-downloads the model; with no worker, one starts now.
+   * The failure flag is cleared only when the new worker reports download progress (or a result),
+   * so the retry is real when the caller says "retrying". Returns what happened.
+   */
+  retryDictationModel(): 'started' | 'in-progress' | 'unavailable' {
+    if (this.disposed || !this.parakeetDownloadFailed) return 'unavailable'
+    if (this.retryInFlight || this.pendingRestart) return 'in-progress'
+    if (this.sessionActive) return 'unavailable'
+    this.retryInFlight = true
+    if (this.child) {
+      this.pendingRestart = true
+      this.unloading = true
+      this.ready = false
+      this.child.kill()
+    } else {
+      this.reload()
+    }
+    return 'started'
+  }
+
+  /** Where dictation's capture control messages go (the dictation capture window). */
+  setDictationCaptureSink(sink: ((control: EngineCaptureControl) => void) | null): void {
+    this.dictationSink = sink
+  }
+
+  /**
+   * Why a live start would be refused right now, in the words start() would use;
+   * null when it would go ahead. Lets callers that are not the recorder ask first.
+   */
+  liveStartRefusal(): string | null {
+    if (this.disposed) return 'The speech engine is shutting down.'
+    if (this.sessionActive) return 'The speech engine is busy with another session.'
+    const reloading = this.unloaded && !this.child
+    if (!reloading && !this.child && this.warmupResult && !this.warmupResult.ok)
+      return 'The speech engine is restarting to check its model. Try again in a moment.'
+    if (!reloading && (!this.child || !this.ready))
+      return 'The speech engine is still loading its model. Try again in a moment.'
+    return null
+  }
+
+  /**
+   * Start a live session only if nothing else is using the engine, the way
+   * EngineProcess.tryStartLive does on macOS. Never supersedes a meeting.
+   */
+  tryStartLive(
+    opts: EngineStartOptions = {}
+  ): { started: true } | { started: false; reason: string } {
+    const refusal = this.liveStartRefusal()
+    if (refusal) return { started: false, reason: refusal }
+    this.start('live', undefined, opts)
+    return { started: true }
+  }
+
   /** Fork the engine and load models (call once, after app ready). */
   startServe(): void {
     if (this.child || this.disposed) return
     const child = utilityProcess.fork(join(__dirname, 'engine-win.js'), [], {
-      serviceName: 'doodlenote-engine'
+      serviceName: 'doodlenote-engine',
+      // QA hooks reach the worker only where they are meant to (never a production package).
+      env: speechWorkerEnv(process.env, app.isPackaged, APP_CHANNEL)
     })
     this.child = child
     this.ready = false
 
     child.on('message', (message: unknown) => {
       if (this.child !== child) return
-      const data = message as { t?: string; event?: Record<string, unknown> }
+      const data = message as {
+        t?: string
+        event?: Record<string, unknown>
+        id?: number
+        op?: string
+      }
+      if (data.t === 'helper-expired' && typeof data.id === 'number') {
+        // The worker closed this hold on its own: it is not held any more (alive() false at once).
+        this.helperHeld.delete(data.id)
+        return
+      }
+      if (data.t === 'helper') {
+        const key = `${String(data.id)}:${String(data.op)}`
+        const pending = this.helperPending.get(key)
+        this.helperPending.delete(key)
+        pending?.resolve(data as Record<string, unknown>)
+        return
+      }
       if (data.t !== 'event' || !data.event) return
       this.handleEngineEvent(data.event)
     })
     child.on('exit', (code) => {
+      // Bark's helper holds end with the worker: every waiting request learns it at once.
+      this.endHelperHolds(child)
       if (this.child !== child) return
       if (this.unloading) {
-        // Deliberate idle close: setup stays complete; nothing restarts.
+        // Deliberate close: setup stays complete. Only a download retry starts a fresh worker.
         this.unloading = false
         this.unloaded = true
         this.child = null
+        if (this.pendingRestart && !this.disposed) {
+          this.pendingRestart = false
+          this.reload()
+        }
         return
       }
+      // The worker died on its own: a retry it was running has ended.
+      this.retryInFlight = false
       this.backgroundDownload = false
       if (this.sessionActive && this.startAfterReload) {
         // Crashed while reloading for this recording: finish it the same way
@@ -223,6 +364,106 @@ export class WinEngineHost {
     this.postInit()
   }
 
+  /** The worker ended: its holds are gone and its pending helper requests get no answer. */
+  private endHelperHolds(child: UtilityProcess): void {
+    for (const [key, pending] of [...this.helperPending]) {
+      if (pending.child !== child) continue
+      this.helperPending.delete(key)
+      pending.resolve(null)
+    }
+    if (this.child === child || this.child === null) this.helperHeld.clear()
+  }
+
+  private helperRequest(
+    child: UtilityProcess,
+    id: number,
+    op: 'hold' | 'trust' | 'confirm',
+    message: Record<string, unknown>
+  ): Promise<Record<string, unknown> | null> {
+    return new Promise((resolve) => {
+      this.helperPending.set(`${id}:${op}`, { child, resolve })
+      try {
+        child.postMessage(message)
+      } catch {
+        this.helperPending.delete(`${id}:${op}`)
+        resolve(null)
+      }
+    })
+  }
+
+  /**
+   * Bark: have the speech worker open the helper with writing, renaming and deleting denied, read
+   * and hash it through that handle, and keep holding it (windows-helper-check.ts). Starts the worker
+   * if it is not running (Bark needs it for dictation anyway). Rejects when the worker cannot be
+   * started or ends before answering.
+   */
+  async holdHelper(path: string): Promise<HeldHelperLike> {
+    if (this.disposed) throw new Error('the speech engine is shutting down')
+    const started = Date.now()
+    const startedWorker = !this.child
+    if (!this.child) {
+      if (this.unloaded) this.reload()
+      else this.startServe()
+    }
+    const child = this.child
+    if (!child) throw new Error('the speech worker could not be started')
+    const id = this.nextHelperId++
+    const reply = await this.helperRequest(child, id, 'hold', { t: 'helper-hold', id, path })
+    if (!reply) throw new Error('the speech worker ended before holding the helper')
+    console.error(
+      `[engine] helper hold answered in ${Date.now() - started} ms (${startedWorker ? 'the speech worker was started for it' : 'the speech worker was running'})`
+    )
+    const alive = (): boolean => this.child === child && this.helperHeld.has(id)
+    const release = (): void => {
+      if (!this.helperHeld.delete(id)) return
+      if (this.child === child) {
+        try {
+          child.postMessage({ t: 'helper-release', id })
+        } catch {
+          // The worker is gone, and the hold with it.
+        }
+      }
+    }
+    let facts: HeldHelperLike['facts']
+    if (reply.ok === true) {
+      this.helperHeld.add(id)
+      facts = {
+        status: 'held',
+        fileSha256: String(reply.fileSha256),
+        digest: typeof reply.digest === 'string' ? reply.digest : null,
+        signed: reply.signed === true
+      }
+    } else {
+      facts =
+        reply.code === 'ENOENT'
+          ? { status: 'absent' }
+          : { status: 'unreadable', code: String(reply.code ?? 'EIO') }
+    }
+    return {
+      facts,
+      alive,
+      release,
+      trust: async (): Promise<SignatureCheck> => {
+        if (!alive()) return { status: 'unavailable', reason: 'the hold ended' }
+        const answer = await this.helperRequest(child, id, 'trust', { t: 'helper-trust', id })
+        if (!answer) return { status: 'unavailable', reason: 'the speech worker ended' }
+        if (answer.status === 'valid')
+          return {
+            status: 'valid',
+            subjectCn: typeof answer.subjectCn === 'string' ? answer.subjectCn : null,
+            thumbprint: typeof answer.thumbprint === 'string' ? answer.thumbprint : null
+          }
+        if (answer.status === 'invalid') return { status: 'invalid', code: String(answer.code) }
+        return { status: 'unavailable', reason: String(answer.reason ?? 'unknown') }
+      },
+      confirm: async (): Promise<boolean> => {
+        if (!alive()) return false
+        const answer = await this.helperRequest(child, id, 'confirm', { t: 'helper-confirm', id })
+        return !!answer && answer.held === true && alive()
+      }
+    }
+  }
+
   private postInit(): void {
     this.child?.postMessage({
       t: 'init',
@@ -233,6 +474,12 @@ export class WinEngineHost {
 
   private handleEngineEvent(event: Record<string, unknown>): void {
     if (event.event === 'status' && event.stage === 'serve_ready') {
+      this.liveModelName = typeof event.model === 'string' ? event.model : null
+      if (this.liveModelName === PARAKEET_UNIFIED.name) {
+        // The model is here after all (a retry found it): nothing failed any more.
+        this.parakeetDownloadFailed = false
+        this.retryInFlight = false
+      }
       // Diagnostics only: model, measured decode cost and caption mode.
       console.info(
         `[win-asr] ready model=${String(event.model ?? '')} loadMs=${String(event.loadMs ?? '')} calibrationRtf=${String(event.calibrationRtf ?? '')} captionMode=${String(event.captionMode ?? '')}`
@@ -254,17 +501,27 @@ export class WinEngineHost {
       this.failReloadDuringSession(String(event.message ?? 'the speech model could not be loaded'))
       return
     }
-    if (event.event === 'status' && event.stage === 'model_download' && !this.backgroundDownload) {
-      // Closing the worker now would abort the download it is running.
-      this.backgroundDownload = true
-      if (this.idleTimer) clearTimeout(this.idleTimer)
-      this.idleTimer = null
+    if (event.event === 'status' && event.stage === 'model_download') {
+      if (typeof event.progress === 'number') this.parakeetDownloadProgress = event.progress
+      this.parakeetDownloadFailed = false
+      this.retryInFlight = false
+      if (!this.backgroundDownload) {
+        // Closing the worker now would abort the download it is running.
+        this.backgroundDownload = true
+        if (this.idleTimer) clearTimeout(this.idleTimer)
+        this.idleTimer = null
+      }
     }
     if (
       event.event === 'status' &&
       (event.stage === 'model_upgraded' || event.stage === 'model_download_failed')
     ) {
       this.backgroundDownload = false
+      // On a successful upgrade the next serve_ready reports Parakeet; a failure leaves the fallback.
+      if (event.stage === 'model_upgraded') this.liveModelName = PARAKEET_UNIFIED.name
+      if (event.stage === 'model_download_failed') this.parakeetDownloadFailed = true
+      this.retryInFlight = false
+      this.parakeetDownloadProgress = null
       if (!this.sessionActive) this.armIdleTimer()
     }
     if (!this.ready && !this.sessionActive) {
@@ -391,16 +648,38 @@ export class WinEngineHost {
     this.workerStarted = false
     this.activeChannels = channels
     this.inputDevice = opts.inputDevice
+    this.sessionProfile = opts.captureProfile === 'dictation' ? 'dictation' : null
+    this.sessionLevels = opts.levels === true
     // Audio is written only when the session persists it; with no post-stop
     // refinement pass there is no temporary copy any more.
     this.recorder = opts.audioDir ? new WinSessionRecorder(opts.audioDir) : null
     this.emit({ event: 'started', command, filePath, binaryPath: 'sherpa-onnx (in-process)' })
-    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
+    this.sendCaptureControl({
       action: 'start',
       sessionId: this.activeSessionId,
       channels,
-      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {})
+      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {}),
+      ...(this.sessionProfile ? { profile: this.sessionProfile } : {})
     })
+  }
+
+  /** Meetings: every window, as before (the main window captures). Dictation: its own window. */
+  private sendCaptureControl(control: EngineCaptureControl): void {
+    if (this.sessionProfile === 'dictation' && this.dictationSink) {
+      this.dictationSink(control)
+      return
+    }
+    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, control)
+  }
+
+  /** Peak of one microphone frame, for the dictation meter. */
+  private emitLevel(samples: Float32Array): void {
+    let peak = 0
+    for (let i = 0; i < samples.length; i++) {
+      const value = Math.abs(samples[i] as number)
+      if (value > peak) peak = value
+    }
+    this.emit({ event: 'level', channel: 'mic', peak: Math.min(1, peak) })
   }
 
   stop(): void {
@@ -465,6 +744,7 @@ export class WinEngineHost {
     ) {
       return
     }
+    if (this.sessionLevels && channel === 'mic') this.emitLevel(samples)
     if (this.startAfterReload) {
       this.recorder?.write(channel, samples)
       // Bounded: a reload takes seconds. Past the cap audio is still saved,
@@ -588,10 +868,11 @@ export class WinEngineHost {
   setInputDevice(uid: string | null): void {
     this.inputDevice = uid ?? undefined
     if (!this.sessionActive || !this.activeChannels.includes('mic')) return
-    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
+    this.sendCaptureControl({
       action: 'switch-input',
-      sessionId: this.activeSessionId,
-      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {})
+      sessionId: this.activeSessionId as number,
+      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {}),
+      ...(this.sessionProfile ? { profile: this.sessionProfile } : {})
     })
   }
 
@@ -655,7 +936,11 @@ export class WinEngineHost {
   }
 
   private stopCaptureInRenderer(sessionId: number): void {
-    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, { action: 'stop', sessionId })
+    this.sendCaptureControl({
+      action: 'stop',
+      sessionId,
+      ...(this.sessionProfile ? { profile: this.sessionProfile } : {})
+    })
   }
 
   dispose(): void {

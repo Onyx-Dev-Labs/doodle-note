@@ -10,6 +10,13 @@
 import { overlayFontCss, barkPine, barkWhite } from './brand-assets'
 import { FEATURE_NAME } from '../shared/dictation-brand'
 
+/**
+ * The URL the page navigates to for an action, as the overlay window parses it: the action, then (for an offer's
+ * buttons, round 24) the 32-hex record of the card the page showed. Shared with the window's will-navigate handler
+ * and the rendered layout check, so the page-to-main hop cannot drift.
+ */
+export const OVERLAY_ACTION_URL = /^doodle-dictation:\/\/([a-z-]+)(?:\/([0-9a-f]{32}))?$/
+
 export function overlayHtml(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
@@ -69,15 +76,17 @@ ${overlayFontCss}
   .caption-state{color:var(--mute);line-height:1.35;overflow-wrap:anywhere}
   /* message card */
   .card{box-sizing:border-box;flex:1;border-radius:16px 14px 17px 13px/13px 17px 14px 16px;padding:10px 14px;display:flex;flex-direction:column;gap:6px;min-height:0}
-  .card .title{font-weight:700;font-size:14px;line-height:1.3}
+  .card .title{flex:none;font-weight:700;font-size:14px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
   .card.warn{border-color:var(--warn)}.card.error{border-color:var(--err)}
-  .card .detail{flex:1;min-height:0;color:var(--mute);font:12px/1.35 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
+  .card .cardwarn{flex:0 1 auto;min-height:1lh;overflow-y:auto;overscroll-behavior:contain;color:var(--warn);font-weight:600;font-size:12px;line-height:1.35}
+  .card .detail{flex:1;min-height:1lh;color:var(--mute);font:12px/1.35 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
   .diff{flex:1;min-height:0;overflow:hidden;font:12px/1.45 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;white-space:pre-wrap;word-break:break-word;-webkit-user-select:text;user-select:text;background:var(--wash);border-radius:8px;padding:6px 8px}
   .diff ins{text-decoration:none;color:var(--ok);background:rgba(79,122,74,.16);border-radius:3px}
   .diff del{color:var(--err);background:rgba(179,65,47,.14);border-radius:3px;text-decoration:line-through}
-  .btns{display:flex;gap:6px;justify-content:flex-end}
+  .btns{flex:none;display:flex;gap:6px;justify-content:flex-end}
   .btn{color:var(--ink);background:var(--wash);border:1.4px solid var(--ink);padding:1px 10px;border-radius:9px;text-decoration:none;font-size:13px}
   .btn.primary{background:var(--accent);color:#fff;border-color:var(--ink)}
+  .btn.pending{opacity:.6;cursor:default}
   .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   [hidden]{display:none!important}
   @media (prefers-reduced-motion:reduce){.rest{transition:none}.rest:hover{transform:none}}
@@ -107,12 +116,17 @@ ${overlayFontCss}
   <div class="caption" id="caption" hidden><div class="caption-state" id="captionState" hidden></div><div class="warn" id="warn" hidden></div><div class="detail" id="detail"></div></div>
   <div class="card" id="card" hidden>
     <div class="title" id="title"></div>
+    <div class="cardwarn" id="cardWarn" hidden></div>
     <div class="detail" id="cardDetail"></div>
     <div class="diff" id="diff" hidden aria-label="Changes: removed words are struck through, added words are highlighted"></div>
     <div class="btns">
       <a class="btn" id="view" href="doodle-dictation://view" role="button" hidden>View</a>
       <a class="btn primary" id="undo" href="doodle-dictation://undo" role="button" hidden>Undo</a>
       <a class="btn primary" id="copy" href="doodle-dictation://copy" role="button" hidden>Copy text</a>
+      <a class="btn primary" id="offerRestore" data-action="offer-restore" href="doodle-dictation://offer-restore" role="button" hidden>Restore</a>
+      <a class="btn" id="offerDismiss" data-action="offer-dismiss" href="doodle-dictation://offer-dismiss" role="button" hidden>Dismiss</a>
+      <a class="btn" id="offerKeep" data-action="offer-keep" href="doodle-dictation://offer-keep" role="button" hidden>Keep it</a>
+      <a class="btn primary" id="offerDelete" data-action="offer-delete" href="doodle-dictation://offer-delete" role="button" hidden>Delete saved copy</a>
       <a class="btn" id="dismiss" href="doodle-dictation://dismiss" role="button" hidden>Dismiss</a>
     </div>
   </div>
@@ -213,12 +227,30 @@ ${overlayFontCss}
     if (next.mode === 'message') {
       $('card').className = 'card ' + (next.tone === 'ok' ? '' : next.tone)
       $('title').textContent = next.title
+      // Windows only sets this on a card (the clipboard could not be fully put back).
+      $('cardWarn').textContent = next.warning || ''
+      $('cardWarn').hidden = !next.warning
       $('cardDetail').textContent = next.detail
       $('cardDetail').hidden = !next.detail
       $('copy').hidden = !next.controls.copy
       $('view').hidden = !next.controls.view
       $('undo').hidden = !next.controls.undo
       $('dismiss').hidden = !next.controls.dismiss
+      // Round 29 (Astra P1): every offer button's link is REBUILT on every render from its fixed action
+      // (data-action) and the view, never derived from what an earlier render left in the DOM. Round 24: it names
+      // the offer this card shows, so a click acts on no other. Round 28: an outstanding Restore reads
+      // "Restoring…" and has no link (it cannot be clicked); the next render gives the link back.
+      for (const id of ['offerRestore', 'offerDismiss', 'offerKeep', 'offerDelete']) {
+        const button = $(id)
+        button.hidden = !next.controls[id]
+        const pending = id === 'offerRestore' && !!next.restoring
+        if (pending) button.removeAttribute('href')
+        else button.setAttribute('href', 'doodle-dictation://' + button.dataset.action + (next.offerRecord ? '/' + next.offerRecord : ''))
+        if (pending) button.setAttribute('aria-disabled', 'true')
+        else button.removeAttribute('aria-disabled')
+        button.classList.toggle('pending', pending)
+      }
+      $('offerRestore').textContent = next.restoring ? 'Restoring…' : 'Restore'
       const diff = $('diff')
       diff.hidden = !next.diff
       diff.textContent = ''

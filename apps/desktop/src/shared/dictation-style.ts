@@ -85,6 +85,46 @@ export const BUILTIN_STYLE_APPS: Record<Exclude<StyleCategory, 'other'>, string[
   ]
 }
 
+/**
+ * The same categories on Windows, by executable name (the Windows helper reports the
+ * focused program's file name, in lower case, where macOS reports a bundle id). The
+ * two vocabularies never overlap: a Windows name always ends in ".exe".
+ */
+export const BUILTIN_STYLE_APPS_WINDOWS: Record<Exclude<StyleCategory, 'other'>, string[]> = {
+  personal: [
+    'whatsapp.exe',
+    'whatsapp.root.exe',
+    'telegram.exe',
+    'discord.exe',
+    'signal.exe',
+    'messenger.exe'
+  ],
+  work: [
+    'slack.exe',
+    'ms-teams.exe',
+    'teams.exe',
+    'ciscocollabhost.exe',
+    'webex.exe',
+    'zoom.exe',
+    'linear.exe'
+  ],
+  email: [
+    'outlook.exe',
+    'olk.exe',
+    'hxoutlook.exe',
+    'thunderbird.exe',
+    'mailbird.exe',
+    'superhuman.exe'
+  ]
+}
+
+/** The built-in lists the settings page shows on a platform. */
+export function builtinStyleApps(
+  platform: 'darwin' | 'win32' = 'darwin'
+): Record<Exclude<StyleCategory, 'other'>, string[]> {
+  return platform === 'win32' ? BUILTIN_STYLE_APPS_WINDOWS : BUILTIN_STYLE_APPS
+}
+
 function normalizeId(id: string): string {
   return id.trim().toLowerCase()
 }
@@ -102,19 +142,24 @@ export function categoryForApp(
   for (const category of ['personal', 'work', 'email'] as const) {
     if (BUILTIN_STYLE_APPS[category].some((id) => normalizeId(id) === wanted)) return category
   }
+  for (const category of ['personal', 'work', 'email'] as const) {
+    if (BUILTIN_STYLE_APPS_WINDOWS[category].some((id) => normalizeId(id) === wanted))
+      return category
+  }
   return 'other'
 }
 
 /** The apps a category lists, built-in first, for the settings page. */
 export function appsInCategory(
   category: StyleCategory,
-  apps: StyleApps
+  apps: StyleApps,
+  platform: 'darwin' | 'win32' = 'darwin'
 ): Array<{ bundleId: string; builtin: boolean }> {
   const mine = apps[category]
   const builtin =
     category === 'other'
       ? []
-      : BUILTIN_STYLE_APPS[category].filter(
+      : builtinStyleApps(platform)[category].filter(
           // An app the user moved elsewhere is no longer listed here.
           (id) => categoryForApp(id, apps) === category
         )

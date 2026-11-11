@@ -2,6 +2,9 @@ import { createBeforeQuitHandler, finishRecordingBeforeQuit } from './engine-qui
 import { APP_CHANNEL } from '../shared/app-channel'
 import { planProfile } from './profile-identity'
 import { createDictationHost } from './dictation-host'
+import { WinDictationCapture } from './win-dictation-capture'
+import { onlyDictationWindowsRemain } from './dictation-windows'
+import { windowsInputStateUid, winDictationEngine } from './win-dictation-engine'
 import type { DictationService } from './dictation-service'
 import { SourceIndexService } from './source-index-service'
 import { RecipeRunner } from './recipe-runner'
@@ -116,6 +119,21 @@ function resolveEngineBinary(): string {
 
 /** The native dictation helper: beside the engine in the packaged app. */
 function resolveDictationHelperBinary(): string {
+  if (process.platform === 'win32') {
+    // Bark's Windows helper (engine/windows/dictation-helper, built with the .NET
+    // Framework 4.8 compiler): Resources/engine in the packaged app.
+    return app.isPackaged
+      ? join(process.resourcesPath, 'engine', 'dictation-helper.exe')
+      : path.resolve(
+          app.getAppPath(),
+          '..',
+          '..',
+          'engine',
+          '.build',
+          'windows',
+          'dictation-helper.exe'
+        )
+  }
   if (app.isPackaged) {
     return join(process.resourcesPath, 'engine', 'dictation-helper')
   }
@@ -297,6 +315,7 @@ function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
 
 let notesService: NotesService | null = null
 let dictation: DictationService | null = null
+let winDictationCapture: WinDictationCapture | null = null
 let recipeRunner: RecipeRunner | null = null
 let calendarService: CalendarService | null = null
 let winBatchTranscriber: WinBatchTranscriber | null = null
@@ -383,6 +402,16 @@ function createWindow(): void {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null
     recording.rendererGone()
+    // Windows: the pill and the hidden capture window outlive the main window, so
+    // window-all-closed never fires on its own. When a real close (not hide-to-tray)
+    // leaves only those, quit — preserving step 3's "close quits unless recording".
+    if (process.platform === 'win32' && !quitting && !recording.busy) {
+      const remaining = BrowserWindow.getAllWindows().filter(
+        (other) => other !== window && !other.isDestroyed()
+      )
+      // The pill and hidden capture window are tagged, so they never keep the app alive.
+      if (onlyDictationWindowsRemain(remaining, null)) app.quit()
+    }
   })
   window.webContents.on('did-start-loading', () => {
     if (recording.busy && engine.running) engine.stop()
@@ -762,17 +791,53 @@ app.whenReady().then(async () => {
   )
   notesService.registerIpc()
 
-  // System-wide dictation (macOS). Created once the notes service exists so
-  // optional cleanup shares its model ownership. Disabled until the user
+  // System-wide dictation (macOS and Windows). Created once the notes service
+  // exists so optional cleanup shares its model ownership. Disabled until the user
   // turns it on in Settings; nothing here opens the microphone by itself.
+  const barkWindows = process.platform === 'win32' && engine instanceof WinEngineHost
+  const winEngineHost = barkWindows ? (engine as WinEngineHost) : null
+  // Windows: the microphone is recorded raw in a hidden window of Bark's own, and the
+  // shared Parakeet worker transcribes it; the C# helper hears the hold key and types.
+  winDictationCapture = winEngineHost
+    ? new WinDictationCapture({
+        preload: join(__dirname, '../preload/dictation-capture.js'),
+        load: (window) =>
+          is.dev && process.env['ELECTRON_RENDERER_URL']
+            ? window.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/dictation-capture.html`)
+            : window.loadFile(join(__dirname, '../renderer/dictation-capture.html')),
+        testHooks: !app.isPackaged && process.env.DOODLENOTE_BARK_TEST_HOOKS === '1',
+        onCaptureLost: (status) => winEngineHost.captureStatus(status)
+      })
+    : null
+  if (winEngineHost && winDictationCapture) {
+    const capture = winDictationCapture
+    winEngineHost.setDictationCaptureSink((control) => capture.control(control))
+  }
+  const winBark =
+    winEngineHost && winDictationCapture
+      ? winDictationEngine(winEngineHost, winDictationCapture)
+      : null
   dictation = createDictationHost({
     channel: APP_CHANNEL,
     userData: app.getPath('userData'),
     logsDir: app.getPath('logs'),
     helperPath: resolveDictationHelperBinary(),
-    // Bark needs the Swift engine for speech and the helper for typing: macOS only.
-    // It is off until the person turns it on in Settings.
-    engine: process.platform === 'darwin' && engine instanceof EngineProcess ? engine : null,
+    packaged: app.isPackaged,
+    // Bark needs a speech engine and a helper for typing: the Swift engine and helper
+    // on macOS, the Parakeet worker and the C# helper on Windows. It is off until the
+    // person turns it on in Settings.
+    engine:
+      process.platform === 'darwin' && engine instanceof EngineProcess ? engine : (winBark ?? null),
+    ...(winBark && winEngineHost
+      ? {
+          inputStateUid: (uid: string | null) =>
+            windowsInputStateUid(uid, (id) => winBark.deviceName(id)),
+          // While Bark is on, the speech model stays loaded so a press starts at once.
+          onEnabled: (enabled: boolean) => winEngineHost.setKeepWarm(enabled),
+          // The speech worker holds and verifies the helper before each spawn (no PowerShell).
+          helperHolder: (path: string) => winEngineHost.holdHelper(path)
+        }
+      : {}),
     notes: () => notesService,
     meetingBusy: () => recording.busy || libraryActivity.moving,
     setMicHeld: (held) => {
@@ -1101,6 +1166,7 @@ function focusMainWindow(): void {
 app.on('will-quit', () => {
   // Cancels any dictation session and releases the shortcuts and the helper.
   void dictation?.dispose()
+  winDictationCapture?.dispose()
   void recipeRunner?.stop().then(() => notesService?.dispose())
   calendarService?.dispose()
   winBatchTranscriber?.dispose()

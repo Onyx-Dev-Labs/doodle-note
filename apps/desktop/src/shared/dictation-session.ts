@@ -36,6 +36,8 @@ export type RecoveryReason =
   | 'no-target'
   | 'not-editable'
   | 'accessibility-denied'
+  /** Windows: the focused app runs as administrator, so a non-elevated helper cannot type into it. */
+  | 'elevated-target'
   | 'insertion-uncertain'
   | 'insertion-failed'
   | 'helper-unavailable'
@@ -43,6 +45,33 @@ export type RecoveryReason =
   | 'selection-changed'
   /** Undo: the field no longer holds the text that was inserted. */
   | 'text-changed'
+  /**
+   * Windows: the clipboard could not be used to paste, and typing the text instead is not safe there
+   * (an app whose accessibility updates cannot be observed per keystroke, such as Chromium apps).
+   */
+  | 'paste-unavailable'
+  /** Windows: whether the field is safe to type into (identity, password state) could not be read. */
+  | 'target-unverifiable'
+  /**
+   * Windows: the typing fallback stopped part-way: a character could not be confirmed as it arrived,
+   * focus moved, or it ran out of time. Some of the text may be in the field.
+   */
+  | 'typing-stopped'
+  /**
+   * Windows: a supported classic text box that does not accept Enter from dictation (no
+   * ES_WANTRETURN), so text with a line break was not typed at all.
+   */
+  | 'line-break-unsupported'
+  /** Windows: Shift, Ctrl, Alt or Win was held down right before the keys would have gone out. */
+  | 'keys-held'
+  /** Windows: the clipboard changed in the last moment before Ctrl+V, so nothing was pasted. */
+  | 'clipboard-changed'
+  /** Windows: the helper stopped (stuck app) and no automatic restart is left this session. */
+  | 'helper-stopped'
+  /** Windows: the typing fallback stopped part-way because the field became a password field. */
+  | 'typing-stopped-secure'
+  /** Windows: the helper's calls into other apps are stuck (an app is not responding). */
+  | 'helper-busy'
 
 export type DeliveryOutcome =
   { kind: 'delivered' } | { kind: 'recover'; reason: RecoveryReason; detail?: string }

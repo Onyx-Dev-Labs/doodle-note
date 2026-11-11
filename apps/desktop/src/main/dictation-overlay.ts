@@ -11,10 +11,22 @@ import {
   type SoundKind
 } from '../shared/dictation-pill'
 import { overlaySize, type OverlayView } from './dictation-overlay-view'
-import { overlayHtml } from './dictation-overlay-page'
+import { OVERLAY_ACTION_URL, overlayHtml } from './dictation-overlay-page'
+import { tagDictationWindow } from './dictation-windows'
 
 export type OverlayAction =
-  'stop' | 'cancel' | 'copy' | 'dismiss' | 'pill' | 'menu' | 'view' | 'undo'
+  | 'stop'
+  | 'cancel'
+  | 'copy'
+  | 'dismiss'
+  | 'pill'
+  | 'menu'
+  | 'view'
+  | 'undo'
+  | 'offer-restore'
+  | 'offer-dismiss'
+  | 'offer-delete'
+  | 'offer-keep'
 
 const DRAG_TICK_MS = 16
 /** A drag whose release never arrived (pointer lost) ends by itself. */
@@ -51,7 +63,7 @@ export class DictationOverlay {
   } | null = null
 
   constructor(
-    private readonly onAction: (action: OverlayAction, gen: number | null) => void,
+    private readonly onAction: (action: OverlayAction, gen: number | null, record?: string) => void,
     /** The pill was dropped near this edge. */
     private readonly onEdge: (edge: PillEdge) => void
   ) {}
@@ -204,13 +216,15 @@ export class DictationOverlay {
         autoplayPolicy: 'no-user-gesture-required'
       }
     })
+    tagDictationWindow(window)
     window.setAlwaysOnTop(true, 'screen-saver')
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event, url) => {
       event.preventDefault()
-      const match = /^doodle-dictation:\/\/([a-z-]+)$/.exec(url)
-      if (match) this.handle(match[1] as string)
+      // Round 24: an offer's buttons carry the record of the card the page showed (32 hex digits).
+      const match = OVERLAY_ACTION_URL.exec(url)
+      if (match) this.handle(match[1] as string, match[2])
     })
     this.loaded = false
     this.sentIcon = null
@@ -227,7 +241,7 @@ export class DictationOverlay {
     return window
   }
 
-  private handle(name: string): void {
+  private handle(name: string, record?: string): void {
     switch (name) {
       case 'drag-start':
         this.beginDrag()
@@ -243,7 +257,11 @@ export class DictationOverlay {
       case 'menu':
       case 'view':
       case 'undo':
-        this.onAction(name, this.lastView?.gen ?? null)
+      case 'offer-restore':
+      case 'offer-dismiss':
+      case 'offer-delete':
+      case 'offer-keep':
+        this.onAction(name, this.lastView?.gen ?? null, record)
         break
     }
   }
@@ -261,6 +279,9 @@ export class DictationOverlay {
       .filter(Boolean)
       .join(';')
     this.sentIcon = icon
-    void window.webContents.executeJavaScript(script).catch(() => {})
+    // Round 29: a render that throws in the page is logged (it used to be swallowed).
+    void window.webContents.executeJavaScript(script).catch((error: unknown) => {
+      console.error('[dictation] the overlay page failed to render:', error)
+    })
   }
 }

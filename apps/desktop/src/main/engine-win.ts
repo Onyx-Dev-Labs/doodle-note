@@ -14,7 +14,10 @@
  *        {t:'start', channels:[...]}      — begin a session
  *        {t:'audio', channel, samples}    — 16k mono Float32Array frame
  *        {t:'stop'}                       — finish session (emit finals+done)
+ *        {t:'helper-hold'|'helper-trust'|'helper-confirm'|'helper-release', id, path?}
+ *                                         — Bark's helper check (windows-helper-check.ts)
  *   out: {t:'event', event:{...}}         — engine event object
+ *        {t:'helper', id, op, ...}        — the helper check's replies
  *
  * An updated install whose Parakeet model is not downloaded yet uses the
  * cached streaming Zipformer from earlier builds for live captions (see
@@ -40,6 +43,7 @@ import {
   parakeetRecognizerConfig,
   sileroVadConfig,
   vadBufferSeconds,
+  windowsFfi,
   type SherpaModule
 } from './windows-asr-recognizers'
 import {
@@ -59,6 +63,8 @@ import {
   type LegacyRecognizer
 } from './windows-asr-legacy'
 import { EchoOrderGate } from './windows-asr-echo-gate'
+import { HelperChecker, type FfiLike } from './windows-helper-check'
+import { boundedTestStallMs, MAX_ASR_STALL_MS, MAX_CONFIRM_STALL_MS } from './speech-worker-env'
 
 interface AudioMessage {
   t: 'audio'
@@ -83,6 +89,8 @@ type InMessage =
   | { t: 'start'; channels: string[]; sessionId?: number }
   | AudioMessage
   | { t: 'stop'; sessionId?: number }
+  | { t: 'helper-hold'; id: number; path: string }
+  | { t: 'helper-trust' | 'helper-confirm' | 'helper-release'; id: number }
 
 interface ChannelTranscriber {
   readonly channel: string
@@ -102,7 +110,7 @@ function emit(event: Record<string, unknown>): void {
  * QA hook (packaged-app smoke only, inert unless set): stall the first decode
  * of each live session for this many milliseconds to force a real backlog.
  */
-const TEST_STALL_MS = Number(process.env.DOODLENOTE_ASR_TEST_STALL_MS ?? 0)
+const TEST_STALL_MS = boundedTestStallMs(process.env.DOODLENOTE_ASR_TEST_STALL_MS, MAX_ASR_STALL_MS)
 
 function withTestStall(
   model: OfflineRecognizerLike<OfflineStreamLike>
@@ -492,9 +500,57 @@ function ingest(data: AudioMessage): void {
   }
 }
 
+/**
+ * QA hook (inert unless DOODLENOTE_BARK_TEST_HOOKS=1 and the stall are both set; only a delay): right after
+ * answering the FIRST "still held?" of a hold (the one before the helper's spawn), block this
+ * worker's loop synchronously for this many milliseconds, as loading a model or a long decode does,
+ * so the confirmation after the spawn arrives while the worker cannot answer.
+ */
+const TEST_CONFIRM_STALL_MS =
+  process.env.DOODLENOTE_BARK_TEST_HOOKS === '1'
+    ? boundedTestStallMs(process.env.DOODLENOTE_BARK_TEST_WORKER_STALL_MS, MAX_CONFIRM_STALL_MS)
+    : 0
+const stalledHolds = new Set<number>()
+
+/** Bark's helper check: holds and verifies the helper file for the app (see windows-helper-check.ts). */
+const helperChecker = new HelperChecker(
+  () => windowsFfi() as unknown as FfiLike,
+  undefined,
+  // A hold that expires is reported at once, so the app never counts on it afterwards.
+  (id) => port.postMessage({ t: 'helper-expired', id })
+)
+
 port.on('message', (message: Electron.MessageEvent) => {
   const data = message.data as InMessage
   switch (data.t) {
+    case 'helper-hold':
+      port.postMessage({
+        t: 'helper',
+        id: data.id,
+        op: 'hold',
+        ...helperChecker.hold(data.id, data.path)
+      })
+      break
+    case 'helper-trust':
+      void helperChecker.trust(data.id).then((reply) => {
+        port.postMessage({ t: 'helper', id: data.id, op: 'trust', ...reply })
+      })
+      break
+    case 'helper-confirm':
+      port.postMessage({
+        t: 'helper',
+        id: data.id,
+        op: 'confirm',
+        held: helperChecker.held(data.id)
+      })
+      if (TEST_CONFIRM_STALL_MS > 0 && !stalledHolds.has(data.id)) {
+        stalledHolds.add(data.id)
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, TEST_CONFIRM_STALL_MS)
+      }
+      break
+    case 'helper-release':
+      helperChecker.release(data.id)
+      break
     case 'init':
       knownCalibration = data.calibration ?? null
       void init(data.modelsDir, data.quality, data.parakeetModel)

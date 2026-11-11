@@ -28,8 +28,15 @@ import {
   type MicrophoneAccess
 } from '../shared/dictation-api'
 import type { PermissionPane } from '../shared/dictation-permissions'
+import { privacySettingsUrl } from '../shared/dictation-platform'
 import { CaptureOwnership } from './capture-ownership'
-import { DictationHelperClient } from './dictation-helper-client'
+import {
+  DictationHelperClient,
+  barkHelperIdentity,
+  helperSpawnEnv
+} from './dictation-helper-client'
+import { HelperIntegrity, resolveHelperExpectation, type HelperHolder } from './helper-integrity'
+import { qaHoldPauseMs } from './helper-hold-timing'
 import { DictationOverlay } from './dictation-overlay'
 import { DictationService, type EngineLike } from './dictation-service'
 import { DictationSettingsStore } from './dictation-settings'
@@ -40,8 +47,29 @@ export interface DictationHostOptions {
   userData: string
   logsDir: string
   helperPath: string
-  /** The macOS sidecar host; dictation is unavailable without it. */
+  /** The app runs packaged (app.isPackaged): only the integrity values baked into the build count. */
+  packaged?: boolean
+  /**
+   * Windows: the app identity the helper names its state after. Defaults from the channel
+   * (barkHelperIdentity); a build-time identity module (a QA identity) passes its own here.
+   */
+  helperIdentity?: string | null
+  /**
+   * Windows: the speech worker's hold on the helper file (WinEngineHost.holdHelper), which also
+   * verifies its signature; without it the helper is checked by digest alone (locked:false).
+   */
+  helperHolder?: HelperHolder | null
+  /** The speech engine (macOS sidecar, or Bark's Windows engine); dictation is unavailable without it. */
   engine: EngineLike | null
+  /** Defaults to the running platform. */
+  platform?: NodeJS.Platform
+  /**
+   * Windows: the helper reads a microphone by endpoint name, not Chromium's device id.
+   * Maps the id the session records from to what the helper's input-state expects.
+   */
+  inputStateUid?: (uid: string | null) => string | null
+  /** Called with whether Bark is on (now, and whenever its status changes): keeps the engine warm. */
+  onEnabled?: (enabled: boolean) => void
   notes: () => NotesService | null
   /** The meeting recorder, when it holds or is about to hold the microphone. */
   meetingBusy: () => boolean
@@ -51,12 +79,6 @@ export interface DictationHostOptions {
   isTrustedSender: (sender: WebContents) => boolean
   broadcast: (channel: string, payload: unknown) => void
 }
-
-const PRIVACY_PANES = {
-  microphone: 'Privacy_Microphone',
-  accessibility: 'Privacy_Accessibility',
-  'input-monitoring': 'Privacy_ListenEvent'
-} as const
 
 function isPermissionPane(value: unknown): value is PermissionPane {
   return value === 'microphone' || value === 'accessibility' || value === 'input-monitoring'
@@ -70,6 +92,28 @@ function microphoneAccess(): MicrophoneAccess {
   }
 }
 
+/**
+ * The engine as the service sees it. Every member of EngineLike is forwarded, the optional Windows
+ * ones included (the model-readiness gate and the download retry), so nothing is silently dropped
+ * between the engine and the service. The meeting recorder's handshake counts as running.
+ */
+export function hostEngine(engine: EngineLike, meetingBusy: () => boolean): EngineLike {
+  const wrapped: EngineLike = {
+    tryStartLive: (opts) => engine.tryStartLive(opts),
+    stop: () => engine.stop(),
+    get running() {
+      return engine.running || meetingBusy()
+    },
+    get warm() {
+      return engine.warm
+    },
+    listInputDevices: () => engine.listInputDevices?.() ?? Promise.resolve([])
+  }
+  if (engine.dictationModelState) wrapped.dictationModelState = () => engine.dictationModelState!()
+  if (engine.retryDictationModel) wrapped.retryDictationModel = () => engine.retryDictationModel!()
+  return wrapped
+}
+
 /** Builds the real service from Electron pieces and registers its IPC. */
 export function createDictationHost(options: DictationHostOptions): {
   service: DictationService
@@ -77,13 +121,73 @@ export function createDictationHost(options: DictationHostOptions): {
 } {
   const ownership = new CaptureOwnership()
   const settings = new DictationSettingsStore(options.userData)
-  const helper = new DictationHelperClient({ command: options.helperPath })
+  const platform = options.platform ?? process.platform
+  const packaged = options.packaged ?? false
+  // Bark's test facilities: an unpackaged run with DOODLENOTE_BARK_TEST_HOOKS=1 only.
+  const testHooks = !packaged && process.env.DOODLENOTE_BARK_TEST_HOOKS === '1'
+  // Windows only: the helper's integrity is checked lazily, asynchronously and only right before
+  // it is spawned, never on its own at startup; a damaged helper is never executed. The helper is
+  // spawned when Bark is on, and also with Bark off when this identity has kept clipboard records
+  // on disk (the clipboard offers; see DictationService.loadClipboardOffers), so that check (and the
+  // speech worker it uses) can then run at app start too.
+  const integrity =
+    platform === 'win32'
+      ? new HelperIntegrity({
+          helperPath: options.helperPath,
+          expectation: () => resolveHelperExpectation(options.helperPath, packaged),
+          holder: options.helperHolder ?? null,
+          cachePath: join(options.userData, 'helper-integrity.json'),
+          log: (line) => console.error(`[dictation] ${line}`)
+        })
+      : null
+  const client = new DictationHelperClient({
+    command: options.helperPath,
+    platform,
+    ...(integrity
+      ? {
+          identity: barkHelperIdentity(options.channel, options.helperIdentity),
+          verify: async () => {
+            const lease = await integrity.acquire()
+            // QA only (unpackaged with Bark's test hooks on): hold the lease a while before the spawn,
+            // so a test can end the speech worker in the middle of the hold.
+            // Capped (helper-hold-timing.ts) so the hold cannot expire inside the spawn path.
+            const pause = testHooks
+              ? qaHoldPauseMs(process.env.DOODLENOTE_BARK_TEST_HOLD_PAUSE_MS)
+              : 0
+            if (pause > 0 && lease.locked)
+              await new Promise((resolve) => setTimeout(resolve, pause))
+            return {
+              ok: lease.verdict === 'ok',
+              locked: lease.locked,
+              confirm: lease.confirm,
+              release: lease.release,
+              launched: lease.launched
+            }
+          },
+          // A user's environment must not reach the helper's test facilities; only an unpackaged
+          // run with Bark's test hooks on passes DICTATION_HELPER_* through.
+          env: helperSpawnEnv(process.env, testHooks)
+        }
+      : {})
+  })
+  const mapUid = options.inputStateUid
+  // Windows only: the same client, with the microphone named the way the helper reads it.
+  const helper = mapUid
+    ? new Proxy(client, {
+        get(target, property) {
+          if (property === 'inputState')
+            return (uid: string | null) => target.inputState(mapUid(uid))
+          const value = Reflect.get(target, property, target) as unknown
+          return typeof value === 'function' ? value.bind(target) : value
+        }
+      })
+    : client
 
   // The overlay callback fires only after construction, so the forward reference is safe.
   // The overlay is built before the service it reports to; actions arrive only after both exist.
   const route: { service: DictationService | null } = { service: null }
   const overlay = new DictationOverlay(
-    (action, gen) => route.service?.onOverlayAction(action, gen),
+    (action, gen, record) => route.service?.onOverlayAction(action, gen, record),
     (edge) => route.service?.onPillEdge(edge)
   )
 
@@ -109,20 +213,18 @@ export function createDictationHost(options: DictationHostOptions): {
   const service = new DictationService({
     channel: options.channel,
     supported: options.engine !== null,
+    platform,
+    ...(integrity
+      ? {
+          helperIntegrity: () => integrity.state(),
+          helperLocked: () => integrity.lastLocked,
+          checkHelperIntegrity: () => void integrity.ensure()
+        }
+      : {}),
     settings,
     // The meeting recorder holds the microphone before the sidecar session
     // exists; treat that handshake as busy too.
-    engine: {
-      tryStartLive: (opts) => engine.tryStartLive(opts),
-      stop: () => engine.stop(),
-      get running() {
-        return engine.running || options.meetingBusy()
-      },
-      get warm() {
-        return engine.warm
-      },
-      listInputDevices: () => engine.listInputDevices?.() ?? Promise.resolve([])
-    },
+    engine: hostEngine(engine, options.meetingBusy),
     ownership,
     helper,
     shortcuts: {
@@ -147,6 +249,8 @@ export function createDictationHost(options: DictationHostOptions): {
       options.notes()?.dictationCleanupOptions() ?? { localModelLabel: null, byok: null },
     microphoneAccess,
     requestMicrophone: async () => {
+      // Windows shows no per-app microphone prompt; the switch is in Windows Settings.
+      if (platform === 'win32') return microphoneAccess() === 'granted'
       try {
         return await systemPreferences.askForMediaAccess('microphone')
       } catch {
@@ -154,7 +258,10 @@ export function createDictationHost(options: DictationHostOptions): {
       }
     },
     writeClipboard: (text) => clipboard.writeText(text),
-    broadcast: (status) => options.broadcast(DICTATION_STATUS_EVENT_CHANNEL, status),
+    broadcast: (status) => {
+      options.onEnabled?.(status.supported && status.settings.enabled)
+      options.broadcast(DICTATION_STATUS_EVENT_CHANNEL, status)
+    },
     onMicHeld: options.setMicHeld,
     openSettings: () => {
       options.showMainWindow()
@@ -185,13 +292,19 @@ export function createDictationHost(options: DictationHostOptions): {
   })
 
   route.service = service
+  integrity?.onChange(() => service.helperIntegrityChanged())
+  options.onEnabled?.(options.engine !== null && settings.get().enabled)
   const trusted = (event: { sender: WebContents }): boolean => options.isTrustedSender(event.sender)
   ipcMain.handle(DICTATION_GET_STATUS_CHANNEL, (event) =>
     trusted(event) ? service.status() : null
   )
-  ipcMain.handle(DICTATION_SET_SETTINGS_CHANNEL, (event, update: DictationSettingsUpdate) =>
-    trusted(event) ? service.setSettings(update ?? {}) : null
-  )
+  ipcMain.handle(DICTATION_SET_SETTINGS_CHANNEL, async (event, update: DictationSettingsUpdate) => {
+    if (!trusted(event)) return null
+    const status = await service.setSettings(update ?? {})
+    // Turning Bark on or off from the page does not broadcast; report it here too.
+    options.onEnabled?.(status.supported && status.settings.enabled)
+    return status
+  })
   ipcMain.handle(DICTATION_APP_INFO_CHANNEL, (event, ids: unknown) =>
     trusted(event) ? service.appInfo(ids) : {}
   )
@@ -243,10 +356,9 @@ export function createDictationHost(options: DictationHostOptions): {
     if (trusted(event) && typeof gen === 'number') service.dismissRecovery(gen)
   })
   ipcMain.handle(DICTATION_OPEN_PRIVACY_CHANNEL, (event, pane: unknown) => {
-    if (trusted(event) && typeof pane === 'string' && pane in PRIVACY_PANES) {
-      void shell.openExternal(
-        `x-apple.systempreferences:com.apple.preference.security?${PRIVACY_PANES[pane as keyof typeof PRIVACY_PANES]}`
-      )
+    if (trusted(event) && isPermissionPane(pane)) {
+      const url = privacySettingsUrl(platform, pane)
+      if (url) void shell.openExternal(url)
     }
   })
 

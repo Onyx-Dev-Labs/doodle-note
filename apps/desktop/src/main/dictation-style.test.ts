@@ -166,3 +166,27 @@ test('appsInCategory lists built-in apps first and drops the ones the user moved
   assert.deepEqual(work.at(-1), { bundleId: 'com.apple.mail', builtin: false })
   assert.deepEqual(appsInCategory('other', EMPTY_STYLE_APPS), [])
 })
+
+test('Windows programs are placed by executable name, and macOS ids keep their categories', async () => {
+  const { categoryForApp, appsInCategory, BUILTIN_STYLE_APPS_WINDOWS, EMPTY_STYLE_APPS } =
+    await import('../shared/dictation-style')
+  assert.equal(categoryForApp('slack.exe', EMPTY_STYLE_APPS), 'work')
+  assert.equal(categoryForApp('Slack.EXE', EMPTY_STYLE_APPS), 'work')
+  assert.equal(categoryForApp('olk.exe', EMPTY_STYLE_APPS), 'email')
+  assert.equal(categoryForApp('whatsapp.exe', EMPTY_STYLE_APPS), 'personal')
+  assert.equal(categoryForApp('notepad.exe', EMPTY_STYLE_APPS), 'other')
+  assert.equal(categoryForApp('com.tinyspeck.slackmacgap', EMPTY_STYLE_APPS), 'work')
+  for (const ids of Object.values(BUILTIN_STYLE_APPS_WINDOWS))
+    for (const id of ids) assert.match(id, /^[a-z0-9.-]+\.exe$/, id)
+  // The settings page lists each platform's own built-in apps; macOS is the default.
+  assert.deepEqual(
+    appsInCategory('work', EMPTY_STYLE_APPS, 'win32').map((a) => a.bundleId),
+    BUILTIN_STYLE_APPS_WINDOWS.work
+  )
+  assert.ok(appsInCategory('work', EMPTY_STYLE_APPS).every((a) => !a.bundleId.endsWith('.exe')))
+  // A user's own placement wins on Windows too.
+  assert.equal(
+    categoryForApp('slack.exe', { ...EMPTY_STYLE_APPS, personal: ['slack.exe'] }),
+    'personal'
+  )
+})

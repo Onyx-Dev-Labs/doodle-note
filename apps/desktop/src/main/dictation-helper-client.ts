@@ -1,9 +1,14 @@
+import { DEV_BUNDLE_ID, type AppChannel } from '../shared/app-channel'
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import type { Readable, Writable } from 'node:stream'
+import { graphemes } from './dictation-overlay-view'
 import type {
   AppInfoEntry,
+  ClipboardOffer,
+  ClipboardOfferRestore,
   DeliveryGuards,
   HelperDelivery,
   HelperDeliveryTimings,
@@ -18,6 +23,10 @@ import type {
   SelectionResult,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
+import {
+  HELPER_DELIVER_MARGIN_MS,
+  helperDeliverEstimateMs
+} from '../shared/dictation-helper-protocol'
 
 type HelperChild = ChildProcessByStdio<Writable, Readable, Readable>
 type Reply = { event: 'reply'; id: string; ok: boolean; reason?: string } & Record<string, unknown>
@@ -25,7 +34,131 @@ type Reply = { event: 'reply'; id: string; ok: boolean; reason?: string } & Reco
 export interface HelperLaunch {
   command: string
   args?: string[]
+  /** Defaults to the running platform; only changes behavior on win32. */
+  platform?: NodeJS.Platform
+  /** The monotonic clock (ms) the spin guard reads; defaults to performance.now(). For tests. */
+  clock?: () => number
+  /** Overrides the readiness timeout; for tests that exercise a late ready. */
+  readyTimeoutMs?: number
+  /**
+   * Windows: awaited before EVERY spawn (status included). ok false means the helper must not run
+   * (it failed its integrity check), so it is never executed. After the spawn returns, confirm()
+   * (when given) must answer true, proving the file was still held when the process was created;
+   * otherwise the spawned helper is ended at once and the check runs again. release() follows: until
+   * then the speech worker holds the helper file locked against replacement.
+   */
+  verify?: () => Promise<HelperLaunchVerdict>
+  /** Windows: the spawn environment (see helperSpawnEnv). Defaults to the app's own. */
+  env?: NodeJS.ProcessEnv
+  /**
+   * Windows: the app identity the helper names its own state after (the mute-recovery mutex and
+   * file), so a QA identity installed beside production never shares it. Defaults to
+   * BARK_HELPER_IDENTITY.
+   */
+  identity?: string
 }
+
+/** The production app identity (electron-builder appId). */
+export const BARK_HELPER_IDENTITY = 'com.doodlenote.desktop'
+
+/**
+ * The app identity passed to the Windows helper (DICTATION_HELPER_IDENTITY), which names the
+ * helper's own state after it. Derived from the build channel the app already uses to keep the
+ * development app apart from production (DEV_BUNDLE_ID for `dev`); `override` is the hook for a
+ * build-time identity module (a QA identity installed beside production) and wins when given.
+ */
+export function barkHelperIdentity(channel: AppChannel, override?: string | null): string {
+  if (override && override.trim()) return override.trim()
+  return channel === 'dev' ? DEV_BUNDLE_ID : BARK_HELPER_IDENTITY
+}
+
+/** The integrity verdict for one spawn (see HelperLaunch.verify). */
+export interface HelperLaunchVerdict {
+  ok: boolean
+  /** The file is held (write/rename/delete denied) until release(). */
+  locked?: boolean
+  /** Asked after the spawn returns; false invalidates the spawn (see HelperLaunch.verify). */
+  confirm?: () => Promise<boolean>
+  release?: () => void
+  /** The whole launch succeeded: published, ready, and its first status answered. */
+  launched?: () => void
+}
+
+/** Spawns attempted per start when the hold keeps being lost before the spawn returns. */
+export const HELPER_SPAWN_ATTEMPTS = 3
+
+/**
+ * Windows: the helper's environment. DICTATION_HELPER_* variables reach it only when the app itself
+ * runs in Bark's test mode (unpackaged with DOODLENOTE_BARK_TEST_HOOKS=1), so a user's environment
+ * can never switch on helper test facilities. (The shipped helper has none compiled in anyway.)
+ */
+export function helperSpawnEnv(env: NodeJS.ProcessEnv, testMode: boolean): NodeJS.ProcessEnv {
+  if (testMode) return { ...env }
+  const clean: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (!/^DICTATION_HELPER_/i.test(key)) clean[key] = value
+  }
+  return clean
+}
+
+/**
+ * How long a Windows helper may take to leave after its stdin closes before it is
+ * ended. Windows cannot deliver a catchable signal, and a forced end would skip the
+ * helper's own clean-up. Its worst case is the helper's own constants (Program.cs, read by a test):
+ * QuitWaitMs 3 s for a delivery's restore and reply and an abandoned clipboard write's rollback,
+ * then HooksStopMs 1 s, the clipboard readers' IdleExitWaitMs 0.5 s, AudioRestoreMs 2 s and
+ * DrainMs 0.5 s: 7 s, plus a second of margin.
+ */
+export const WINDOWS_EXIT_GRACE_MS = 8_000
+
+/**
+ * How long to wait for a freshly started helper to announce itself. An unsigned .NET exe
+ * can be scanned on first launch and take several seconds, so this is generous.
+ */
+export const WINDOWS_READY_TIMEOUT_MS = 15_000
+
+/** A helper is not started again within this long of its last exit, so one that dies at once cannot spin. */
+export const SPIN_GUARD_MS = 500
+/**
+ * How much later than the spin guard the first automatic restart is due. Timers can fire a little early
+ * against the clock the guard reads (they measure from the event loop's cached time), so a restart due
+ * exactly at the guard could be refused by it. A restart that still meets the guard waits out the rest.
+ */
+export const RESTART_MARGIN_MS = 100
+/**
+ * Deliveries the client keeps outstanding at once (the service sends one at a time). Late clipboard
+ * results are kept only for outstanding deliveries, so this also bounds what is kept; none is evicted.
+ */
+export const MAX_DELIVERIES_IN_FLIGHT = 4
+/** Backoff between automatic helper restarts after a crash, capped. Every step is past the spin guard. */
+export const RESTART_BACKOFF_MS: readonly number[] = [
+  SPIN_GUARD_MS + RESTART_MARGIN_MS,
+  1_000,
+  2_000,
+  5_000,
+  10_000
+]
+/** A helper that stays up this long is considered healthy; the backoff resets only then. */
+const HELPER_HEALTHY_MS = 60_000
+/** A ceiling on automatic restarts per session, so a helper that always dies cannot spin forever. */
+const MAX_RESTARTS_PER_SESSION = 20
+
+/**
+ * How long the client waits for a Windows delivery, and the elapsed-ms deadline it passes
+ * the helper, both sized from the text length: the typing fallback is ~8 ms/char plus 70 ms
+ * at each word boundary, so a long transcript must not time out and land later as doubled text.
+ */
+export function windowsDeliverBudget(text: string): { timeout: number; deadlineMs: number } {
+  // The deadline must clear the helper's own estimate plus a margin, or a short transcript would
+  // be refused instead of typed; the wait clears the deadline plus the reply's round trip.
+  const estimate = helperDeliverEstimateMs(text)
+  const deadlineMs = Math.min(60_000, estimate + HELPER_DELIVER_MARGIN_MS)
+  const timeout = Math.min(90_000, deadlineMs + 2_000)
+  return { timeout, deadlineMs }
+}
+
+/** spawn() error codes Windows reports when Application Control or Smart App Control blocks a program. */
+const WINDOWS_BLOCKED_CODES = new Set(['UNKNOWN', 'EACCES', 'EPERM'])
 
 export interface HelperTimeouts {
   status: number
@@ -52,6 +185,63 @@ export const DEFAULT_HELPER_TIMEOUTS: HelperTimeouts = {
  * the helper is started lazily and restarted on demand after a crash, with its
  * hold-key watch re-armed. It never receives a credential or provider key.
  */
+/** The helper's own rule for its identity in file names (HelperIdentity.Sanitize). */
+export function sanitizeIdentity(identity: string | null | undefined): string {
+  const trimmed = (identity ?? '').trim() || BARK_HELPER_IDENTITY
+  const clean = [...trimmed]
+    .slice(0, 64)
+    .map((c) => (/[A-Za-z0-9._-]/.test(c) ? c : '_'))
+    .join('')
+  return clean || BARK_HELPER_IDENTITY
+}
+
+/** A helper's offer (event or list entry), checked field by field; null when malformed. */
+function toOffer(value: unknown): ClipboardOffer | null {
+  if (!value || typeof value !== 'object') return null
+  const o = value as Record<string, unknown>
+  if (typeof o.record !== 'string' || !/^[0-9a-f]{32}$/.test(o.record)) return null
+  if (
+    typeof o.formats !== 'number' ||
+    typeof o.bytes !== 'number' ||
+    typeof o.sequence !== 'number'
+  )
+    return null
+  return {
+    record: o.record,
+    delivery: typeof o.delivery === 'string' ? o.delivery : '',
+    formats: o.formats,
+    bytes: o.bytes,
+    sequence: o.sequence,
+    created: typeof o.created === 'string' ? o.created : '',
+    likelyOurs: o.likelyOurs === true,
+    incomplete: o.incomplete === true,
+    missing: toNames(o.missing),
+    // Round 25: every name is kept, so the total is the list's length (a helper that shortens it would send one).
+    missingTotal:
+      typeof o.missingTotal === 'number' && o.missingTotal >= 0
+        ? o.missingTotal
+        : toNames(o.missing).length,
+    // Round 24: an older helper sends no count: every format is taken as content (the helper still refuses).
+    content: typeof o.content === 'number' && o.content >= 0 ? o.content : o.formats
+  }
+}
+
+/**
+ * Format names and reasons from the helper (strings only): what a put-back did not include. Rounds 23-24 (Astra
+ * S2): every name is kept (the card counts them: "+N more"), never silently cut; a long one is shortened by code
+ * points, never inside a surrogate pair.
+ */
+function toNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((name): name is string => typeof name === 'string' && name.length > 0)
+    .map((name) => {
+      // Round 25: cut on grapheme boundaries (never inside a cluster: an emoji sequence, a combining mark).
+      const parts = graphemes(name)
+      return parts.length > 160 ? `${parts.slice(0, 160).join('')}…` : name
+    })
+}
+
 export class DictationHelperClient {
   private child: HelperChild | null = null
   private ready: Promise<boolean> | null = null
@@ -67,7 +257,46 @@ export class DictationHelperClient {
   private readonly tapListeners = new Set<() => void>()
   private readonly clickListeners = new Set<() => void>()
   private readonly exitListeners = new Set<() => void>()
-  private lastExitAt = 0
+  /** When the last helper exited, on `clock` (null: none has). */
+  private lastExitAt: number | null = null
+  /** The last spawn error code, cleared once a helper announces readiness. */
+  private launchError: string | null = null
+  /** The sound output is silenced right now, so a crashed helper must be replaced to give it back. */
+  private mutedOutput = false
+  private restartTimer: NodeJS.Timeout | null = null
+  private restartAttempts = 0
+  private totalRestarts = 0
+  private aliveTimer: NodeJS.Timeout | null = null
+  /** True once the current child announced readiness (even if that arrived after the ready timeout). */
+  private helperReady = false
+  /** The child whose triggers have been re-armed, so re-arming runs once per process. */
+  private rearmedChild: HelperChild | null = null
+  /**
+   * Windows: the ONE launch in progress (verify, confirm the hold, spawn, confirm the hold again).
+   * Every caller that needs the helper meanwhile awaits this same promise.
+   */
+  private launching: Promise<boolean> | null = null
+  /**
+   * Windows: a helper spawned under a lease whose post-spawn hold confirmation has not come back yet.
+   * It is not `child`: nothing can send it a request, and its output (ready, events) is held back
+   * in `gatedChunks` until it is confirmed (then replayed) or discarded unseen.
+   */
+  private gated: HelperChild | null = null
+  private gatedChunks: string[] = []
+  private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
+  private readonly clipboardLateListeners = new Set<
+    (clipboard: string, deliveryId?: string, missing?: string[], record?: string) => void
+  >()
+  /**
+   * Windows: deliveries whose reply has not been consumed yet. A clipboard result for one of them (a late
+   * rollback, a recovery, a pending record) waits in lateOutcomes and is applied to that reply, whatever
+   * the order the reply and the event arrive in (even in one stdout chunk). Entries leave when the
+   * delivery settles: its reply, its timeout, or the helper's exit.
+   */
+  private readonly awaitingDeliver = new Set<string>()
+  private readonly offerListeners = new Set<(offer: ClipboardOffer) => void>()
+  private readonly offerGoneListeners = new Set<(record: string) => void>()
+  private readonly lateOutcomes = new Map<string, { clipboard: string; missing: string[] }>()
 
   constructor(
     private readonly launch: HelperLaunch,
@@ -76,6 +305,18 @@ export class DictationHelperClient {
 
   get available(): boolean {
     return existsSync(this.launch.command)
+  }
+
+  private get windows(): boolean {
+    return (this.launch.platform ?? process.platform) === 'win32'
+  }
+
+  /**
+   * Windows only: the helper exists but Windows would not start it (an unsigned
+   * program held back by Application Control or Smart App Control). Always false on macOS.
+   */
+  get blocked(): boolean {
+    return this.windows && this.launchError !== null && WINDOWS_BLOCKED_CODES.has(this.launchError)
   }
 
   onHold(listener: (event: HoldEvent) => void): () => void {
@@ -101,6 +342,120 @@ export class DictationHelperClient {
     return () => this.exitListeners.delete(listener)
   }
 
+  /**
+   * Windows: the clipboard rollback of the LAST delivery finished after its reply (the reply said the
+   * clipboard state was unknown); `clipboard` is what happened after all (restored, untouched, …).
+   */
+  /** Windows: a kept clipboard transaction is offered to the user (the helper wrote nothing). */
+  onClipboardOffer(listener: (offer: ClipboardOffer) => void): () => void {
+    this.offerListeners.add(listener)
+    return () => this.offerListeners.delete(listener)
+  }
+
+  /** Windows: an offer no longer stands (restored, dismissed, stale, expired). */
+  onClipboardOfferGone(listener: (record: string) => void): () => void {
+    this.offerGoneListeners.add(listener)
+    return () => this.offerGoneListeners.delete(listener)
+  }
+
+  /**
+   * Offer requests (list, restore, dismiss) run one at a time, in order: a refresh never overlaps a restore or a
+   * dismiss, so a list never reflects half of one.
+   */
+  private offerChain: Promise<unknown> = Promise.resolve()
+
+  private serialOffer<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.offerChain.then(run, run)
+    this.offerChain = next.catch(() => undefined)
+    return next
+  }
+
+  /**
+   * Windows: the offers the helper's kept records stand for now (after a restart too). Null when no valid list
+   * came (no helper, a timeout, a malformed reply): the caller keeps what it holds.
+   */
+  async clipboardOffers(): Promise<ClipboardOffer[] | null> {
+    if (!this.windows) return []
+    return this.serialOffer(async () => {
+      const reply = await this.request('clipboard-offers', {}, this.timeouts.status)
+      if (!reply?.ok || !Array.isArray(reply.offers)) return null
+      return (reply.offers as unknown[])
+        .map(toOffer)
+        .filter((offer): offer is ClipboardOffer => offer !== null)
+    })
+  }
+
+  /**
+   * Windows: the user's Restore of an offer. It runs only while the clipboard is unchanged since
+   * `sequence` (the offer's, or the one a "changed" answer gave); otherwise "changed" says what a
+   * restore would overwrite (formats and size only).
+   */
+  async restoreClipboardOffer(
+    record: string,
+    sequence: number,
+    acceptIncomplete = false
+  ): Promise<ClipboardOfferRestore> {
+    if (!this.windows) return { result: 'gone' }
+    // acceptIncomplete: the card showed the user what an incomplete offer cannot put back.
+    const reply = await this.serialOffer(() =>
+      this.request(
+        'clipboard-restore',
+        { record, sequence, ...(acceptIncomplete ? { acceptIncomplete: true } : {}) },
+        this.timeouts.deliver
+      )
+    )
+    if (!reply || typeof reply.result !== 'string') return { result: 'failed' }
+    const missing = toNames(reply.missing)
+    return {
+      result: reply.result,
+      ...(missing.length > 0 ? { missing } : {}),
+      ...(typeof reply.formats === 'number' ? { formats: reply.formats } : {}),
+      ...(typeof reply.bytes === 'number' || reply.bytes === null
+        ? { bytes: reply.bytes as number | null }
+        : {}),
+      ...(typeof reply.sequence === 'number' ? { sequence: reply.sequence } : {})
+    }
+  }
+
+  /**
+   * Windows: whether this identity has kept clipboard records in %TEMP% (file names only; nothing read and
+   * no helper started), so the app can offer them whether or not Bark is on.
+   */
+  hasKeptClipboard(): boolean {
+    if (!this.windows) return false
+    // The exact prefix, then a 32-hex id: no pattern is built from the identity (nothing to escape).
+    const prefix = `DoodleNote-Bark-clipboard-${sanitizeIdentity(this.launch.identity ?? BARK_HELPER_IDENTITY)}-`
+    try {
+      return readdirSync(tmpdir()).some(
+        (file) => file.startsWith(prefix) && /^[0-9a-f]{32}\.state$/.test(file.slice(prefix.length))
+      )
+    } catch {
+      return false
+    }
+  }
+
+  /** Windows: the user dismissed an offer; the helper deletes its record. */
+  async dismissClipboardOffer(record: string): Promise<boolean> {
+    if (!this.windows) return false
+    const reply = await this.serialOffer(() =>
+      this.request('clipboard-dismiss', { record }, this.timeouts.status)
+    )
+    return reply?.dismissed === true
+  }
+
+  onClipboardLate(
+    listener: (clipboard: string, deliveryId?: string, missing?: string[], record?: string) => void
+  ): () => void {
+    this.clipboardLateListeners.add(listener)
+    return () => this.clipboardLateListeners.delete(listener)
+  }
+
+  /** Windows: the low-level hooks were lost and re-installed (or could not be). */
+  onHooks(listener: (phase: 'lost' | 'restored' | 'failed') => void): () => void {
+    this.hookListeners.add(listener)
+    return () => this.hookListeners.delete(listener)
+  }
+
   async status(): Promise<HelperStatus | null> {
     const reply = await this.request('status', {}, this.timeouts.status)
     if (!reply?.ok) return null
@@ -119,7 +474,8 @@ export class DictationHelperClient {
         reply.inputMonitoringAccess === 'not-determined'
           ? reply.inputMonitoringAccess
           : null,
-      fnKeyAction: typeof reply.fnKeyAction === 'number' ? reply.fnKeyAction : null
+      fnKeyAction: typeof reply.fnKeyAction === 'number' ? reply.fnKeyAction : null,
+      hooksLive: typeof reply.hooksLive === 'boolean' ? reply.hooksLive : null
     }
   }
 
@@ -144,12 +500,25 @@ export class DictationHelperClient {
   async muteOutput(): Promise<boolean> {
     if (!(await this.ensureRunning())) return false
     const reply = await this.request('mute-output', {}, this.timeouts.status)
-    return reply?.ok === true && reply.outcome === 'muted'
+    const muted = reply?.ok === true && reply.outcome === 'muted'
+    if (muted) this.mutedOutput = true
+    return muted
   }
 
-  /** Give back the sound muteOutput took. Safe to call when nothing was muted. */
+  /**
+   * Give back the sound muteOutput took. Safe to call when nothing was muted. If the helper
+   * crashed while the sound was muted, start a fresh one, which gives it back on launch.
+   */
   async restoreOutput(): Promise<void> {
-    if (!this.child) return
+    // Windows: a helper that crashed while the sound was muted is replaced to give it back.
+    // macOS keeps the base behaviour exactly: if there is no helper, there is nothing to do.
+    if (!this.child) {
+      if (!this.windows || !this.mutedOutput) return
+      this.mutedOutput = false
+      if (!(await this.ensureRunning())) return
+    } else {
+      this.mutedOutput = false
+    }
     await this.request('restore-output', {}, this.timeouts.status)
   }
 
@@ -176,10 +545,15 @@ export class DictationHelperClient {
    * `uncertain`, never a silent failure: the text may already be in the target,
    * so the caller keeps it and must not resend.
    */
+  /**
+   * `deliveryId` (Windows: the caller's name for this delivery) becomes the request id, so later clipboard
+   * results (late, recovered, pending) can be matched to it (see onClipboardLate).
+   */
   async deliver(
     snapshotId: string,
     text: string,
-    guards: DeliveryGuards = {}
+    guards: DeliveryGuards = {},
+    deliveryId: string = randomUUID()
   ): Promise<HelperDelivery> {
     if (!(await this.ensureRunning())) {
       return {
@@ -189,7 +563,16 @@ export class DictationHelperClient {
         clipboard: 'untouched'
       }
     }
-    const reply = await this.request(
+    // Windows sizes the wait and the helper's deadline from the text length so a long
+    // typing fallback never times out and lands later; macOS keeps its fixed deliver timeout.
+    const budget = this.windows ? windowsDeliverBudget(text) : null
+    const id = deliveryId
+    if (this.windows && this.awaitingDeliver.size >= MAX_DELIVERIES_IN_FLIGHT) {
+      console.error('[dictation] too many deliveries outstanding; refused')
+      return { outcome: 'refused', reason: 'helper-busy', verified: false, clipboard: 'untouched' }
+    }
+    if (this.windows) this.awaitingDeliver.add(id)
+    const pendingReply = this.request(
       'deliver',
       {
         snapshotId,
@@ -198,18 +581,46 @@ export class DictationHelperClient {
           ? { expectSelection: guards.expectSelection }
           : {}),
         ...(guards.replace !== undefined ? { replace: guards.replace } : {}),
-        ...(guards.watch ? { watch: true } : {})
+        ...(guards.watch ? { watch: true } : {}),
+        ...(budget ? { deadlineMs: budget.deadlineMs } : {})
       },
-      this.timeouts.deliver,
-      false
+      budget ? budget.timeout : this.timeouts.deliver,
+      false,
+      id
     )
+    let reply: Reply | null
+    try {
+      reply = await pendingReply
+    } finally {
+      this.awaitingDeliver.delete(id)
+    }
+    // The latest clipboard outcome known for this delivery wins over what the helper knew when it replied.
+    const late = this.lateOutcomes.get(id)
+    this.lateOutcomes.delete(id)
+    const lateFields =
+      late === undefined
+        ? null
+        : {
+            clipboard: late.clipboard,
+            ...(late.clipboard === 'unrestored' ? { clipboardHolds: 'unknown' as const } : {}),
+            ...(late.missing.length > 0 ? { clipboardMissing: late.missing } : {})
+          }
     if (!reply) {
       return {
         outcome: 'uncertain',
         reason: 'helper-timeout',
         verified: false,
-        clipboard: 'untouched'
+        clipboard: 'untouched',
+        ...(lateFields ?? {})
       }
+    }
+    if (lateFields) {
+      reply.clipboard = lateFields.clipboard
+      if (lateFields.clipboardHolds) reply.clipboardHolds = lateFields.clipboardHolds
+      else delete reply.clipboardHolds
+      // Round 24 (Opus nit): the late result decides the names too: none on it leaves none of the reply's.
+      if (lateFields.clipboardMissing) reply.clipboardMissing = lateFields.clipboardMissing
+      else delete reply.clipboardMissing
     }
     const outcome = reply.outcome
     return {
@@ -218,10 +629,31 @@ export class DictationHelperClient {
           ? outcome
           : 'failed',
       ...(typeof reply.reason === 'string' ? { reason: reply.reason } : {}),
-      ...(reply.method === 'ax' || reply.method === 'paste' ? { method: reply.method } : {}),
+      ...(reply.method === 'ax' || reply.method === 'paste' || reply.method === 'type'
+        ? { method: reply.method }
+        : {}),
       verified: reply.verified === true,
       clipboard: typeof reply.clipboard === 'string' ? reply.clipboard : 'untouched',
-      ...(isTimings(reply.timings) ? { timings: reply.timings } : {})
+      ...(isTimings(reply.timings) ? { timings: reply.timings } : {}),
+      // Windows only (the macOS helper never sends these).
+      ...(typeof reply.charsDelivered === 'number' ? { charsDelivered: reply.charsDelivered } : {}),
+      ...(typeof reply.charsUnconfirmed === 'number'
+        ? { charsUnconfirmed: reply.charsUnconfirmed }
+        : {}),
+      ...(reply.clipboardHolds === 'dictated' ||
+      reply.clipboardHolds === 'foreign' ||
+      reply.clipboardHolds === 'unknown'
+        ? { clipboardHolds: reply.clipboardHolds }
+        : {}),
+      ...(toNames(reply.clipboardMissing).length > 0
+        ? { clipboardMissing: toNames(reply.clipboardMissing) }
+        : {}),
+      ...(reply.clipboardNotice === 'not-saved' ? { clipboardNotice: 'not-saved' as const } : {}),
+      ...(reply.clipboardNotice === 'not-saved' &&
+      typeof reply.clipboardNoticeReason === 'string' &&
+      /^[a-z-]{1,32}$/.test(reply.clipboardNoticeReason)
+        ? { clipboardNoticeReason: reply.clipboardNoticeReason }
+        : {})
     }
   }
 
@@ -387,7 +819,7 @@ export class DictationHelperClient {
     const child = this.child
     if (child && child.exitCode === null) {
       child.stdin.end()
-      child.kill('SIGTERM')
+      this.end(child)
     }
   }
 
@@ -395,33 +827,233 @@ export class DictationHelperClient {
     this.disposed = true
     this.holdKey = 'off'
     this.mouse = null
+    if (this.restartTimer) clearTimeout(this.restartTimer)
+    this.restartTimer = null
+    if (this.aliveTimer) clearTimeout(this.aliveTimer)
+    this.aliveTimer = null
     this.failAll()
+    if (this.gated) this.discardGated(this.gated)
     const child = this.child
     this.child = null
     if (child && child.exitCode === null) {
       child.stdin.end()
-      child.kill('SIGTERM')
+      this.end(child)
     }
+  }
+
+  /**
+   * macOS: SIGTERM at once (the helper catches it and restores the sound). Windows:
+   * closing stdin already asks the helper to leave; it is ended only if it lingers.
+   */
+  private end(child: HelperChild): void {
+    if (!this.windows) {
+      child.kill('SIGTERM')
+      return
+    }
+    const timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill()
+    }, WINDOWS_EXIT_GRACE_MS)
+    timer.unref?.()
   }
 
   /* ---- plumbing ---- */
 
   private ensureRunning(): Promise<boolean> {
     if (this.disposed) return Promise.resolve(false)
+    // Windows: callers that arrive while a launch is in progress wait for that same launch.
+    if (this.windows && this.launching) return this.launching
+    // Windows only: a ready that arrived after the readiness timeout still counts for the session.
+    // macOS keeps the base behaviour exactly (no late-ready shortcut).
+    if (this.windows && this.child && this.helperReady) return Promise.resolve(true)
     if (this.child && this.ready) return this.ready
     if (!this.available) return Promise.resolve(false)
     // Do not spin on a helper that dies immediately.
-    if (Date.now() - this.lastExitAt < 500) return Promise.resolve(false)
+    if (this.spinGuardLeft() > 0) return Promise.resolve(false)
+    // Windows: verify the helper immediately before every spawn; a damaged helper never runs.
+    if (this.windows && this.launch.verify) {
+      const launch = this.launchVerified(HELPER_SPAWN_ATTEMPTS)
+      this.launching = launch
+      void launch.finally(() => {
+        if (this.launching === launch) this.launching = null
+      })
+      return launch
+    }
+    return this.spawnChild()
+  }
+
+  /**
+   * Windows: the whole launch as one sequence, shared by every caller (see `launching`):
+   *  1. verify (the speech worker holds the file and checks it);
+   *  2. confirm the hold is still open immediately BEFORE the spawn;
+   *  3. spawn, with the new process gated: not yet `child`, no request can reach it, its output is
+   *     held back, and no trigger is re-armed;
+   *  4. confirm the hold again right AFTER the spawn (CreateProcess runs inside spawn());
+   *  5. only then release the lease and publish the helper (replaying its held-back output).
+   * A failed confirmation ends the gated process before anything observed it. That spawn counts
+   * against the restart allowance like a crash, and the check runs again with a fresh hold after the
+   * normal restart backoff (after repeated losses the integrity check goes digest-only, locked:false).
+   * Killing it cannot undo what it already ran if the bytes had been swapped; see the PR notes for
+   * why process creation is not moved into the worker. The launch counts as a success (which clears
+   * the lost-hold count) only once the published helper answered its first status.
+   */
+  private async launchVerified(attempts: number): Promise<boolean> {
+    const verify = this.launch.verify!
+    for (let attempt = 0; attempt < attempts && !this.disposed; attempt++) {
+      let verdict: HelperLaunchVerdict
+      try {
+        verdict = await verify()
+      } catch {
+        verdict = { ok: false }
+      }
+      if (!verdict.ok || this.disposed) {
+        verdict.release?.()
+        return false
+      }
+      if (this.child && this.ready) {
+        verdict.release?.()
+        return this.ready
+      }
+      const confirm = async (): Promise<boolean> => {
+        if (!verdict.locked || !verdict.confirm) return true
+        try {
+          return await verdict.confirm()
+        } catch {
+          return false
+        }
+      }
+      if (!(await confirm())) {
+        console.error(
+          '[dictation] the helper file was no longer held before the spawn; checking again'
+        )
+        verdict.release?.()
+        continue
+      }
+      const ready = this.spawnChild(true)
+      const spawned = this.gated
+      if (!spawned) {
+        verdict.release?.()
+        return false
+      }
+      if (!(await confirm())) {
+        verdict.release?.()
+        this.discardGated(spawned)
+        // A discarded helper is a spawn like any other: it uses the restart allowance, and the next
+        // attempt waits the normal backoff.
+        const delay = this.countDiscardedSpawn()
+        if (delay === null || attempt + 1 >= attempts) {
+          console.error(
+            '[dictation] the helper file was no longer held when the helper started; ended it unused (no attempts left now)'
+          )
+          break
+        }
+        console.error(
+          `[dictation] the helper file was no longer held when the helper started; ended it unused, checking again in ${delay} ms`
+        )
+        // Not unref'd: a caller is waiting on this launch.
+        await new Promise((resolve) => setTimeout(resolve, delay))
+        continue
+      }
+      verdict.release?.()
+      if (this.disposed || spawned.exitCode !== null || spawned.signalCode !== null) {
+        this.discardGated(spawned)
+        return false
+      }
+      this.publish(spawned)
+      const ok = await ready
+      if (ok && this.child === spawned) {
+        // The first status, sent without re-entering the launch (start: false).
+        const status = await this.request('status', {}, this.timeouts.status, false)
+        if (status?.ok) verdict.launched?.()
+      }
+      return ok
+    }
+    // Out of attempts: the next one comes through the normal restart path (backoff, allowance).
+    if (!this.disposed) this.scheduleRestart()
+    return false
+  }
+
+  /**
+   * A gated helper ended unused: count it like a restart. Returns the backoff before the next
+   * attempt, or null when the session's restart allowance is used up.
+   */
+  private countDiscardedSpawn(): number | null {
+    if (this.totalRestarts >= MAX_RESTARTS_PER_SESSION) return null
+    const delay = RESTART_BACKOFF_MS[Math.min(this.restartAttempts, RESTART_BACKOFF_MS.length - 1)]
+    this.restartAttempts += 1
+    this.totalRestarts += 1
+    return delay
+  }
+
+  /** Automatic restarts (crashes and discarded spawns) used this session (diagnostics, tests). */
+  get restartsUsed(): number {
+    return this.totalRestarts
+  }
+
+  /**
+   * Windows: whether a helper that leaves now is started again on its own (a restart is scheduled
+   * on its exit while the session's allowance lasts). The helper-busy card says "restarting" only then.
+   */
+  willRestart(): boolean {
+    return this.windows && !this.disposed && this.totalRestarts < MAX_RESTARTS_PER_SESSION
+  }
+
+  /** End a gated helper whose lease turned out invalid; nothing ever saw it. */
+  private discardGated(child: HelperChild): void {
+    if (this.gated === child) {
+      this.gated = null
+      this.gatedChunks = []
+    }
+    try {
+      child.stdin.end()
+    } catch {
+      // Already closed.
+    }
+    child.kill()
+  }
+
+  /** The gated helper was confirmed: it becomes `child`, and its held-back output is processed. */
+  private publish(child: HelperChild): void {
+    const chunks = this.gatedChunks
+    this.gated = null
+    this.gatedChunks = []
+    this.child = child
+    this.buffer = ''
+    for (const chunk of chunks) this.consume?.(child, chunk)
+  }
+
+  /** Processes a chunk of the current child's output (set per spawn, see spawnChild). */
+  private consume: ((child: HelperChild, chunk: string) => void) | null = null
+
+  private spawnChild(gate = false): Promise<boolean> {
     let child: HelperChild
     try {
       child = spawn(this.launch.command, this.launch.args ?? [], {
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // Windows: the identity is set last, after DICTATION_HELPER_* was stripped, so neither a
+        // user's environment nor a test run can point the helper at another identity's state.
+        ...(this.windows
+          ? {
+              env: {
+                ...(this.launch.env ?? process.env),
+                DICTATION_HELPER_IDENTITY: this.launch.identity ?? BARK_HELPER_IDENTITY
+              }
+            }
+          : {})
       })
-    } catch {
+    } catch (error) {
+      this.launchError = (error as NodeJS.ErrnoException)?.code ?? 'UNKNOWN'
       return Promise.resolve(false)
     }
-    this.child = child
-    this.buffer = ''
+    // Windows verified launch: gated until the post-spawn hold confirmation (launchVerified).
+    if (gate) {
+      this.gated = child
+      this.gatedChunks = []
+    } else {
+      this.child = child
+      this.buffer = ''
+    }
+    this.helperReady = false
+    this.rearmedChild = null
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
@@ -429,51 +1061,91 @@ export class DictationHelperClient {
     })
     child.stdin.on('error', () => {})
     this.ready = new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), 3_000)
+      const timer = setTimeout(
+        () => resolve(false),
+        this.launch.readyTimeoutMs ?? (this.windows ? WINDOWS_READY_TIMEOUT_MS : 3_000)
+      )
       const settle = (ok: boolean): void => {
         clearTimeout(timer)
         resolve(ok)
       }
-      child.stdout.on('data', (chunk: string) => {
-        if (this.child !== child) return
+      const consume = (from: HelperChild, chunk: string): void => {
+        if (this.child !== from) return
         this.buffer += chunk
         for (let nl = this.buffer.indexOf('\n'); nl !== -1; nl = this.buffer.indexOf('\n')) {
           const line = this.buffer.slice(0, nl)
           this.buffer = this.buffer.slice(nl + 1)
-          if (this.handleLine(line)) settle(true)
+          if (this.handleLine(line)) {
+            this.launchError = null
+            this.helperReady = true
+            // Windows: re-arm the remembered triggers on the actual ready event, not via the ready
+            // promise, which may already have resolved false after a slow (late) readiness. macOS
+            // keeps the base behaviour (re-arm only when the ready promise resolves true, below).
+            if (this.windows) this.rearmTriggers(child)
+            // The backoff resets only once this helper has proved healthy (stayed up a while), so a
+            // helper that always crashes right after ready cannot restart every 0.5 s. Only the
+            // backoff is reset here, not the per-session total (which is a real ceiling).
+            if (this.aliveTimer) clearTimeout(this.aliveTimer)
+            this.aliveTimer = setTimeout(() => {
+              this.restartAttempts = 0
+            }, HELPER_HEALTHY_MS)
+            this.aliveTimer.unref?.()
+            settle(true)
+          }
         }
+      }
+      this.consume = consume
+      child.stdout.on('data', (chunk: string) => {
+        if (this.gated === child) {
+          this.gatedChunks.push(chunk)
+          return
+        }
+        consume(child, chunk)
       })
-      child.on('error', () => settle(false))
+      child.on('error', (error: NodeJS.ErrnoException) => {
+        this.launchError = error.code ?? 'UNKNOWN'
+        settle(false)
+      })
       child.on('close', () => {
         settle(false)
         if (this.child !== child) return
         this.child = null
         this.ready = null
-        this.lastExitAt = Date.now()
+        this.helperReady = false
+        this.rearmedChild = null
+        if (this.aliveTimer) clearTimeout(this.aliveTimer)
+        this.aliveTimer = null
+        this.lastExitAt = this.now()
         this.failAll()
         for (const listener of this.exitListeners) listener()
+        this.scheduleRestart()
       })
     })
-    // Re-arm the mouse button and the hold watch on the fresh process.
-    void this.ready.then((ok) => {
-      if (ok && this.mouse && this.child === child) {
-        void this.request(
-          'mouse-start',
-          { ...this.mouse, minHoldMs: 150 },
-          this.timeouts.hold,
-          false
-        )
-      }
-      if (ok && this.holdKey !== 'off' && this.child === child) {
-        void this.request(
-          'hold-start',
-          { key: this.holdKey, minHoldMs: 150 },
-          this.timeouts.hold,
-          false
-        )
-      }
-    })
+    if (!this.windows) {
+      // macOS, as before Windows support: re-arm the mouse button and the hold watch on the fresh
+      // process only when it became ready within the readiness window.
+      void this.ready.then((ok) => {
+        if (ok) this.rearmTriggers(child)
+      })
+    }
     return this.ready
+  }
+
+  /** Re-arm the remembered mouse button and hold key on a freshly ready helper (once per child). */
+  private rearmTriggers(child: HelperChild): void {
+    if (this.child !== child || this.rearmedChild === child) return
+    this.rearmedChild = child
+    if (this.mouse) {
+      void this.request('mouse-start', { ...this.mouse, minHoldMs: 150 }, this.timeouts.hold, false)
+    }
+    if (this.holdKey !== 'off') {
+      void this.request(
+        'hold-start',
+        { key: this.holdKey, minHoldMs: 150 },
+        this.timeouts.hold,
+        false
+      )
+    }
   }
 
   /** Returns true when the helper announced readiness. */
@@ -503,6 +1175,71 @@ export class DictationHelperClient {
       for (const listener of this.tapListeners) listener()
       return false
     }
+    if (parsed.event === 'hooks') {
+      const phase =
+        parsed.phase === 'lost' || parsed.phase === 'restored' || parsed.phase === 'failed'
+          ? parsed.phase
+          : null
+      if (phase) for (const listener of this.hookListeners) listener(phase)
+      return false
+    }
+    if (parsed.event === 'restarting') {
+      // The helper is leaving to be replaced (stuck provider calls, or clipboard readers stuck on
+      // owners that never render); it exits once its delivery in progress is done.
+      console.error(
+        `[dictation] the helper announced a restart (${typeof parsed.reason === 'string' ? parsed.reason : 'unknown'}); ${this.willRestart() ? 'it will be started again' : 'no automatic restart is left this session'}`
+      )
+      return false
+    }
+    if (
+      parsed.event === 'clipboard' &&
+      (parsed.phase === 'late-restore' ||
+        parsed.phase === 'recovered' ||
+        parsed.phase === 'pending')
+    ) {
+      // late-restore: an abandoned write's rollback finished; recovered: a kept transaction was put back
+      // later (a retry, or the next helper's start); pending: a kept one is ambiguous (left as it is).
+      const clipboard =
+        typeof parsed.clipboard === 'string'
+          ? parsed.clipboard
+          : parsed.phase === 'recovered'
+            ? 'restored'
+            : 'unknown'
+      const id = typeof parsed.id === 'string' ? parsed.id : ''
+      // Round 23 (Astra S1): what the put-back did not include travels with the event (it can precede a reply).
+      const missing = toNames(parsed.missing)
+      console.error(`[dictation] clipboard ${parsed.phase} for an earlier delivery: ${clipboard}`)
+      const record = typeof parsed.record === 'string' ? parsed.record : ''
+      // A kept transaction the helper could not prove its own: offered to the user, nothing written.
+      if (parsed.phase === 'pending' && record) {
+        const offer = toOffer(parsed)
+        if (offer) for (const listener of this.offerListeners) listener(offer)
+        return false
+      }
+      if (parsed.phase === 'recovered' && record)
+        for (const listener of this.offerGoneListeners) listener(record)
+      // Its delivery's reply is not consumed yet: that reply carries it (see deliver()).
+      if (id && this.awaitingDeliver.has(id)) {
+        // Bounded by MAX_DELIVERIES_IN_FLIGHT; it leaves when its delivery settles (never evicted).
+        this.lateOutcomes.set(id, { clipboard, missing })
+        return false
+      }
+      // Round 25 (Astra S1): the record travels too (a rebuilt record's delivery is "", so only it identifies the Restore).
+      for (const listener of this.clipboardLateListeners)
+        listener(
+          clipboard,
+          id || undefined,
+          missing.length > 0 ? missing : undefined,
+          record || undefined
+        )
+      return false
+    }
+    if (parsed.event === 'clipboard' && parsed.phase === 'offer-gone') {
+      const record = typeof parsed.record === 'string' ? parsed.record : ''
+      if (record) for (const listener of this.offerGoneListeners) listener(record)
+      return false
+    }
+    if (parsed.event === 'parse-error') return false
     if (parsed.event === 'reply' && typeof parsed.id === 'string') {
       const entry = this.pending.get(parsed.id)
       if (entry) {
@@ -518,12 +1255,12 @@ export class DictationHelperClient {
     op: string,
     fields: Record<string, unknown>,
     timeoutMs: number,
-    start = true
+    start = true,
+    id: string = randomUUID()
   ): Promise<Reply | null> {
     if (start && !(await this.ensureRunning())) return null
     const child = this.child
     if (!child || child.exitCode !== null) return null
-    const id = randomUUID()
     return new Promise<Reply | null>((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
@@ -538,6 +1275,49 @@ export class DictationHelperClient {
         resolve(null)
       }
     })
+  }
+
+  /**
+   * Windows: a crashed helper is replaced automatically with a growing backoff, so hold-to-talk
+   * and a muted sound do not stay broken until the next manual request. A fresh helper re-arms
+   * the triggers and, on launch, gives back any sound an earlier helper left muted.
+   */
+  private scheduleRestart(): void {
+    if (!this.windows || this.disposed || this.restartTimer) return
+    const wantsHelper = this.holdKey !== 'off' || this.mouse !== null || this.mutedOutput
+    if (!wantsHelper || this.totalRestarts >= MAX_RESTARTS_PER_SESSION) return
+    const delay = RESTART_BACKOFF_MS[Math.min(this.restartAttempts, RESTART_BACKOFF_MS.length - 1)]
+    this.restartAttempts += 1
+    this.totalRestarts += 1
+    this.armRestart(delay)
+  }
+
+  /**
+   * The restart timer. When it fires while the spin guard still holds (a timer can fire a little early),
+   * the restart waits out the rest of the guard instead of being dropped; that uses no further attempt.
+   */
+  private armRestart(delay: number): void {
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      if (this.disposed || this.child) return
+      const left = this.spinGuardLeft()
+      if (left > 0) return this.armRestart(Math.ceil(left) + 1)
+      void this.ensureRunning()
+    }, delay)
+    this.restartTimer.unref?.()
+  }
+
+  private now(): number {
+    return this.launch.clock ? this.launch.clock() : performance.now()
+  }
+
+  /** How long the spin guard still refuses a start (0: it does not). */
+  private spinGuardLeft(): number {
+    if (this.lastExitAt === null) return 0
+    const since = this.now() - this.lastExitAt
+    // A clock reading earlier than the exit (cannot happen with a monotonic clock) still ends the guard.
+    if (since < 0) return 0
+    return since < SPIN_GUARD_MS ? SPIN_GUARD_MS - since : 0
   }
 
   private failAll(): void {

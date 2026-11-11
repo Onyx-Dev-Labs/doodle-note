@@ -34,7 +34,35 @@ const NAMES: Record<string, string> = {
   'com.apple.TextEdit': 'TextEdit',
   'com.microsoft.VSCode': 'Visual Studio Code',
   'notion.id': 'Notion',
-  'md.obsidian': 'Obsidian'
+  'md.obsidian': 'Obsidian',
+  // Windows: the executable names the Windows helper reports.
+  'whatsapp.exe': 'WhatsApp',
+  'whatsapp.root.exe': 'WhatsApp',
+  'telegram.exe': 'Telegram Desktop',
+  'discord.exe': 'Discord',
+  'signal.exe': 'Signal',
+  'messenger.exe': 'Messenger',
+  'slack.exe': 'Slack',
+  'ms-teams.exe': 'Microsoft Teams',
+  'teams.exe': 'Microsoft Teams (classic)',
+  'ciscocollabhost.exe': 'Webex',
+  'webex.exe': 'Webex',
+  'zoom.exe': 'Zoom',
+  'linear.exe': 'Linear',
+  'outlook.exe': 'Outlook (classic)',
+  'olk.exe': 'Outlook',
+  'hxoutlook.exe': 'Mail',
+  'thunderbird.exe': 'Thunderbird',
+  'mailbird.exe': 'Mailbird',
+  'superhuman.exe': 'Superhuman',
+  'chrome.exe': 'Google Chrome',
+  'msedge.exe': 'Microsoft Edge',
+  'firefox.exe': 'Firefox',
+  'notepad.exe': 'Notepad',
+  'code.exe': 'Visual Studio Code',
+  'winword.exe': 'Word',
+  'notion.exe': 'Notion',
+  'obsidian.exe': 'Obsidian'
 }
 
 const byLowerId = new Map(Object.entries(NAMES).map(([id, name]) => [id.toLowerCase(), name]))
