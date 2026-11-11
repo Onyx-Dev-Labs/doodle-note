@@ -471,7 +471,7 @@ round 36: neither does a privacy-marked, memory-only transaction's settlement, C
 deadline is checked again right after them. The delivery's own kept-records check BEFORE Begin takes the recovery lock
 and does file and clipboard work, which cannot be bounded in place (until round 35 its wait was therefore UNBOUNDED;
 the deadline check after it only prevented a late paste). Round 36: it runs on its own thread, and the delivery waits
-for it only while its deadline allows and at most 5 s; not done by then, the paste is refused ("clipboard-busy", or
+for it only while its deadline allows and at most 5 s; not done by then, the paste is refused ("own-busy" since round 39, or
 "deadline") with nothing emptied, and the check finishes on its own (it never writes the clipboard: CI case 55) (a paste that no longer fits empties nothing).
 Round 37 caveat (Opus, Astra P2), as round 36 shipped it: a check its delivery gave up on still ran once it got the
 lock, and a LATER delivery could be writing by then; it, like the 30-minute retention check (pre-existing), opens the
@@ -481,7 +481,7 @@ checks accumulated without a bound. Round 37 fix: recovery never opens the clipb
 Every automatic look (a delivery's check, a retry, the retention check) holds a look lock from before it reads the
 in-flight set to its close, and skips ("a delivery is in flight: no clipboard look now"; kept, checked again later)
 when a delivery is in flight; a delivery, once its record is in flight, waits for a look already inside (at most 1 s;
-past it, "clipboard-busy", nothing emptied). There is ONE delivery check at a time, shared: a delivery joins the
+past it, "own-busy" since round 39, nothing emptied). There is ONE delivery check at a time, shared: a delivery joins the
 outstanding check while it still waits for the lock, or waits (within its own allowance) for a running one before
 starting the next; a check that no delivery waits for any more does nothing once it gets the lock, and stops between
 records (CI case 56: three deliveries during one stall, one check thread; case 57: the retention check during a held
@@ -603,7 +603,10 @@ typing fallback that put the text in it does not (round 24: no double paste). Sc
 REFUSAL BEFORE OUR EMPTYCLIPBOARD, in the save and in the write up to its empty, gives the app a reason, and each has
 its own sentence (round 24): too-large, unrendered,
 nothing-savable, owner-unresponsive, zero-sequence, clipboard-changed (it changed during the save), clipboard-busy
-(another app held it when the write went to open it; round 25), empty-failed (EmptyClipboard failed; round 25), no-record (the
+(another app held it when the write went to open it; round 25), own-busy (round 39: DoodleNote's OWN clipboard work,
+never another app's: the kept-records check before the paste not done in time, a recovery look still inside, or an
+earlier dictation's late write still putting the clipboard back; rounds 36-38 sent clipboard-busy for these, whose
+sentence blamed another app), empty-failed (EmptyClipboard failed; round 25), no-record (the
 transaction, or the write's own first journal, could not be written down), deadline, no-window, unreadable; an
 unknown reason falls back to the plain sentence. Other paths that do not paste report through their own channels,
 not this notice: a target that fails validation, a delivery past its deadline and the guards after our write
@@ -928,7 +931,11 @@ skip while anything is in flight (round 37), the user's Restore answers "busy" (
 a write thread of ours still runs (deliveries and the Restore share the request queue and recovery looks take the
 recovery lock, so a write thread whose delivery returned, a late write and its rollback, is the one opener left; it is
 counted until its rollback is done), and a new delivery waits for a late write at most 1 s
-within its deadline, else refuses ("clipboard-busy", nothing touched) (CI case 59).
+within its deadline, else refuses ("own-busy" since round 39, nothing touched) (CI case 59). Round 39 (Opus nit): a late write that
+has not ended 30 s after it was abandoned (a hung EmptyClipboard was measured at about 5.2 s before Windows gave up, so
+this needs a write that never returns) makes the helper leave to be replaced, the usual restart between deliveries
+("clipboard-write-stuck", logged); its exit waits for that write within its usual wait, and past it the record lets
+the next helper judge the transaction by content (CI case 60, with the watchdog shortened in the test build).
 
 If the helper's UI thread itself crashes, the hooks may block input for up to 3 s while the bounded
 shutdown runs; a clipboard transaction in flight is then finished by the next helper from its record.
