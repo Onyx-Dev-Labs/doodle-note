@@ -98,3 +98,31 @@ test('large repeated exception text has bounded classification work and cannot i
     'Model operation failed; unclassified details omitted for content privacy.'
   )
 })
+
+test('runtime duration and boolean battery observations persist without arbitrary power data', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'notes-log-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const file = join(dir, 'notes-engine.log')
+  const logger = new NotesEngineLog(file)
+  logger.log({ event: 'runtime', backend: 'vulkan', runtimeMs: 6000 })
+  logger.log({ event: 'warmup', reason: 'skipped', why: 'battery', onBatteryPower: true })
+  logger.log({ event: 'warmup', reason: 'start', onBatteryPower: false })
+  logger.log({
+    event: 'warmup',
+    reason: 'start',
+    onBatteryPower: 'PRIVATE'
+  } as unknown as NotesDiagnostic)
+  await logger.flush()
+  const text = await readFile(file, 'utf8')
+  assert.doesNotMatch(text, /PRIVATE/)
+  const lines = text
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+  assert.equal(lines[0].runtimeMs, 6000)
+  assert.equal(lines[1].reason, 'skipped')
+  assert.equal(lines[1].why, 'battery')
+  assert.equal(lines[1].onBatteryPower, true)
+  assert.equal(lines[2].onBatteryPower, false)
+  assert.equal(lines[3].onBatteryPower, undefined)
+})

@@ -205,6 +205,7 @@ export class LocalNotesEngine implements NotesEngine {
     signal?: AbortSignal,
     defaultFailure?: unknown
   ): Promise<Llama> {
+    const started = Date.now()
     const { getLlama, NoBinaryFoundError } = await loadNodeLlamaCpp()
     try {
       const llama = await getLlama({
@@ -212,7 +213,11 @@ export class LocalNotesEngine implements NotesEngine {
         build: 'never'
       })
       signal?.throwIfAborted()
-      this.diagnostic({ event: 'runtime', backend: llama.gpu || 'cpu' })
+      this.diagnostic({
+        event: 'runtime',
+        backend: llama.gpu || 'cpu',
+        runtimeMs: Date.now() - started
+      })
       return llama
     } catch (error) {
       signal?.throwIfAborted()

@@ -17,6 +17,7 @@ export interface NotesDiagnostic {
   backend?: 'vulkan' | 'metal' | 'cpu' | 'cuda' | 'unknown'
   stage?: 'runtime' | 'load' | 'context' | 'generation' | 'condensing' | 'settings' | 'global-chat'
   reason?:
+    | 'skipped'
     | 'start'
     | 'complete'
     | 'cancel'
@@ -28,6 +29,9 @@ export interface NotesDiagnostic {
     | 'no-model'
     | 'no-meeting'
     | 'cpu-prefill'
+  why?: 'disabled' | 'cloud' | 'busy' | 'battery' | 'memory' | 'no-model' | 'no-meeting'
+  onBatteryPower?: boolean
+  runtimeMs?: number
   cached?: boolean
   prefixReused?: boolean
   gpuLayers?: number
@@ -97,9 +101,11 @@ export class NotesEngineLog {
       event: event.event
     }
     if (event.modelId) record.modelId = event.modelId
-    for (const key of ['backend', 'stage', 'reason', 'cached', 'prefixReused'] as const)
+    for (const key of ['backend', 'stage', 'reason', 'why', 'cached', 'prefixReused'] as const)
       if (event[key] !== undefined) record[key] = event[key]
+    if (typeof event.onBatteryPower === 'boolean') record.onBatteryPower = event.onBatteryPower
     for (const key of [
+      'runtimeMs',
       'gpuLayers',
       'loadMs',
       'hashMs',

@@ -31,7 +31,12 @@ import {
   type MergeInput,
   type NotesEngine
 } from '@repo/ai'
-import { labelSegments, sanitizeSpeakerName, speakerInfos } from '@repo/meetings-store'
+import {
+  labelSegments,
+  sanitizeSpeakerName,
+  speakerInfos,
+  speakerLabel
+} from '@repo/meetings-store'
 import {
   NOTES_ACTIVATE_MODEL_CHANNEL,
   NOTES_ASK_CHANNEL,
@@ -904,10 +909,12 @@ export class NotesService {
   }
 
   /** Capture calls this without awaiting it, after the speech engine reports ready. */
-  warmNotesModel(meetingId: string): void {
+  warmNotesModel(meetingId: string, source: 'mic' | 'system' | 'both' = 'both'): void {
     const skip = (
-      reason: 'disabled' | 'cloud' | 'busy' | 'battery' | 'memory' | 'no-model' | 'no-meeting'
-    ): void => this.engineLog.log({ event: 'warmup', reason })
+      reason: 'disabled' | 'cloud' | 'busy' | 'battery' | 'memory' | 'no-model' | 'no-meeting',
+      onBatteryPower?: boolean
+    ): void =>
+      this.engineLog.log({ event: 'warmup', reason: 'skipped', why: reason, onBatteryPower })
     if (!NOTES_WARMUP_ENABLED) return skip('disabled')
     if (this.settings.engineChoice !== 'local') return skip('cloud')
     if (
@@ -918,7 +925,9 @@ export class NotesService {
       this.activateBusy
     )
       return skip('busy')
-    if (powerMonitor.isOnBatteryPower()) return skip('battery')
+    // Read Electron's current state at capture ready, never a settings/startup cache.
+    const onBatteryPower = powerMonitor.isOnBatteryPower()
+    if (onBatteryPower) return skip('battery', onBatteryPower)
     const selected = LOCAL_MODELS.find((spec) => spec.id === this.settings.activeLocalModelId)
     if (!selected) return skip('no-model')
     if (
@@ -928,14 +937,24 @@ export class NotesService {
       return skip('memory')
     const meeting = this.meetings.get(meetingId)
     if (!meeting) return skip('no-meeting')
-    this.engineLog.log({ event: 'warmup', reason: 'start', modelId: selected.id })
-    const system = buildMergeSystemPrompt(
-      meeting.templateId,
-      speakerInfos(
-        meeting.segments.filter((segment) => !segment.echo),
-        meeting.participants
-      )
+    this.engineLog.log({ event: 'warmup', reason: 'start', modelId: selected.id, onBatteryPower })
+    const speakers = speakerInfos(
+      meeting.segments.filter((segment) => !segment.echo),
+      meeting.participants
     )
+    // At ready there are usually no transcript segments yet. Predict the same
+    // channel labels that generation will resolve, including names already known
+    // in the roster. Existing speakers come first for resumed recordings. This is
+    // speculative only: never persist invented segments or change foreground rules.
+    const channels = source === 'both' ? (['mic', 'system'] as const) : [source]
+    for (const channel of channels) {
+      const label = speakerLabel({ channel, speaker: '' }, meeting.participants)
+      const isSelf = channel === 'mic'
+      const seen = speakers.find((speaker) => speaker.label === label)
+      if (seen) seen.isSelf ||= isSelf
+      else speakers.push({ label, isSelf })
+    }
+    const system = buildMergeSystemPrompt(meeting.templateId, speakers)
     const controller = new AbortController()
     const job = { meetingId, controller, work: Promise.resolve() }
     this.notesWarm = job

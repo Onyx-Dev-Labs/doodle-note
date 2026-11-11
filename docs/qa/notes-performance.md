@@ -112,3 +112,60 @@ macOS/Linux instances ignore it, hash the model and make zero safeStorage calls.
 Windows reuses the receipt. All platforms retain in-process verification, and
 service construction never calls safeStorage. Existing store tests retain
 unavailable-storage, decryption-failure and forged-receipt coverage.
+
+## Round 4: recording roster alignment and power observations
+
+The owner’s J2 field log showed 598 warmed tokens but only 112 reused. The warm-up
+read the empty transcript at recording ready; generation read a mic transcript
+with a `You` speaker. With the real Qwen3 tokenizer and automatically selected
+Qwen3 wrapper, the first differing token is index 112 (zero-based): `;` versus
+` (` in these unchanged speaker rules:
+
+- Empty roster: `- "You" is the note-taker; "Them" is everyone else on the call.`
+- Mic roster: `- "You" is the note-taker (the DoodleNote user).` followed by
+  `- "Them" is everyone else on the call.`
+
+Capture now carries its selected source through the accepted `started` event to
+`ready`. Warm-up resolves that source’s channel labels with the same speaker-label
+resolver as generation, including participant names already saved on the meeting.
+Existing non-echo speakers are retained first for resumed recordings. Only the
+speculative inputs change: no invented transcript is saved, and foreground prompt
+text, role placement, template selection and note-quality instructions are unchanged.
+Names/templates changed later, newly identified speakers, or an enabled channel
+that never speaks can still require normal prefix realignment. Full reuse applies
+when the predicted roster and template match the final request.
+
+The opt-in desktop regression runs actual NotesService warm-up and foreground
+input construction, then LocalNotesEngine warm/runRaw with a real Qwen3 GGUF,
+real native evaluation and the automatically selected Qwen3 wrapper. CPU hardware
+injects only GPU eligibility to enter warm-up. It asserts reuse through the entire
+rendered system turn and equality of all warmed tokens. Qwen3-0.6B Q8_0 reproduces
+the field’s token-112 divergence and reuses 605/605 warmed tokens after the fix,
+covering the 603-token rendered system turn. This tests the mechanism, not the
+owner’s Qwen3-4B Vulkan speed. Set `DOODLENOTE_TEST_QWEN_GGUF` to a local Qwen3 GGUF;
+no model is downloaded by the suite. The six always-on roster cases cover mic,
+system and both channels with default and named speakers, including system-first
+speech for the two-channel case.
+
+The battery gate was already called at recording ready, directly through
+`powerMonitor.isOnBatteryPower()`, with true meaning skip. There is no app-cached
+power state or Windows-specific bypass. The integration regression exercises the
+actual started/ready callback with battery changing after service construction:
+battery creates no engine, then AC permits warm-up. Native Electron 44.10.0 on
+Dev04 reports both `isOnBatteryPower()` and `onBatteryPower` as false on AC. This
+cannot establish the owner’s historical power state; they may have been plugged
+in at that instant or switched to battery after warm-up started. This gate is a
+start-time check, not an unplug-during-warm-up cancellation policy.
+
+New diagnostics persist `onBatteryPower` as a boolean on `warmup/start`, and
+`warmup/skipped` with `why: "battery"` and `onBatteryPower: true` on battery skips.
+Other skips also use `reason: "skipped"` and `why`. Runtime acquisition now records
+`runtimeMs` (dynamic import plus getLlama). Context creation remains after model
+load because it requires the loaded model; no speculative overlap is introduced.
+
+At the owner’s measured ~54 prompt tokens/s, avoiding roughly 493 repeated tokens
+would save about 9 seconds of foreground prefill, leaving roughly 3 seconds for
+the actual user message instead of 12.3 seconds. With the same Generate timing,
+load and decode rates, roughly 60 seconds total is an estimate versus 69 seconds;
+recordings long enough to finish warm-up before Generate should hide more setup.
+On battery, warm-up is deliberately skipped. No new owner-device timing is claimed.

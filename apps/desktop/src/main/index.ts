@@ -702,6 +702,8 @@ app.whenReady().then(async () => {
   meetingsService.registerIpc()
   let captureMeetingId: string | undefined
   let pendingCaptureMeetingId: string | undefined
+  let captureSource: 'mic' | 'system' | 'both' = 'both'
+  let pendingCaptureSource: 'mic' | 'system' | 'both' = 'both'
   let captureBase: import('@repo/meetings-store/types').MeetingTranscriptSegment[] = []
   let captureBaseEcho = 0
   let captureId: string | undefined
@@ -777,6 +779,7 @@ app.whenReady().then(async () => {
       // Preparing a start must not reroute the previous capture's checkpoints.
       // Commit the destination/base together with the session's new ownership.
       captureMeetingId = rawEvent.command === 'live' ? pendingCaptureMeetingId : undefined
+      captureSource = pendingCaptureSource
       const captureMeeting = captureMeetingId ? meetingsService.get(captureMeetingId) : null
       captureBase = captureMeeting?.segments ?? []
       captureBaseEcho = captureMeeting?.echoSuppressed ?? 0
@@ -791,7 +794,7 @@ app.whenReady().then(async () => {
     logEngineEvent(event)
     recording.handle(event)
     if (event.event === 'ready' && captureMeetingId && recording.snapshot().phase === 'recording')
-      notesService?.warmNotesModel(captureMeetingId)
+      notesService?.warmNotesModel(captureMeetingId, captureSource)
     if (event.event === 'spawn-error') void notesService?.cancelNotesWarmup()
     if (!recording.busy) micWatcher.setSuppressed(false)
   })
@@ -845,6 +848,7 @@ app.whenReady().then(async () => {
       opts.audioDir = audioService.beginSession(opts.meetingId) ?? undefined
     }
     pendingCaptureMeetingId = request.command === 'live' ? opts.meetingId : undefined
+    pendingCaptureSource = opts.source ?? 'both'
     session.bindMeeting(pendingCaptureMeetingId)
     engine.start(request.command, request.filePath, opts)
   })
