@@ -387,6 +387,9 @@ namespace DoodleNote.DictationHelper
         /// (save, record, bounded write, hold, restore), without a target or Ctrl+V, so recovery can be
         /// exercised natively without any window in front.
         /// </summary>
+        /// <summary>Test build only (round 39): run right after the wait for a recovery look (CI 58b expires its deadline).</summary>
+        static Action TestAfterLookWait;
+
         public static string TestTransaction(string text, int holdMs, int deadlineMs = 0)
         {
             SavedClipboard saved;
@@ -396,7 +399,11 @@ namespace DoodleNote.DictationHelper
             // Round 38: a delivery deadline (deadlineMs, counted from the end of the save and its AFTER_SAVE gate).
             Stopwatch clock = Stopwatch.StartNew();
             Func<bool> stillInTime = null;
-            if (deadlineMs > 0) stillInTime = delegate { return clock.ElapsedMilliseconds <= deadlineMs; };
+            bool expired = false;
+            if (deadlineMs > 0) stillInTime = delegate { return !Volatile.Read(ref expired) && clock.ElapsedMilliseconds <= deadlineMs; };
+            // Round 39 (Astra P3): the hook expires THIS deadline's state right after the look wait; the product's own
+            // predicate then refuses (removing it makes CI 58b fail: the mutant variant shows it).
+            TestAfterLookWait = TestMode.Env("DICTATION_HELPER_TEST_EXPIRE_AFTER_LOOK_WAIT") == "1" ? (Action)delegate { Volatile.Write(ref expired, true); } : null;
             string notStarted = BeginClipboardWrite(text, out saved, out ours, out written, out late,
                 delegate (SavedClipboard s) { Wire.Log("test: saved formats [" + s.DescribeFormats() + "]"); TestMode.Gate("AFTER_SAVE"); clock.Restart(); },
                 stillInTime);
@@ -645,7 +652,9 @@ namespace DoodleNote.DictationHelper
             }
             // Round 37 (Opus): no automatic recovery look may hold the clipboard while our write runs (it would open with the
             // same window and take the write's open over): one already inside is waited for, at most 1 s, else no paste.
-            // Round 38 (Astra P2, Opus): that wait never runs past the delivery's remaining allowance.
+            // Round 38 (Astra P2, Opus): that wait stops once the delivery's allowance is gone; it polls in slices of up to
+            // 50 ms (plus scheduling delay), so it can end about that much after the allowance: the check right after it is
+            // what keeps a paste that no longer fits from writing.
             if (!PendingClipboard.AwaitRecoveryLooks(1000, stillInTime))
             {
                 bool lookDeadline = stillInTime != null && !stillInTime();
@@ -655,8 +664,16 @@ namespace DoodleNote.DictationHelper
                 return deliveryNoSave;
             }
             // Round 38 (Opus, Astra P2): and the deadline is checked again right before the write (the look may have been
-            // released after the allowance ran out). Test build only: DICTATION_HELPER_TEST_EXPIRE_AFTER_LOOK_WAIT.
-            if ((stillInTime != null && !stillInTime()) || TestMode.Env("DICTATION_HELPER_TEST_EXPIRE_AFTER_LOOK_WAIT") == "1")
+            // released after the allowance ran out). Round 39 (Astra P3): the test build's hook expires the delivery's own
+            // deadline state here (TestAfterLookWait), so this production predicate is what decides in CI 58b.
+#if DICTATION_TEST
+            Action afterLookWait = TestAfterLookWait;
+            if (afterLookWait != null) afterLookWait();
+            bool skipRecheck = TestMode.Env("DICTATION_HELPER_TEST_MUTANT_NO_LOOK_RECHECK") == "1"; // the mutation check (58b-mutant)
+#else
+            const bool skipRecheck = false;
+#endif
+            if (!skipRecheck && stillInTime != null && !stillInTime())
             {
                 Wire.Log("the paste no longer fits the deadline after waiting for a recovery look; not pasting (nothing emptied)");
                 PendingClipboard.Finish(record, "untouched");

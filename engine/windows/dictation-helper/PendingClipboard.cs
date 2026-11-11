@@ -181,7 +181,8 @@ namespace DoodleNote.DictationHelper
         {
             if (Monitor.TryEnter(lookGate)) { Monitor.Exit(lookGate); return true; }
             TestMode.Trace("waiting for a recovery look");
-            // Round 38 (Astra P2, Opus): never past the delivery's remaining allowance (in 50 ms slices).
+            // Round 38 (Astra P2, Opus): stops once the allowance is gone; polled in slices of up to 50 ms (plus scheduling
+            // delay), so it can end about that much later: the caller's check right after it keeps a late paste from writing.
             Stopwatch waited = Stopwatch.StartNew();
             for (;;)
             {
