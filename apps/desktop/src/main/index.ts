@@ -948,8 +948,7 @@ app.whenReady().then(async () => {
       if (held) {
         void notesService?.cancelNotesWarmup()
         micWatcher.setSuppressed(true)
-      }
-      else if (!recording.busy) micWatcher.setSuppressed(false)
+      } else if (!recording.busy) micWatcher.setSuppressed(false)
     },
     showMainWindow: focusMainWindow,
     isTrustedSender: (sender) => sender === mainWindow?.webContents,

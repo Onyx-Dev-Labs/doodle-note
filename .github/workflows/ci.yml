@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Public CI-only values. Production uses deployment-managed secrets.
-      DOODLENOTE_SELF_HOSTED: "true"
+      DOODLENOTE_SELF_HOSTED: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
