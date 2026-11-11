@@ -8,11 +8,13 @@ import {
 import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { libraryIpc } from './library-ipc'
 import { fetchCloudModels } from './cloud-models'
-import { app, ipcMain, safeStorage } from 'electron'
+import { app, ipcMain, safeStorage, powerMonitor } from 'electron'
 import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { freemem } from 'node:os'
 import { join } from 'node:path'
 import { escapeHtml, markdownToHtml } from '../shared/markdown-html'
 import {
+  buildMergeSystemPrompt,
   GenerationError,
   GlobalAskBudgetError,
   globalAskCoverageNotice,
@@ -75,6 +77,9 @@ type GlobalAskMeeting = GlobalAskInput['meetings'][number]
 
 /** Newest meetings considered for cross-meeting context; the prompt builder
  *  reduces further to its selected model request budget. */
+export const NOTES_WARMUP_ENABLED = true
+// Model weights + 16K KV cache, with at least 3 GiB left for capture/ASR and the OS.
+const WARMUP_RESERVE_BYTES = 3 * 1024 ** 3
 const MAX_GLOBAL_MEETINGS = 30
 /** Fallback transcript excerpt length for meetings with no notes at all. */
 const TRANSCRIPT_EXCERPT_CHARS = 1500
@@ -147,6 +152,7 @@ export class NotesService {
   private get enhanceBusy(): boolean {
     return this.generationJobs.busy
   }
+  private notesWarm: { controller: AbortController; work: Promise<void> } | null = null
   private askBusy = false
   private activateBusy = false
 
@@ -226,6 +232,7 @@ export class NotesService {
   }
 
   async dispose(): Promise<void> {
+    await this.cancelNotesWarmup()
     await this.generationJobs.stop()
     const engine = this.localEngine
     this.localEngine = null
@@ -281,6 +288,7 @@ export class NotesService {
     }
     this.activateBusy = true
     try {
+      await this.cancelNotesWarmup()
       const phase = (stage: 'checking' | 'loading' | 'verifying'): void => {
         this.broadcast(NOTES_DOWNLOAD_PROGRESS_CHANNEL, { modelId: spec.id, progress: 0, stage })
       }
@@ -401,6 +409,17 @@ export class NotesService {
               signal,
               'preparing',
               async (preparingSignal) => {
+                const warm = this.notesWarm
+                if (warm) {
+                  const cancel = (): void => warm.controller.abort(preparingSignal.reason)
+                  preparingSignal.addEventListener('abort', cancel, { once: true })
+                  try {
+                    await warm.work
+                  } finally {
+                    preparingSignal.removeEventListener('abort', cancel)
+                  }
+                  preparingSignal.throwIfAborted()
+                }
                 const engine = await this.pickEngine(request.automaticAfterStop === true)
                 preparingSignal.throwIfAborted()
                 if (engine instanceof LocalNotesEngine) await engine.prepare(preparingSignal)
@@ -454,6 +473,7 @@ export class NotesService {
     }
     this.askBusy = true
     try {
+      await this.cancelNotesWarmup()
       const question = typeof request.question === 'string' ? request.question.trim() : ''
       if (!question) return { error: 'Ask a question first.' }
 
@@ -509,6 +529,7 @@ export class NotesService {
     }
     this.askBusy = true
     try {
+      await this.cancelNotesWarmup()
       const question = typeof request.question === 'string' ? request.question.trim() : ''
       if (!question) return { error: 'Ask a question first.' }
 
@@ -673,6 +694,7 @@ export class NotesService {
       throw new Error('Another model operation is running. Wait for it to finish, then retry.')
     this.askBusy = true
     try {
+      await this.cancelNotesWarmup()
       if (
         policy === 'explicit-cloud' &&
         (this.settings.engineChoice !== 'cloud' || !this.settings.cloud)
@@ -725,6 +747,7 @@ export class NotesService {
       throw new DictationCleanupError('busy', 'The notes model is busy with another task.')
     this.askBusy = true
     try {
+      await this.cancelNotesWarmup()
       const settingsBefore = JSON.stringify(this.settings)
       const engine = await this.pickDictationEngine(mode, consent)
       signal.throwIfAborted()
@@ -837,10 +860,12 @@ export class NotesService {
    * model. A failure here is silent: the real cleanup reports its own.
    */
   warmDictationModel(): void {
+    const notesStopped = this.cancelNotesWarmup()
     if (this.dictationWarm || this.askBusy || this.enhanceBusy || this.activateBusy) return
     this.askBusy = true
     const work = (async () => {
       try {
+        await notesStopped
         const engine = await this.pickDictationEngine('local', null)
         if (engine instanceof LocalNotesEngine) await engine.prepare()
       } catch {
@@ -852,6 +877,61 @@ export class NotesService {
     this.dictationWarm = work.finally(() => {
       this.dictationWarm = null
     })
+  }
+
+  /** Capture calls this without awaiting it, after the speech engine reports ready. */
+  warmNotesModel(meetingId: string): void {
+    if (
+      !NOTES_WARMUP_ENABLED ||
+      this.settings.engineChoice !== 'local' ||
+      this.notesWarm ||
+      this.dictationWarm ||
+      this.askBusy ||
+      this.enhanceBusy ||
+      this.activateBusy
+    )
+      return
+    if (powerMonitor.isOnBatteryPower()) return
+    const selected = LOCAL_MODELS.find((spec) => spec.id === this.settings.activeLocalModelId)
+    if (
+      !selected ||
+      selected.minRamGB > totalRamGB() ||
+      freemem() < selected.sizeGB * 1024 ** 3 + WARMUP_RESERVE_BYTES
+    )
+      return
+    const meeting = this.meetings.get(meetingId)
+    if (!meeting) return
+    const system = buildMergeSystemPrompt(
+      meeting.templateId,
+      speakerInfos(
+        meeting.segments.filter((segment) => !segment.echo),
+        meeting.participants
+      )
+    )
+    const controller = new AbortController()
+    const job = { controller, work: Promise.resolve() }
+    this.notesWarm = job
+    // Yield to the capture ready callback; no disk/model work in the capture path.
+    job.work = Promise.resolve()
+      .then(async () => {
+        controller.signal.throwIfAborted()
+        const engine = await this.pickEngine(true)
+        controller.signal.throwIfAborted()
+        if (engine instanceof LocalNotesEngine) await engine.warm(system, controller.signal)
+      })
+      .catch(() => {
+        // The foreground request reports its own actionable error.
+      })
+      .finally(() => {
+        if (this.notesWarm === job) this.notesWarm = null
+      })
+  }
+
+  /** Higher-priority work requests native cancellation; capture never awaits this. */
+  cancelNotesWarmup(): Promise<void> {
+    const warm = this.notesWarm
+    warm?.controller.abort(new GenerationError('canceled', 'Background notes warm-up canceled.'))
+    return warm?.work ?? Promise.resolve()
   }
 
   /** Cheap, settings-only view for the Dictation panel; touches no model file. */
@@ -907,6 +987,7 @@ export class NotesService {
   }
 
   private applySettings(update: NotesSettingsUpdate): NotesSettingsView {
+    void this.cancelNotesWarmup()
     let error: string | undefined
     const previousSettings = { ...this.settings }
     if (update.batchTranscription)

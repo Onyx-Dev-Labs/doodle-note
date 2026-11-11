@@ -790,6 +790,9 @@ app.whenReady().then(async () => {
     if (event.event === 'audio') audioService.onAudioSaved(event)
     logEngineEvent(event)
     recording.handle(event)
+    if (event.event === 'ready' && captureMeetingId && recording.snapshot().phase === 'recording')
+      notesService?.warmNotesModel(captureMeetingId)
+    if (event.event === 'spawn-error') void notesService?.cancelNotesWarmup()
     if (!recording.busy) micWatcher.setSuppressed(false)
   })
 

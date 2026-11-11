@@ -58,6 +58,14 @@ function fixture(idleTimeoutMs = 600_000) {
     dispose(options: { disposeSequence: boolean }) {
       assert.equal(options.disposeSequence, false)
     }
+    async preloadPrompt(
+      user: string,
+      options: { signal: AbortSignal; evaluationPriority: number }
+    ) {
+      assert.equal(user, '')
+      assert.equal(options.evaluationPriority, 1)
+      await this.promptWithMeta(user, options)
+    }
     async promptWithMeta(user: string, options: { signal: AbortSignal }) {
       record.histories.push([...this.history])
       const tokens = [...Buffer.from(`${this.history[0]}\n<user>${user}\n<assistant>`)]
@@ -213,5 +221,25 @@ test('idle expiry frees model and context, but never interrupts active work', as
   assert.equal(f.record.modelsDisposed, 1)
   await f.engine.runRaw('rules', 'second')
   assert.equal(f.record.loads, 2)
+  await f.engine.dispose()
+})
+
+test('warm-up preloads at low priority and foreground prepare joins the same model load', async () => {
+  const f = fixture()
+  let release!: () => void
+  f.block(
+    new Promise<void>((resolve) => {
+      release = resolve
+    })
+  )
+  const warm = f.engine.warm('Shared template rules')
+  const prepare = f.engine.prepare()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(f.record.loads, 1)
+  release()
+  await Promise.all([warm, prepare])
+  await f.engine.runRaw('Shared template rules', 'Actual transcript')
+  assert.ok(f.record.skipped[1]! >= 'Shared template rules'.length)
+  assert.equal(f.record.contexts.length, 1)
   await f.engine.dispose()
 })

@@ -88,6 +88,32 @@ export class LocalNotesEngine implements NotesEngine {
     return this.exclusive(() => this.prepareModel(signal))
   }
 
+  /** No user content is supplied; a fresh session later aligns to the exact request. */
+  async warm(systemPrompt: string, signal?: AbortSignal): Promise<void> {
+    return this.exclusive(async () => {
+      await withGenerationDeadline(signal, 'preparing', (active) => this.prepareModel(active))
+      await withGenerationDeadline(signal, 'writing', async (active) => {
+        const { LlamaChatSession } = await loadNodeLlamaCpp()
+        await this.obtainContext(this.options.contextSize ?? 16384, active)
+        const session = new LlamaChatSession({
+          contextSequence: this.sequence!,
+          systemPrompt,
+          forceAddSystemPrompt: true
+        })
+        try {
+          active.throwIfAborted()
+          await session.preloadPrompt('', { signal: active, evaluationPriority: 1 })
+          active.throwIfAborted()
+        } catch (error) {
+          await this.disposeContext()
+          throw error
+        } finally {
+          session.dispose({ disposeSequence: false })
+        }
+      })
+    })
+  }
+
   private async acquireRuntime(
     cpuOnly: boolean,
     signal?: AbortSignal,

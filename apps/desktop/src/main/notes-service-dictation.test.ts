@@ -28,6 +28,8 @@ interface LocalRig {
   engines: Array<{
     uri: string
     prepared: number
+    warmed: string[]
+    canceled: boolean
     disposed: boolean
     ran: Array<Record<string, unknown>>
   }>
@@ -35,6 +37,11 @@ interface LocalRig {
 
 interface Service {
   warmDictationModel(): void
+  warmNotesModel(meetingId: string): void
+  cancelNotesWarmup(): Promise<void>
+  notesWarm: { work: Promise<void> } | null
+  dispose(): Promise<void>
+  enhance(request: api.EnhanceRequest, owner: number): Promise<api.EnhanceResult>
   settings: Record<string, unknown>
   askBusy: boolean
   activateBusy: boolean
@@ -53,7 +60,8 @@ interface Service {
 function createService(
   dir: string,
   hold?: { release?: () => void },
-  local?: LocalRig
+  local?: LocalRig,
+  power = { battery: false, free: 32 * 1024 ** 3 }
 ): { service: Service; cloud: CloudCall[] } {
   const cloud: CloudCall[] = []
   class StubCloudEngine {
@@ -74,11 +82,37 @@ function createService(
     private readonly record: LocalRig['engines'][number]
     constructor(options: { modelUri: string }) {
       this.id = `local:${options.modelUri}`
-      this.record = { uri: options.modelUri, prepared: 0, disposed: false, ran: [] }
+      this.record = {
+        uri: options.modelUri,
+        prepared: 0,
+        warmed: [],
+        canceled: false,
+        disposed: false,
+        ran: []
+      }
       local?.engines.push(this.record)
     }
     async prepare(): Promise<void> {
       this.record.prepared += 1
+    }
+    async warm(system: string, signal: AbortSignal): Promise<void> {
+      await this.prepare()
+      this.record.warmed.push(system)
+      if (hold)
+        await new Promise<void>((resolve, reject) => {
+          hold.release = resolve
+          signal.addEventListener(
+            'abort',
+            () => {
+              this.record.canceled = true
+              reject(signal.reason)
+            },
+            { once: true }
+          )
+        })
+    }
+    async generateNotes(): Promise<{ markdown: string; engine: string; elapsedMs: number }> {
+      return { markdown: 'Synthetic notes', engine: this.id, elapsedMs: 1 }
     }
     async runBounded(
       _system: string,
@@ -103,6 +137,7 @@ function createService(
   const deps: Record<string, unknown> = {
     electron: {
       app: { getPath: () => dir },
+      powerMonitor: { isOnBatteryPower: () => power.battery },
       ipcMain: { handle: () => {} },
       safeStorage: { isEncryptionAvailable: () => true, decryptString: () => 'sk-synthetic' }
     },
@@ -115,8 +150,10 @@ function createService(
     './model-paths': { modelSearchDirectories: () => [dir] },
     'node:fs': fs,
     'node:path': path,
+    'node:os': { freemem: () => power.free },
     '@repo/ai': {
       ...ai,
+      totalRamGB: () => 64,
       CloudNotesEngine: StubCloudEngine,
       ...(local ? { LocalNotesEngine: StubLocalEngine, LocalModelStore: StubModelStore } : {})
     },
@@ -137,6 +174,7 @@ function createService(
       assert.ok(name in deps, name)
       return deps[name]
     },
+    AbortController,
     Buffer,
     process,
     console,
@@ -145,7 +183,10 @@ function createService(
     setTimeout,
     clearTimeout
   })
-  const service = new exports.NotesService!(dir, () => {}, { readAll: () => [] })
+  const service = new exports.NotesService!(dir, () => {}, {
+    readAll: () => [],
+    get: () => ({ templateId: 'general', segments: [] })
+  })
   return { service, cloud }
 }
 
@@ -373,4 +414,97 @@ test('a warm-up with no model installed fails quietly and releases the lease', a
   service.warmDictationModel()
   await new Promise((resolve) => setTimeout(resolve, 10))
   assert.equal(service.askBusy, false)
+})
+
+test('notes warm-up skips cloud, battery, insufficient RAM and busy operations without loading', async () => {
+  const dir = sandbox()
+  try {
+    for (const reason of ['cloud', 'battery', 'memory', 'busy'] as const) {
+      const spec = ai.LOCAL_MODELS[0]!
+      const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+      const { service } = createService(dir, undefined, rig, {
+        battery: reason === 'battery',
+        free: reason === 'memory' ? 0 : 32 * 1024 ** 3
+      })
+      service.settings = {
+        engineChoice: reason === 'cloud' ? 'cloud' : 'local',
+        activeLocalModelId: spec.id
+      }
+      service.askBusy = reason === 'busy'
+      service.warmNotesModel('synthetic')
+      assert.equal(service.notesWarm, null, reason)
+      assert.equal(rig.engines.length, 0, reason)
+      await service.dispose()
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('recording warm-up is asynchronous, deduplicates and Generate joins it', async () => {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const hold: { release?: () => void } = {}
+  const { service } = createService(dir, hold, rig)
+  try {
+    service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+    service.warmNotesModel('synthetic')
+    service.warmNotesModel('synthetic')
+    assert.equal(rig.engines.length, 0, 'capture callback returns before model I/O')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(rig.engines.length, 1)
+    assert.equal(rig.engines[0]!.warmed.length, 1)
+    assert.equal(rig.engines[0]!.warmed[0], ai.buildMergeSystemPrompt('general', []))
+    let done = false
+    const result = service
+      .enhance(
+        {
+          meetingId: 'synthetic',
+          runId: 'warm-join',
+          title: 'Synthetic',
+          rawNotesMarkdown: '',
+          segments: []
+        },
+        1
+      )
+      .then((value) => {
+        done = true
+        return value
+      })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(done, false)
+    hold.release!()
+    assert.equal((await result).markdown, 'Synthetic notes')
+    assert.equal(rig.engines.length, 1)
+    assert.equal(rig.engines[0]!.canceled, false)
+  } finally {
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('dictation preempts background notes without a busy rejection', async () => {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const { service } = createService(dir, {}, rig)
+  try {
+    service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+    service.warmNotesModel('synthetic')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const result = await service.runDictationCleanup(
+      'local',
+      'system',
+      'synthetic',
+      new AbortController().signal,
+      null
+    )
+    assert.equal(result.markdown, 'Tidy.')
+    assert.equal(rig.engines[0]!.canceled, true)
+    assert.equal(service.notesWarm, null)
+  } finally {
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })
