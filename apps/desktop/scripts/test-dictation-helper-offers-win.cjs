@@ -4249,8 +4249,10 @@ async function main() {
   // allowance, and the deadline is checked again right before the write. The retention check is held INSIDE its look
   // (the look lock held) while a delivery with a 400 ms deadline (counted from the end of its save) reaches the wait:
   // (a) "deadline" within the allowance, while the look is still held; (b) the look released after 300 ms, the deadline
-  // found passed right after the wait (test hook): "deadline". Both: nothing emptied (bytes and sequence), no write.
-  for (const variant of ['a', 'b']) {
+  // found passed right after the wait: "deadline". Both: nothing emptied (bytes and sequence), no write. Round 39 (Astra
+  // P3): in (b) the test hook only EXPIRES the delivery's own deadline state (a 60 s allowance) right after the wait, so
+  // the production predicate is what refuses; (b-mutant) skips that predicate (test build) and is CAUGHT: it writes.
+  for (const variant of ['a', 'b', 'b-mutant']) {
     await begin(`58${variant}`)
     copyMulti(user)
     await keptRecord(`dictated text DL0${variant}`)
@@ -4258,9 +4260,15 @@ async function main() {
     const before = contentSnapshot()
     const a = start(
       testops,
-      variant === 'b'
-        ? { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_EXPIRE_AFTER_LOOK_WAIT: '1' }
-        : { DICTATION_HELPER_TEST: '1' },
+      variant === 'a'
+        ? { DICTATION_HELPER_TEST: '1' }
+        : variant === 'b'
+          ? { DICTATION_HELPER_TEST: '1', DICTATION_HELPER_TEST_EXPIRE_AFTER_LOOK_WAIT: '1' }
+          : {
+              DICTATION_HELPER_TEST: '1',
+              DICTATION_HELPER_TEST_EXPIRE_AFTER_LOOK_WAIT: '1',
+              DICTATION_HELPER_TEST_MUTANT_NO_LOOK_RECHECK: '1'
+            },
       { gates: ['RETRY', 'LOOK', 'AFTER_SAVE'] } // RETRY never opened: no retry runs in this case
     )
     // The start check runs before "ready": its look is released first.
@@ -4270,7 +4278,7 @@ async function main() {
     const reply = a.req('__clipboard-txn', {
       text: `dictated text DL${variant}`,
       holdMs: 300,
-      deadlineMs: variant === 'a' ? 400 : 0
+      deadlineMs: variant === 'a' ? 400 : 60000
     })
     await atLine(a, "the delivery's check inside its look", /test-trace: gate LOOK#2 waiting/)
     a.open('LOOK')
@@ -4305,6 +4313,16 @@ async function main() {
     for (const o of (listed && listed.offers) || [])
       await h.req('clipboard-dismiss', { record: o.record })
     await h.stop()
+    if (variant === 'b-mutant') {
+      check(
+        'MUTANT (the deadline re-check after the look wait removed): 58b is CAUGHT: the delivery writes and "pastes" past its deadline (the check above would fail)',
+        !!live &&
+          /^restored\|/.test(String(live.result)) &&
+          a.logs.some((l) => /test-trace: write opened/.test(l)),
+        `${JSON.stringify(live)} in ${took} ms`
+      )
+      continue
+    }
     check(
       variant === 'a'
         ? 'the wait for a recovery look stops at the delivery\'s deadline: "deadline" within the allowance while the look is still held, nothing emptied (bytes and sequence), no write'
