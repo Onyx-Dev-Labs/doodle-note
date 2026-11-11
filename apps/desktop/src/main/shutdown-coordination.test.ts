@@ -243,6 +243,7 @@ console.log(JSON.stringify({ event: 'status', stage: 'serve_ready' }))
       }
     },
     calendarService: null,
+    notesService: null,
     isQuittingForUpdate: () => options.update === true,
     app: {
       on: (_name: string, callback: typeof hook) => {

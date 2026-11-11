@@ -1120,6 +1120,7 @@ app.whenReady().then(async () => {
     createBeforeQuitHandler({
       acquire: () => libraryActivity.tryBeginShutdown(),
       cleanup: async () => {
+        void notesService?.cancelNotesWarmup()
         quitting = true
         // Windows keeps the tray (showing "Saving recording…") until the wait below.
         if (process.platform !== 'win32') recordingTray?.dispose()
@@ -1303,6 +1304,7 @@ app.whenReady().then(async () => {
   // Store writes fan out to cloud sync and local recording cleanup.
   meetingsService.onDidWrite = (change) => {
     lastLibraryWriteAt = Date.now()
+    if (change.deletedId) void notesService?.cancelNotesWarmup(change.deletedId)
     sourceIndex.invalidate()
     syncService.onMeetingsChanged(change.deletedId)
     // A deleted meeting takes its recordings with it.

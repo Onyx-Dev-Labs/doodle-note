@@ -154,7 +154,11 @@ export class NotesService {
   private get enhanceBusy(): boolean {
     return this.generationJobs.busy
   }
-  private notesWarm: { controller: AbortController; work: Promise<void> } | null = null
+  private notesWarm: {
+    meetingId: string
+    controller: AbortController
+    work: Promise<void>
+  } | null = null
   private askBusy = false
   private activateBusy = false
 
@@ -930,7 +934,7 @@ export class NotesService {
       )
     )
     const controller = new AbortController()
-    const job = { controller, work: Promise.resolve() }
+    const job = { meetingId, controller, work: Promise.resolve() }
     this.notesWarm = job
     // Yield to the capture ready callback; no disk/model work in the capture path.
     job.work = Promise.resolve()
@@ -955,8 +959,9 @@ export class NotesService {
   }
 
   /** Higher-priority work requests native cancellation; capture never awaits this. */
-  cancelNotesWarmup(): Promise<void> {
+  cancelNotesWarmup(meetingId?: string): Promise<void> {
     const warm = this.notesWarm
+    if (meetingId !== undefined && warm?.meetingId !== meetingId) return Promise.resolve()
     warm?.controller.abort(new GenerationError('canceled', 'Background notes warm-up canceled.'))
     return warm?.work ?? Promise.resolve()
   }

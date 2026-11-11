@@ -15,6 +15,9 @@ import * as markdownHtml from '../shared/markdown-html'
 import * as libraryPath from './library-path'
 import * as dictationModel from './dictation-model'
 import { LibraryActivity } from './library-activity'
+import * as meetingsApi from '../shared/meetings-api'
+import * as meetingOwnership from './meeting-write-ownership'
+import * as engineQuit from './engine-quit'
 import { NotesGenerationJobs } from './notes-generation-job'
 
 interface CloudCall {
@@ -38,7 +41,7 @@ interface LocalRig {
 interface Service {
   warmDictationModel(): void
   warmNotesModel(meetingId: string): void
-  cancelNotesWarmup(): Promise<void>
+  cancelNotesWarmup(meetingId?: string): Promise<void>
   notesWarm: { work: Promise<void> } | null
   dispose(): Promise<void>
   enhance(request: api.EnhanceRequest, owner: number): Promise<api.EnhanceResult>
@@ -61,7 +64,8 @@ function createService(
   dir: string,
   hold?: { release?: () => void },
   local?: LocalRig,
-  power = { battery: false, free: 32 * 1024 ** 3 }
+  power = { battery: false, free: 32 * 1024 ** 3 },
+  actualMeetings?: meetings.MeetingFileStore
 ): { service: Service; cloud: CloudCall[] } {
   const cloud: CloudCall[] = []
   class StubCloudEngine {
@@ -183,10 +187,14 @@ function createService(
     setTimeout,
     clearTimeout
   })
-  const service = new exports.NotesService!(dir, () => {}, {
-    readAll: () => [],
-    get: () => ({ templateId: 'general', segments: [] })
-  })
+  const service = new exports.NotesService!(
+    dir,
+    () => {},
+    actualMeetings ?? {
+      readAll: () => [],
+      get: () => ({ templateId: 'general', segments: [] })
+    }
+  )
   return { service, cloud }
 }
 
@@ -503,6 +511,254 @@ test('dictation preempts background notes without a busy rejection', async () =>
     assert.equal(result.markdown, 'Tidy.')
     assert.equal(rig.engines[0]!.canceled, true)
     assert.equal(service.notesWarm, null)
+  } finally {
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/** Execute the actual index registration/callback with only host boundaries replaced. */
+function productionHook(
+  predicate: (node: ts.Node, source: ts.SourceFile) => boolean,
+  context: Record<string, unknown>
+): void {
+  const source = ts.createSourceFile(
+    'index.ts',
+    fs.readFileSync('src/main/index.ts', 'utf8'),
+    ts.ScriptTarget.Latest,
+    true
+  )
+  let code = ''
+  function visit(node: ts.Node): void {
+    if (predicate(node, source)) code = node.getText(source)
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  assert.ok(code)
+  runInNewContext(
+    ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText,
+    context
+  )
+}
+
+test('authoritative delete IPC and trash writes cancel only their meeting warm-up', async () => {
+  const dir = sandbox()
+  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const exports: {
+    MeetingsService?: new (
+      ...args: unknown[]
+    ) => meetings.MeetingFileStore & { registerIpc(): void }
+  } = {}
+  const deps: Record<string, unknown> = {
+    '@repo/meetings-store': meetings,
+    './meeting-write-ownership': meetingOwnership,
+    '../shared/meetings-api': meetingsApi,
+    './library-ipc': {
+      libraryIpc: {
+        handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
+          handlers.set(channel, handler)
+      }
+    }
+  }
+  runInNewContext(
+    ts.transpileModule(fs.readFileSync('src/main/meetings-service.ts', 'utf8'), {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
+    }).outputText,
+    {
+      exports,
+      require: (name: string) => {
+        assert.ok(name in deps)
+        return deps[name]
+      }
+    }
+  )
+  const store = new exports.MeetingsService!(path.join(dir, 'meetings'))
+  store.registerIpc()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const { service } = createService(dir, {}, rig, undefined, store)
+  productionHook(
+    (node, source) =>
+      ts.isBinaryExpression(node) && node.left.getText(source) === 'meetingsService.onDidWrite',
+    {
+      meetingsService: store,
+      notesService: service,
+      lastLibraryWriteAt: 0,
+      sourceIndex: {
+        invalidate() {
+          /* Host boundary intentionally inert in this integration test. */
+        }
+      },
+      syncService: {
+        onMeetingsChanged() {
+          /* Host boundary intentionally inert in this integration test. */
+        }
+      },
+      audioService: {
+        deleteFor() {
+          /* Host boundary intentionally inert in this integration test. */
+        }
+      }
+    }
+  )
+  try {
+    service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+    for (const action of ['delete', 'trash']) {
+      store.upsert({ id: 'synthetic', title: 'Synthetic', templateId: 'general' })
+      service.warmNotesModel('synthetic')
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      rig.engines.at(-1)!.canceled = false
+      handlers.get(meetingsApi.MEETINGS_DELETE_CHANNEL)!(null, 'unrelated')
+      assert.equal(rig.engines.at(-1)!.canceled, false)
+      const work = service.notesWarm!.work
+      if (action === 'delete') handlers.get(meetingsApi.MEETINGS_DELETE_CHANNEL)!(null, 'synthetic')
+      else
+        handlers.get(meetingsApi.MEETINGS_UPSERT_CHANNEL)!(null, {
+          id: 'synthetic',
+          trashedAt: new Date().toISOString()
+        })
+      await work
+      assert.equal(rig.engines.at(-1)!.canceled, true, action)
+    }
+  } finally {
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ordinary before-quit cancels warm-up before waiting for recording finalization and hard exit', async () => {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const { service } = createService(dir, {}, rig)
+  let handler!: (event: { preventDefault(): void }) => void
+  let exit!: () => void
+  const exited = new Promise<void>((resolve) => {
+    exit = resolve
+  })
+  let finish!: () => void
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve
+  })
+  try {
+    service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+    service.warmNotesModel('synthetic')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    productionHook(
+      (node, source) =>
+        ts.isCallExpression(node) &&
+        node.expression.getText(source) === 'app.on' &&
+        node.arguments[0]?.getText(source) === "'before-quit'",
+      {
+        ...engineQuit,
+        app: {
+          on: (_event: string, callback: typeof handler) => {
+            handler = callback
+          },
+          quit: () => assert.fail('ordinary quit')
+        },
+        notesService: service,
+        libraryActivity: new LibraryActivity(),
+        quitting: false,
+        process: { platform: 'win32', exit },
+        recordingTray: null,
+        calendarService: null,
+        sessionEnding: false,
+        isQuittingForUpdate: () => false,
+        engine: { running: true, dispose: async () => {} },
+        micWatcher: { dispose: async () => {} },
+        finishRecordingBeforeQuit: () => {
+          assert.equal(rig.engines[0]!.canceled, true, 'cancellation precedes recording wait')
+          return finished
+        },
+        console: { error: (...args: unknown[]) => assert.fail(String(args)) }
+      }
+    )
+    handler({
+      preventDefault() {
+        /* Host boundary intentionally inert in this integration test. */
+      }
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(rig.engines[0]!.canceled, true)
+    finish()
+    await exited
+  } finally {
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('actual recording exit hook keeps warm-up alive for Generate', async () => {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const hold: { release?: () => void } = {}
+  const { service } = createService(dir, hold, rig)
+  let handler!: (event: { event: string }) => void
+  try {
+    service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+    productionHook(
+      (node, source) =>
+        ts.isCallExpression(node) && node.expression.getText(source) === 'engine.onEvent',
+      {
+        engine: {
+          onEvent: (callback: typeof handler) => {
+            handler = callback
+          }
+        },
+        dictation: null,
+        captureMeetingId: 'synthetic',
+        captureId: 'test',
+        notesService: service,
+        captureEventForSession: (event: unknown) => event,
+        broadcastEngineEvent() {
+          /* Host boundary intentionally inert in this integration test. */
+        },
+        session: {
+          handle() {
+            /* Host boundary intentionally inert in this integration test. */
+          }
+        },
+        audioService: {
+          onAudioSaved() {
+            /* Host boundary intentionally inert in this integration test. */
+          }
+        },
+        logEngineEvent() {
+          /* Host boundary intentionally inert in this integration test. */
+        },
+        recording: {
+          handle() {
+            /* Host boundary intentionally inert in this integration test. */
+          },
+          snapshot: () => ({ phase: 'recording' }),
+          busy: false
+        },
+        micWatcher: {
+          setSuppressed() {
+            /* Host boundary intentionally inert in this integration test. */
+          }
+        }
+      }
+    )
+    handler({ event: 'ready' })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    handler({ event: 'exit' })
+    assert.equal(rig.engines[0]!.canceled, false)
+    const result = service.enhance(
+      {
+        meetingId: 'synthetic',
+        runId: 'stop-join',
+        title: 'Synthetic',
+        rawNotesMarkdown: '',
+        segments: []
+      },
+      1
+    )
+    hold.release!()
+    assert.equal((await result).markdown, 'Synthetic notes')
+    assert.equal(rig.engines[0]!.canceled, false)
   } finally {
     await service.dispose()
     fs.rmSync(dir, { recursive: true, force: true })
