@@ -4448,7 +4448,13 @@ async function main() {
       'the late write held after its EmptyClipboard',
       /test-trace: gate EMPTIED#1 waiting/
     )
-    const restarting = await a.waitEvent((e) => e.event === 'restarting')
+    // The restart is decided now (logged); its "restarting" event goes out at the exit, after the write ended.
+    await atLine(
+      a,
+      'the restart decided',
+      /a late clipboard write has not ended in 2000 ms; restarting once the delivery in progress/
+    )
+    await atLine(a, 'no delivery can start any more', /test-trace: deliveries closed/)
     const logged = a.logs.some((l) =>
       /a late clipboard write has not ended 2000 ms after it was abandoned .*; restarting the helper/.test(
         l
@@ -4461,6 +4467,7 @@ async function main() {
     // It left on its own: no stop (its input is not written to after its exit); its output is read to the end.
     if (exited) await a.waitLog(/(?!)/, { ms: 3000 })
     else await a.stop()
+    const restarting = await a.waitEvent((e) => e.event === 'restarting', 1000)
     const back = observe()
     check(
       'a late write that does not end within the watchdog makes the helper restart ("clipboard-write-stuck", logged); a delivery meanwhile is refused ("helper-busy"); released, the late write puts the user\'s copy back, the helper exits with code 3 and leaves no record',

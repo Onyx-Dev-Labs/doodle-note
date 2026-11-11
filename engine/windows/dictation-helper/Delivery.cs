@@ -3163,6 +3163,7 @@ namespace DoodleNote.DictationHelper
             lock (gate)
             {
                 closed = true;
+                TestMode.Trace("deliveries closed"); // round 39: a case acts once no delivery can start
                 deadlineTicks = Math.Min(deadlineTicks, Now + timeoutMs);
                 while (count > 0 || writes > 0)
                 {
