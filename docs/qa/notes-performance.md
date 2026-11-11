@@ -17,6 +17,18 @@ dictation and other foreground operations cancel it and wait for native cleanup
 before using the same model. Generate joins the existing task, including its load,
 and forwards cancellation/deadline to it. Warm-up never downloads a model.
 
+Prefill renders the chat wrapper's system/user boundary with the same marker
+technique used by node-llama-cpp 3.20.0, retaining its special tokens. It leaves
+the final boundary token for foreground tokenization, then evaluates at most 64
+tokens per native call, checking cancellation between calls. At the owner's
+reported 47 tokens/sec this is about 1.36 seconds per batch; this is a sizing
+estimate, not a new owner-device timing measurement. Native work always settles
+before disposal or a queued foreground operation starts. Context allocation also
+receives `createSignal`. Reading starts only after context allocation/fallback.
+Discard/delete/trash cancels the matching meeting's job, and before-quit cleanup
+requests cancellation before recording finalization. A normal Stop keeps warm-up
+alive so Generate can join it.
+
 The RAM guard requires the model's catalog minimum total RAM and free memory of
 at least its file size plus 3 GiB for context, speech capture/ASR and the OS. This is
 a conservative heuristic, not a measured allocation guarantee. Qwen 4B weights
@@ -26,7 +38,8 @@ GPU/CPU contention can still affect timing; llama priority is not an OS real-tim
 guarantee. The field CPU-prefill pathology is deliberately unchanged for foreground work.
 CPU-only warm-up loads weights but skips speculative prefill: on Dev04, Qwen 0.5B
 failed to yield within two minutes at default settings and at one thread. The
-`cpu-prefill` log reason records this guard. Vulkan/Metal warm-up still preloads.
+`cpu-prefill` log reason records this guard. The guard runs again after context allocation/fallback and also excludes models
+with zero offloaded GPU layers. Vulkan/Metal warm-up still preloads.
 This avoids starting the known non-yielding CPU work while capture is active.
 
 Prefix savings require identical tokens. Template or speaker-roster changes
@@ -39,7 +52,20 @@ than promised. Later identical templates/rosters reuse more of the prefix.
 The profile's `model-integrity.json` caches at most 64 successful SHA-256 verdicts
 (64 KiB maximum). Canonical path, size, mtime, ctime, device and inode must all match.
 A changed stamp rehashes. Corruption or write failure falls back to verification;
-partial-download markers always override cached verdicts.
+partial-download markers always override cached verdicts. Each versioned receipt
+has an HMAC-SHA256 over the canonical path, complete stamp, catalog digest and
+schema version. A random 256-bit profile key is encrypted by Electron safeStorage
+(DPAPI on Windows, Keychain on macOS), stored separately as
+`model-integrity.json.key`, and never written into the verdict JSON. Unauthenticated
+or mismatched receipts rehash. Unavailable/decryption-failing secure storage
+(including Linux's `basic_text` fallback) disables persisted trust and rehashes on
+launch; in-process verified results still work.
+
+Threat model: the HMAC prevents trivially edited cache files from skipping model
+verification. Same-user code execution is out of scope: it can already alter the
+app's data and invoke the user's secure storage. File stamps remain a metadata
+invalidation heuristic, not a cryptographic identity for arbitrary filesystem
+attacks.
 
 `<userData>/notes-engine.log` is JSON lines, rotated near 1 MiB with one `.old`
 file. It records timestamps, model/backend/layers, load/hash/context timings,
@@ -53,3 +79,17 @@ No transcript, notes, prompt, file path, raw stack or raw exception message is
 written. Exception messages are classified into fixed operational messages because
 native/provider exceptions can contain user input; unknown details are omitted.
 Logging is asynchronous, serialized, best-effort, and flushed at service disposal.
+
+## Round 2 regression checks
+
+`local-engine-native.test.ts` uses the real installed node-llama-cpp and an existing
+small GGUF; set `DOODLENOTE_TEST_GGUF` to its absolute path before running the AI
+suite. No model is downloaded. The test injects only GPU eligibility/context
+failure while evaluating on CPU, so it validates the shared cancellation and
+prefix mechanics without claiming Vulkan/Metal performance. It aborts at native
+batch entry with foreground generation queued, proves exactly one 64-token batch
+finishes, checks all 899 warmed tokens match and are reused by `runRaw`, and checks
+CPU fallback does zero speculative evaluation then produces a foreground token.
+The synthetic one-token output budget intentionally returns the normal
+output-limit error after real generation. Without a GGUF path, CI skips this
+opt-in test; Linux and native Dev04 evidence runs enable it.
