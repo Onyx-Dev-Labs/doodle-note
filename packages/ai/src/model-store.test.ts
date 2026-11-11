@@ -147,3 +147,82 @@ test('failed or invalid downloads recover without changing existing files', asyn
   await rm(good)
   assert.equal(await store.find(spec), null, 'removed shared references are not ready')
 })
+
+test('persists verdict across processes and rehashes any changed stamp or catalog digest', async (t) => {
+  const { legacy } = await fixture(t)
+  const file = join(legacy, 'model.gguf')
+  const verdictPath = join(legacy, '..', 'profile', 'model-integrity.json')
+  await writeFile(file, bytes)
+  const checks: boolean[] = []
+  const store = () =>
+    new LocalModelStore([legacy], {
+      verdictPath,
+      onIntegrityCheck: (event) => checks.push(event.cached)
+    })
+  assert.equal(await store().find(spec), file)
+  assert.equal(await store().find(spec), file)
+  assert.deepEqual(checks, [false, true])
+  const { readFile, utimes, rename } = await import('node:fs/promises')
+  const saved = JSON.parse(await readFile(verdictPath, 'utf8'))
+  assert.deepEqual(
+    Object.keys(saved[0]).sort(),
+    ['path', 'size', 'mtime', 'ctime', 'dev', 'ino', 'sha256'].sort()
+  )
+  for (const key of ['size', 'mtime', 'ctime', 'dev', 'ino']) {
+    const stale = structuredClone(saved)
+    stale[0][key] += 1
+    await writeFile(verdictPath, JSON.stringify(stale))
+    assert.equal(await store().find(spec), file)
+    assert.equal(checks.at(-1), false, `${key} change must rehash`)
+  }
+  assert.equal(
+    await store().find({ ...spec, artifact: { ...spec.artifact, sha256: '0'.repeat(64) } }),
+    null
+  )
+  const before = await stat(file)
+  await writeFile(file, Buffer.alloc(bytes.length))
+  await utimes(file, before.atime, before.mtime)
+  assert.equal(
+    await store().find(spec),
+    null,
+    'same-size edit/restored mtime must not bypass ctime'
+  )
+  await rename(file, `${file}.old`)
+  await writeFile(file, bytes)
+  assert.equal(await store().find(spec), file)
+  assert.equal(checks.at(-1), false, 'replacement file rehashes')
+  await writeFile(`${file}.ipull`, '')
+  assert.equal(await store().find(spec), null, 'partial marker overrides persisted verdict')
+})
+
+test('corrupt, oversized or unwritable verdict file cannot prevent verification', async (t) => {
+  const { legacy } = await fixture(t)
+  const file = join(legacy, 'model.gguf'),
+    verdictPath = join(legacy, 'verdict.json')
+  await writeFile(file, bytes)
+  for (const invalid of [
+    '{',
+    '{}',
+    '[null]',
+    JSON.stringify([{ path: file }]),
+    ' '.repeat(65537)
+  ]) {
+    await writeFile(verdictPath, invalid)
+    const checks: boolean[] = []
+    assert.equal(
+      await new LocalModelStore([legacy], {
+        verdictPath,
+        onIntegrityCheck: (event) => checks.push(event.cached)
+      }).find(spec),
+      file
+    )
+    assert.deepEqual(checks, [false])
+  }
+  await rm(verdictPath)
+  await mkdir(verdictPath)
+  assert.equal(await new LocalModelStore([legacy], { verdictPath }).find(spec), file)
+  assert.equal(
+    (await readdir(legacy)).some((name) => name.endsWith('.tmp')),
+    false
+  )
+})

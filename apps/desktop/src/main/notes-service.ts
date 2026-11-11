@@ -160,7 +160,8 @@ export class NotesService {
   ) {
     this.settingsPath = join(userDataDir, 'settings.json')
     this.modelStore = new LocalModelStore(
-      modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR)
+      modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR),
+      { verdictPath: join(userDataDir, 'model-integrity.json') }
     )
     this.settings = this.loadSettings()
   }

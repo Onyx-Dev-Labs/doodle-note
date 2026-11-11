@@ -1,8 +1,56 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { access, mkdir, mkdtemp, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  readFile,
+  writeFile
+} from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import type { LocalModelSpec } from './catalog'
+
+interface IntegrityVerdict {
+  path: string
+  size: number
+  mtime: number
+  ctime: number
+  dev: number
+  ino: number
+  sha256: string
+}
+export interface ModelStoreOptions {
+  /** Profile-owned cache; never written beside shared model artifacts. */
+  verdictPath?: string
+  onIntegrityCheck?: (event: { modelId: string; cached: boolean; hashMs: number }) => void
+}
+const MAX_VERDICTS = 64
+const MAX_VERDICT_BYTES = 64 * 1024
+
+function stamp(file: Awaited<ReturnType<typeof stat>>): string {
+  return `${file.dev}:${file.ino}:${file.size}:${file.mtimeMs}:${file.ctimeMs}`
+}
+function verdictStamp(verdict: IntegrityVerdict): string {
+  return `${verdict.dev}:${verdict.ino}:${verdict.size}:${verdict.mtime}:${verdict.ctime}`
+}
+function validVerdict(value: unknown): value is IntegrityVerdict {
+  if (!value || typeof value !== 'object') return false
+  const v = value as IntegrityVerdict
+  return (
+    typeof v.path === 'string' &&
+    v.path.length < 4096 &&
+    typeof v.sha256 === 'string' &&
+    /^[a-f0-9]{64}$/.test(v.sha256) &&
+    [v.size, v.mtime, v.ctime, v.dev, v.ino].every(
+      (n) => typeof n === 'number' && Number.isFinite(n)
+    )
+  )
+}
 
 /** Known, shallow model directories only. Never copies another profile's data. */
 export class LocalModelStore {
@@ -10,7 +58,14 @@ export class LocalModelStore {
   private readonly verified = new Map<string, { stamp: string; digest: string }>()
   private readonly pending = new Map<string, Promise<string>>()
 
-  constructor(directories: string[]) {
+  private readonly verdicts = new Map<string, IntegrityVerdict>()
+  private verdictLoad: Promise<void> | null = null
+  private verdictWrite: Promise<void> = Promise.resolve()
+
+  constructor(
+    directories: string[],
+    private readonly options: ModelStoreOptions = {}
+  ) {
     this.directories = [...new Set(directories.map((directory) => resolve(directory)))]
     if (!this.directories.length) throw new Error('A model download directory is required.')
   }
@@ -27,17 +82,28 @@ export class LocalModelStore {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false
         }
       }
+      await this.loadVerdicts()
       const before = await stat(path)
       if (!before.isFile() || before.size !== spec.artifact.bytes) return false
-      const stamp = `${before.dev}:${before.ino}:${before.size}:${before.mtimeMs}:${before.ctimeMs}`
+      const beforeStamp = stamp(before)
       const cached = this.verified.get(path)
-      if (cached?.stamp === stamp) return cached.digest === spec.artifact.sha256
+      const persistent = this.verdicts.get(path)
+      const digestCached =
+        cached?.stamp === beforeStamp
+          ? cached.digest
+          : persistent && verdictStamp(persistent) === beforeStamp
+            ? persistent.sha256
+            : undefined
+      if (digestCached !== undefined) {
+        this.options.onIntegrityCheck?.({ modelId: spec.id, cached: true, hashMs: 0 })
+        return digestCached === spec.artifact.sha256
+      }
+      const started = Date.now()
       // Streaming I/O keeps the Electron event loop responsive and memory bounded.
       const hash = createHash('sha256')
       for await (const chunk of createReadStream(path)) hash.update(chunk)
       const after = await stat(path)
-      if (stamp !== `${after.dev}:${after.ino}:${after.size}:${after.mtimeMs}:${after.ctimeMs}`)
-        return false
+      if (beforeStamp !== stamp(after)) return false
       if ((await realpath(file)) !== path) return false
       for (const marker of new Set([`${file}.ipull`, `${path}.ipull`])) {
         try {
@@ -48,11 +114,67 @@ export class LocalModelStore {
         }
       }
       const digest = hash.digest('hex')
-      this.verified.set(path, { stamp, digest })
+      this.verified.set(path, { stamp: beforeStamp, digest })
+      this.options.onIntegrityCheck?.({
+        modelId: spec.id,
+        cached: false,
+        hashMs: Date.now() - started
+      })
+      // Persist successful catalog verdicts only, bounded even with many candidates.
+      if (digest === spec.artifact.sha256) {
+        this.verdicts.delete(path)
+        this.verdicts.set(path, {
+          path,
+          size: before.size,
+          mtime: before.mtimeMs,
+          ctime: before.ctimeMs,
+          dev: before.dev,
+          ino: before.ino,
+          sha256: digest
+        })
+        while (this.verdicts.size > MAX_VERDICTS)
+          this.verdicts.delete(this.verdicts.keys().next().value!)
+        await this.saveVerdicts()
+      }
       return digest === spec.artifact.sha256
     } catch {
       return false // Missing, unreadable or concurrently removed: try the next candidate.
     }
+  }
+
+  private loadVerdicts(): Promise<void> {
+    return (this.verdictLoad ??= (async () => {
+      const file = this.options.verdictPath
+      if (!file) return
+      try {
+        if ((await stat(file)).size > MAX_VERDICT_BYTES) return
+        const data: unknown = JSON.parse(await readFile(file, 'utf8'))
+        if (!Array.isArray(data) || data.length > MAX_VERDICTS || !data.every(validVerdict)) return
+        for (const verdict of data) this.verdicts.set(verdict.path, verdict)
+      } catch {
+        /* Missing/corrupt cache: stream and verify the model normally. */
+      }
+    })())
+  }
+
+  private saveVerdicts(): Promise<void> {
+    const file = this.options.verdictPath
+    if (!file) return Promise.resolve()
+    this.verdictWrite = this.verdictWrite.then(async () => {
+      const temporary = `${file}.${randomUUID()}.tmp`
+      try {
+        const data = JSON.stringify([...this.verdicts.values()])
+        if (Buffer.byteLength(data) > MAX_VERDICT_BYTES) return
+        await mkdir(dirname(file), { recursive: true })
+        await writeFile(temporary, data, { mode: 0o600, flag: 'wx' })
+        await rename(temporary, file)
+      } catch {
+        /* A read-only/full profile must not prevent verified inference. */
+      } finally {
+        await rm(temporary, { force: true }).catch(() => {})
+      }
+    })
+    return this.verdictWrite
   }
 
   async find(spec: LocalModelSpec): Promise<string | null> {
