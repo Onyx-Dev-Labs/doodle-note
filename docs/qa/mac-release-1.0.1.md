@@ -1,6 +1,6 @@
 # DoodleNote 1.0.1 release preparation
 
-Status: prepared for review. No signed 1.0.1 candidate or public feed has been published.
+Status: reviewed source merged; exact signed/notarized candidate installed and tested. The publication PR promotes its static updater manifest and release date.
 
 ## Scope
 
@@ -23,6 +23,22 @@ Status: prepared for review. No signed 1.0.1 candidate or public feed has been p
 
 ![Synthetic copied popup](assets/bark-1.0.1-popup.png)
 
-## Remaining release gates
+## Signed candidate and hands-on verification
 
-The final PR head needs the repository's required independent code-owner approval and checks. After merge, build and verify the exact signed/notarized Mac release candidate through the existing workflow. Retain its immutable artifact and receipt, run native release smoke and upgrade checks, then promote those exact bytes through the receipt-bound publisher. Publish the release date, GitHub release, and updater feed only for that verified candidate. See [RELEASING](../RELEASING.md).
+- Source PR [#286](https://github.com/Onyx-Dev-Labs/doodle-note/pull/286) was approved by Sean and merged as `d846a176bb1c4f744d9c6a463cd7fc6e865a030d`.
+- [Mac candidate run 43302498859](https://github.com/Onyx-Dev-Labs/doodle-note/actions/runs/43302498859) passed production signing, notarization, stapling, Gatekeeper, manifest validation, and ZIP/DMG equality checks. The artifact was retained and promoted without rebuilding.
+- Local verification on macOS 27.2 ARM64 passed archive provenance/hash, receipt hashes, signatures/tickets/Gatekeeper, ZIP/DMG equality, audio import/merge/failure preservation, packaged native modules, worker/MCP smoke, and unchanged bundle/original checks.
+- The separate [macOS 14 check](https://github.com/Onyx-Dev-Labs/doodle-note/actions/runs/43306499080) could not start: GitHub reported `macos-14-arm64-us-default` is unsupported. This is environment-blocked, not a compatibility pass.
+- Alec installed the exact signed 1.0.1 app, tested it, reported it working well, and explicitly authorized publication on November 12, 2026. This does not establish prior-version in-app updater/relaunch acceptance.
+
+SHA-256 of retained payloads:
+
+- ZIP: `20c3fdd28ea72663c687ceff37cda483c7da31b5446272162cbfaaace676ba01`
+- DMG: `58b7523c62f7219dbc3861d4d2961408ce4e242cca28f0a9eee639bb1e39f26a`
+- Manifest: `e034e5cacbf827ee94af2f3f49d4c64ad124edad20552044290c77275291436c`
+
+## Publication verification
+
+The [GitHub 1.0.1 release](https://github.com/Onyx-Dev-Labs/doodle-note/releases/tag/v1.0.1) is public with the exact ZIP, DMG, manifest, and receipt. The tag resolves to the approved source commit. The Blob feed was read back independently and matched the candidate manifest hash.
+
+The receipt-bound publisher completed successfully with `activated: true`, verified full public artifact bytes on both storage and website routes, and retained rollback evidence. This PR copies the static feed byte-for-byte from its successful `stagedManifest` output for separate review and deployment. Verify the production feed, changelog, download route, and updater behavior after deployment. See [RELEASING](../RELEASING.md). Windows feeds are unchanged.
