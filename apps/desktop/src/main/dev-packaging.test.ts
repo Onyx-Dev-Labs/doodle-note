@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
 const desktop = resolve(__dirname, '..', '..')
@@ -46,8 +47,23 @@ test('the packaging script never calls the release or publish scripts', () => {
   assert.match(script, /--publish never/)
   assert.match(script, /DOODLENOTE_CHANNEL=dev/)
   assert.match(script, /DOODLENOTE_DEV_IDENTITY/)
-  assert.match(script, /Refusing a Developer ID certificate/)
   assert.doesNotMatch(script, /find-identity/, 'never auto-picks a certificate')
+})
+
+test('dev packaging refuses distribution and unrecognized signing identities before building', () => {
+  for (const identity of [
+    'Developer ID Application: Example',
+    'Apple Distribution: Example',
+    'Unknown'
+  ]) {
+    const result = spawnSync('bash', [resolve(desktop, 'scripts/package-dev.sh')], {
+      env: { ...process.env, DOODLENOTE_DEV_IDENTITY: identity },
+      encoding: 'utf8'
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /Use an Apple Development certificate/)
+    assert.equal(result.stdout, '', 'rejected before starting the build')
+  }
 })
 
 test('the channel is baked at build time, not read from the environment at runtime', () => {

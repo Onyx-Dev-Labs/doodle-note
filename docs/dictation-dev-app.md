@@ -6,13 +6,13 @@ From 0.4.38 Bark ships in the production macOS app, **off until the person turns
 
 ## What it does
 
-Press a shortcut in any macOS app, speak, and the recognized text is typed into the field you were using.
+Press a shortcut in any macOS app, speak, and the recognized text is typed into the field selected when delivery begins.
 
 - **Recognition is always local** (the existing FluidAudio engine, microphone only). No audio is retained, no meeting is created, nothing is synced.
 - **Triggers:** a configurable global toggle (default `Control+Alt+D`), optional hold-to-talk on a lone modifier (Right Option / Right Control / Right Command / Fn), a double tap of that same key (hands-free), and a click on the pill. `Esc` cancels while a session is live and is held only for that time.
-- **The pill:** a small paper-toned doodle pill that stays at a screen edge while dictation is on, and grows into the live pill (Cancel, a squiggle that follows your voice, Finish) during a session. See "The pill" below. Partial text stays in the overlay; the final text is inserted once.
-- **Delivery:** a native helper snapshots the focused app and control at start, re-validates immediately before inserting, and inserts through Accessibility, falling back to a clipboard paste that preserves every pasteboard representation and never overwrites a clipboard change you made meanwhile. It never presses Return.
-- **Recovery:** if focus moved, the field is secure or unsupported, Accessibility is off, or the insertion cannot be confirmed, the text is kept (overlay + Settings → Dictation) for you to copy. It is never retried blindly and the old app is never re-activated.
+- **The pill:** a small paper-toned doodle pill that stays at a screen edge while dictation is on, and grows into the live pill (Cancel, a squiggle that follows your voice, Finish) during a session. See "The pill" below. Partial text stays in the overlay; the final text is inserted once. Message cards fit their content and dismiss after 10 seconds, paused on hover. A successful Copy shows "Copied" for 450 ms, then fades out over 120 ms even while hovered; a failed copy remains available to retry.
+- **Delivery:** the recording-start snapshot provides app/style context. Ordinary dictation explicitly requests `useCurrentFocus`; inside the native delivery queue, the helper captures the currently selected field and inserts there, even after the user changes fields or apps. Selection rewrites and Undo retain their original target. The current destination is validated immediately before insertion; password fields remain protected. Accessibility insertion falls back to a clipboard paste that preserves existing representations and never overwrites a clipboard change made meanwhile. It never presses Return.
+- **Recovery:** if no editable field is selected at delivery, the current field is secure, Accessibility is off, or insertion cannot be confirmed, the text is kept (overlay + Settings → Dictation) for you to copy. It is never retried blindly and the old app is never re-activated.
 - **Tidy-up, styles and transforms (separate from recognition):** Off, Light (default) or Full tidy-up, a tone per kind of app, and optional rewrite transforms. See "Tidy-up, styles and transforms" below. Busy, failing, timed-out or doubtful model output falls back to the words as you said them and says so.
 
 ## The pill
@@ -27,7 +27,7 @@ The look is DoodleNote's own: a paper-toned pill with an offset ink outline, a h
 | Hold-to-talk | Unchanged: hold, speak, release. A hold shorter than 0.35 s is still discarded. |
 | Limits | Hands-free sessions (shortcut, pill click, double tap) stop and insert after 20 minutes; the pill warns at 19 ("One minute left. Then it finishes."). Hold-to-talk keeps its 3-minute backstop for a lost key-up. |
 | Right-click menu | Native menu: Hide the pill for an hour, Microphone (System default and each input), Paste the last transcript, Copy the last transcript, Open dictation settings, Keep the pill on screen. |
-| Edge and display | Drag the pill (5 px threshold separates a drag from a click) and drop it near the bottom, left or right edge; it snaps there and the edge is saved. It sits on the display the pointer is on (checked once a second). On the left and right edges the resting pill is vertical. |
+| Edge and display | Drag the pill (5 px threshold separates a drag from a click) and drop it near the bottom, left or right edge; it snaps there and the edge is saved. Both the resting and active waveform pill follow the display the pointer is on (checked every 150 ms), including while transcribing. Message cards stay on their opening display so their buttons remain easy to click. On the left and right edges the resting pill is vertical. |
 | Hide for an hour | The expiry time is saved in `dictation.json`, so it survives a restart. The pill returns at the expiry, or as soon as dictation starts from the shortcut or hold key, or from "Show it now" in Settings. |
 | Microphone | The choice is a CoreAudio UID saved in `dictation.json` and passed to the recorder. Inputs come from the engine's `devices` command (the same list the meeting recorder uses), re-read at most every 3 s and whenever the menu opens. If the saved device is missing from the list the session records from the system default and the pill says so; the saved choice is kept so it returns with the device. If the list is unavailable the choice is passed through and the engine's own fallback applies, which also raises the notice. |
 | Sounds | A two-note rising chime on start and a falling one on stop, synthesized by the overlay page from sine tones (nothing sampled, no files). A hold plays the start tone only once recording really begins, so an accidental tap is silent; cancel is silent. Setting "Start and stop tones". |
@@ -88,12 +88,12 @@ The Fn key reaches the helper as a flags-changed event (key code 63, the seconda
 
 ### Where the text will go
 
-The live pill shows the icon of the app the text will be typed into (Chrome's icon for Chrome, and so on), after a small drawn arrow, so you can see at a glance that the focused app is the one you meant. Setting: Settings, Dictation, Pill and microphone, **Show where the text will go** (default on).
+The live pill shows the icon of the app where dictation started. Setting: Settings, Bark, Pill and microphone, **Show the starting app** (default on). The final text follows the currently selected field; the icon describes the starting context, which also determines writing style.
 
-- The app is the one that was frontmost when the session began, the same snapshot the delivery uses. The helper reports its bundle path with the snapshot and draws the icon itself (`app-icon` request, `NSWorkspace`, 64 px PNG), only for an absolute path ending in `.app`. Nothing about the app's contents is read.
+- The app is the one that was frontmost when the session began, the snapshot used for style context. The helper reports its bundle path with the snapshot and draws the icon itself (`app-icon` request, `NSWorkspace`, 64 px PNG), only for an absolute path ending in `.app`. Nothing about the app's contents is read.
 - Icons are cached by bundle id in memory (up to 64) and sent to the overlay page once per change, not with every level frame. The pill appears with the icon once it is loaded, so it never flashes a placeholder. If the icon cannot be drawn, the pill shows the app's first letter instead; if the helper cannot place the app on disk it does the same without asking for an icon.
 - Off: no icon request is made and the pill is unchanged. The setting is read once per session, with the rest, so it cannot flip halfway.
-- The icon is also announced to screen readers ("Typing into Google Chrome") and is the tooltip on the icon.
+- The icon is also announced to screen readers ("Started in Google Chrome") and is the tooltip on the icon.
 - Live pill only: the resting pill, message cards and panels do not carry it.
 
 ### Settings added
@@ -140,7 +140,7 @@ Named rewrite prompts, opt-in (Settings, Dictation, Transforms, "Turn on transfo
 - **Checks on the result:** not empty, not an answer or a refusal instead of a rewrite, not wildly longer than the text; Polish additionally has to keep every number, negation and name. A doubtful result changes nothing and the pill says why.
 - **Secure fields:** the selection is never read from a password or other secure field.
 - **Auto apply after dictation:** pick one transform and turn the toggle on. It runs after tidy-up and style on every dictation. If it fails or looks doubtful, the text before it is typed and the pill says so. Its time is counted in the timing metrics (`transformMs`), next to the model tidy-up (`tidyMs`).
-- **View changes and Undo:** after a transform changed the text the pill shows "Changed by Polish. View, Undo" for 8 seconds, and View and Undo stay in the pill's menu and Settings. View opens a word-level before and after (removed words struck through, added words highlighted). Undo asks the helper to find the one copy of the new text in the focused field, select it and put the old text back through the same verified insertion. If the field no longer holds it exactly once, nothing is forced: the old text waits on the kept-text card. The text before a transform is held in memory only and forgotten on quit.
+- **View changes and Undo:** after a transform changed the text the pill shows "Changed by Polish. View, Undo" for 10 seconds (paused while hovered), and View and Undo stay in the pill's menu and Settings. View opens a word-level before and after (removed words struck through, added words highlighted). Undo asks the helper to find the one copy of the new text in the focused field, select it and put the old text back through the same verified insertion. If the field no longer holds it exactly once, nothing is forced: the old text waits on the kept-text card. The text before a transform is held in memory only and forgotten on quit.
 - **Model access:** the quickest local model installed on this Mac (see "Making the model steps quicker"), otherwise your provider with the existing consent (bound to provider and model; the Tidy-up section holds the toggle, and a transform run without consent tells you where to give it). With neither, the page says so plainly; Light and styles keep working.
 - **Quiet mode:** "Changed by..." and the "working" caption are suppressible by "Show status messages". Errors, kept text and warnings never are. Undo and View remain in the menu.
 
@@ -235,20 +235,20 @@ Settings, Bark, Pill and microphone: **Only my voice**. For a shared room: someo
 
 ```sh
 cd apps/desktop
-pnpm package:dev          # swift build + app build + ad-hoc sign + isolation checks
+pnpm package:dev          # swift build + app build + local signing + isolation checks
 pnpm verify:dev-app       # re-run the isolation checks on the built app
 open "release-dev/mac-arm64/DoodleNote Dev.app"
 ```
 
 Output: `apps/desktop/release-dev/mac-arm64/DoodleNote Dev.app` (git-ignored). Nothing is installed into `/Applications`; copy it there yourself if you want it. It will not replace the production app.
 
-**Signing and Keychain.** The default is an ad-hoc signature, which needs no certificate. Because macOS ties permission grants and Keychain access to the code signature, **an ad-hoc rebuild resets Microphone/Accessibility grants and makes macOS ask once for Keychain access ("DoodleNote Dev Safe Storage")**. For grants that survive rebuilds, sign with a local development certificate:
+**Signing and Keychain.** The build reuses the previous Dev app's Apple Development signing identity unless `DOODLENOTE_DEV_IDENTITY` overrides it. When no previous development signer exists, it falls back to ad-hoc signing, which needs no certificate but can invalidate saved permissions on rebuild. Choose a local development certificate for testing that needs permissions to survive rebuilds:
 
 ```sh
 DOODLENOTE_DEV_IDENTITY="Apple Development: Your Name (TEAMID)" pnpm package:dev
 ```
 
-The first signing may ask for Keychain access to that key. The script refuses a Developer ID certificate.
+The first signing may ask for Keychain access to that key. Later builds reuse this signer before replacing the old bundle. Keep the previous bundle available, or pass the identity explicitly after cleaning the output directory. The script accepts only an Apple Development certificate or explicit `-` for ad-hoc signing, and refuses a Developer ID certificate.
 
 For an unpackaged run from source: `pnpm dev:dictation` (also the dev lineage and profile). Whisper batch transcription is not bundled in the dev app (it needs a whisper.cpp build); Parakeet, the default, is.
 
@@ -268,7 +268,11 @@ The microphone is also requested automatically the first time a session starts w
 
 **Which process owns the Accessibility grant.** macOS attributes a permission request to the app that launched the asking process (its "responsible process"), not to the child itself. Checked here with `responsibility_get_pid_responsible_for_pid`: a process started from a Python child of a GUI app reports that GUI app, not its immediate parent or itself. So the dictation helper, a child of the Electron main process inside `DoodleNote Dev.app`, is attributed to **DoodleNote Dev** (`com.doodlenote.desktop.dev`) when the app is opened normally, and the helper's `AXIsProcessTrusted` answer is the one the Settings row shows. Asking from the helper rather than the main process puts the entry macOS lists next to the code that really needs it and makes the row reflect the helper's real answer. The same rule means that a dev run started from a terminal (`pnpm dev:dictation`) is attributed to that terminal instead; grant it there, or use the packaged app. The attribution under the packaged app was inferred from this rule, not exercised: doing so raises real prompts.
 
-**Ad-hoc signing and resets.** The default build is signed ad-hoc, and macOS ties a grant to the code signature, so every rebuild is a new identity: grants disappear (the app may still be listed, switched off) and macOS asks again. A signing identity from `DOODLENOTE_DEV_IDENTITY` keeps grants across rebuilds. To start from nothing, for example when the app is missing from a list:
+**Ad-hoc signing and stale approvals.** On November 12, 2026, both macOS permission switches were on while the packaged helper reported Accessibility and Input Monitoring denied, even after a full restart. TCC logs confirmed `Failed to match existing code requirement` for `com.doodlenote.desktop.dev`: the saved approval referenced an older ad-hoc build hash. An enabled switch alone does not establish that the current binary is approved. Sign with a stable development certificate first, refresh the stale DoodleNote Dev entries in System Settings, and verify the app's live permission rows after relaunch. Do not reset permissions for the production app.
+
+Recovery was verified on this Mac: toggling the two existing switches off and on retained the old code requirement. Removing and re-adding only DoodleNote Dev in Input Monitoring and Device Control and Data Access registered the signed bundle correctly. After the user approved Microphone again, all three permissions showed Allowed and the Right Control shortcut showed Active, including after another complete quit and relaunch. A subsequent local rebuild reused the same Apple Development signer; after opening that new binary, all three permissions still showed Allowed and Right Control still showed Active. This verifies persistence across both restart and rebuild on this Mac.
+
+To start from nothing, for example when the Dev app is missing from a list:
 
 ```sh
 tccutil reset All com.doodlenote.desktop.dev
@@ -284,7 +288,7 @@ Use only synthetic phrases and scratch destinations. Do not send or submit anyth
 2. Repeat in TextEdit, a browser `<textarea>`, a `contenteditable` and the scratch box. Confirm the overlay never steals focus.
 3. Silence: start, say nothing, stop: "No speech detected", nothing typed.
 4. Esc and the Cancel button mid-dictation: nothing typed.
-5. Start, switch to another app, stop: the overlay says you moved and keeps the text; Copy works.
+5. Start in one text box, switch to another text box (also try another app), stop: ordinary dictation inserts once into the currently selected box. Repeat ending in a password field: refused, text kept. Selection rewrites and Undo still refuse a changed target.
 6. Click into a password field and dictate: refused, text kept.
 7. Turn Accessibility off and dictate: text kept, explained.
 8. Hold-to-talk: choose Right Option, hold while speaking, release. A tap shorter than about a third of a second does nothing.

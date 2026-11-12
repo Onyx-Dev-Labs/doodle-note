@@ -437,8 +437,8 @@ export function DictationSettings(): React.JSX.Element {
         </h3>
         <p className="models-sub">
           {FEATURE_NAME} is DoodleNote&apos;s dictation. Press a shortcut in any app and speak.
-          Speech is recognized on this Mac and the text is typed into the field you were using.
-          Audio is never retained and never leaves this Mac.
+          Speech is recognized on this Mac and the text is typed into the field selected when it
+          finishes. Audio is never retained and never leaves this Mac.
         </p>
         {status.channel === 'dev' && (
           <p className="models-sub">
@@ -822,16 +822,15 @@ export function DictationSettings(): React.JSX.Element {
           </div>
           <div className="cal-row">
             <span className="cal-row-main">
-              <span className="cal-row-label">Show where the text will go</span>
+              <span className="cal-row-label">Show the starting app</span>
               <span className="cal-row-sub">
-                The icon of the app you are dictating into (Chrome, Slack, your editor) sits on the
-                pill while you speak, so you can see where the words will land. Only the app&apos;s
-                icon is read; nothing about what is in it.
+                The app where you started dictating appears on the pill. You can switch fields or
+                apps before the text is inserted.
               </span>
             </span>
             <Toggle
               checked={settings.showTargetApp}
-              label="Show the icon of the app the text will be typed into"
+              label="Show the app where dictation started"
               onChange={() => void update({ showTargetApp: !settings.showTargetApp })}
             />
           </div>

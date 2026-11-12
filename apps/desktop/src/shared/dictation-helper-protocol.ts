@@ -42,6 +42,8 @@ export interface AppInfoEntry {
 
 /** Guards for a delivery that edits text already in the field. */
 export interface DeliveryGuards {
+  /** Plain dictation targets the field focused at delivery, not at recording start. */
+  useCurrentFocus?: boolean
   /** Refuse unless the selection is exactly this text. */
   expectSelection?: string
   /** Select the one copy of this text in the field and replace it; refuse if it is not there once. */

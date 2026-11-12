@@ -43,6 +43,7 @@ process.stdin.on('data', (d) => {
       if (mode === 'secure') send({ event: 'reply', id: req.id, ok: false, reason: 'secure-field' })
       else send({ event: 'reply', id: req.id, ok: true, text: 'picked words' })
     } else if (req.op === 'deliver') {
+      if (mode === 'current-focus' && req.useCurrentFocus !== true) { send({ event: 'reply', id: req.id, ok: true, outcome: 'refused', reason: 'focus-changed', verified: false, clipboard: 'untouched' }); return }
       if (req.replace === 'gone') { send({ event: 'reply', id: req.id, ok: true, outcome: 'refused', reason: 'text-changed', verified: false, clipboard: 'untouched' }); return }
       if (req.expectSelection === 'stale') { send({ event: 'reply', id: req.id, ok: true, outcome: 'refused', reason: 'selection-changed', verified: false, clipboard: 'untouched' }); return }
       if (mode === 'hang') return
@@ -345,6 +346,19 @@ test('delivery guards travel with the request and a refusal says why', async () 
     assert.equal(gone.reason, 'text-changed')
     const fine = await client.deliver('s-1', 'text', { replace: 'present' })
     assert.equal(fine.outcome, 'delivered')
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('current-focus delivery is an explicit opt-in on the native request', async () => {
+  const client = new DictationHelperClient(fakeHelper('current-focus'), fast)
+  try {
+    assert.equal((await client.deliver('s-1', 'default stays pinned')).reason, 'focus-changed')
+    assert.equal(
+      (await client.deliver('s-2', 'current chat', { useCurrentFocus: true })).outcome,
+      'delivered'
+    )
   } finally {
     await client.dispose()
   }

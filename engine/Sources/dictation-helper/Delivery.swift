@@ -120,9 +120,54 @@ struct DeliveryGuards {
     var expectSelection: String?
     /// This text must occur exactly once in the field; it is selected and replaced.
     var replace: String?
+
+    /// A wait or clipboard serialization must not invalidate an edit's selection.
+    func refusal(selected: String?) -> String? {
+        if let expected = expectSelection, selected != expected { return "selection-changed" }
+        if let target = replace, selected != target { return "text-changed" }
+        return nil
+    }
+}
+
+/// Secure event input is global, not proof that this target is a password
+/// field. Give a just-dismissed secure prompt a brief chance to release it,
+/// rechecking the original destination on every pass. No insertion is retried.
+enum PasteReadiness {
+    static func refusal(
+        validate: () -> String?, secureInput: () -> Bool,
+        wait: () -> Void, attempts: Int = 6
+    ) -> String? {
+        for attempt in 0...attempts {
+            if let reason = validate() { return reason }
+            if !secureInput() { return validate() }
+            if attempt == attempts { return "secure-input" }
+            wait()
+        }
+        return "secure-input"
+    }
 }
 
 enum Delivery {
+    private static func refusal(_ snapshot: TargetSnapshot) -> String? {
+        guard AX.trusted else { return "accessibility-denied" }
+        guard let expected = snapshot.element, let facts = snapshot.facts else { return "no-target" }
+        guard AX.frontmostPid() == snapshot.pid,
+            let current = AX.focusedElement(pid: snapshot.pid), CFEqual(current, expected)
+        else { return "focus-changed" }
+        let now = ElementFacts(current)
+        if facts.secure || now.secure { return "secure-field" }
+        if !now.editable { return "not-editable" }
+        return nil
+    }
+
+    private static func pasteRefusal(_ snapshot: TargetSnapshot, guards: DeliveryGuards) -> String? {
+        if let reason = refusal(snapshot) { return reason }
+        guard guards.expectSelection != nil || guards.replace != nil,
+            let element = snapshot.element
+        else { return nil }
+        return guards.refusal(selected: AX.string(element, kAXSelectedTextAttribute as String))
+    }
+
     /// Validate the target immediately before inserting, then insert once.
     static func deliver(
         _ snapshot: TargetSnapshot, text: String, guards: DeliveryGuards = DeliveryGuards()
@@ -138,22 +183,12 @@ enum Delivery {
         timings: inout DeliveryTimings
     ) -> DeliveryResult {
         let began = DispatchTime.now().uptimeNanoseconds
-        guard AX.trusted else {
-            return DeliveryResult(outcome: .refused, reason: "accessibility-denied")
+        if let reason = refusal(snapshot) {
+            return DeliveryResult(outcome: .refused, reason: reason)
         }
-        guard let expected = snapshot.element, let facts = snapshot.facts else {
+        guard let current = snapshot.element else {
             return DeliveryResult(outcome: .refused, reason: "no-target")
         }
-        guard AX.frontmostPid() == snapshot.pid else {
-            return DeliveryResult(outcome: .refused, reason: "focus-changed")
-        }
-        guard let current = AX.focusedElement(pid: snapshot.pid), CFEqual(current, expected) else {
-            return DeliveryResult(outcome: .refused, reason: "focus-changed")
-        }
-        // Re-read: the field may have become a password field since the snapshot.
-        let now = ElementFacts(current)
-        if facts.secure || now.secure { return DeliveryResult(outcome: .refused, reason: "secure-field") }
-        if !now.editable { return DeliveryResult(outcome: .refused, reason: "not-editable") }
 
         if let expected = guards.expectSelection,
             AX.string(current, kAXSelectedTextAttribute as String) != expected
@@ -212,17 +247,24 @@ enum Delivery {
                 return DeliveryResult(outcome: .delivered, method: "ax", verified: true)
             }
         }
-        return paste(text, into: current, snapshot: snapshot, before: before, timings: &timings)
+        return paste(text, into: current, snapshot: snapshot, before: before, guards: guards, timings: &timings)
     }
 
     private static func paste(
         _ text: String, into element: AXUIElement, snapshot: TargetSnapshot, before: ControlState,
-        timings: inout DeliveryTimings
+        guards: DeliveryGuards, timings: inout DeliveryTimings
     ) -> DeliveryResult {
-        // Synthetic keystrokes are blocked, and unsafe, while a password field
-        // anywhere has secure event input.
-        if IsSecureEventInputEnabled() {
-            return DeliveryResult(outcome: .refused, reason: "secure-field")
+        let validateStarted = DispatchTime.now().uptimeNanoseconds
+        let reason = PasteReadiness.refusal(
+            validate: { pasteRefusal(snapshot, guards: guards) },
+            secureInput: { IsSecureEventInputEnabled() },
+            wait: { Thread.sleep(forTimeInterval: 0.03) })
+        timings.validateMs += elapsedMs(since: validateStarted)
+        if let reason { return DeliveryResult(outcome: .refused, reason: reason) }
+        // The accessibility attempt or the user may have changed the field
+        // during a wait. Never follow that with a second insertion.
+        guard ControlState(element) == before else {
+            return DeliveryResult(outcome: .uncertain, reason: "insertion-unverifiable")
         }
         let insertStarted = DispatchTime.now().uptimeNanoseconds
         let pasteboard = NSPasteboard.general
@@ -238,6 +280,19 @@ enum Delivery {
         }
         let ours = pasteboard.changeCount
 
+        // Clipboard serialization can take time. Revalidate at the actual
+        // keystroke boundary, including the secure-input flag, without waiting.
+        let finalReason = PasteReadiness.refusal(
+            validate: { pasteRefusal(snapshot, guards: guards) }, secureInput: { IsSecureEventInputEnabled() },
+            wait: {}, attempts: 0)
+        if let finalReason {
+            let restored = saved.restore(to: pasteboard, expecting: ours)
+            return DeliveryResult(outcome: .refused, reason: finalReason, clipboard: restored)
+        }
+        guard ControlState(element) == before else {
+            let restored = saved.restore(to: pasteboard, expecting: ours)
+            return DeliveryResult(outcome: .uncertain, reason: "insertion-unverifiable", clipboard: restored)
+        }
         guard postPaste(to: snapshot.pid) else {
             let restored = saved.restore(to: pasteboard, expecting: ours)
             return DeliveryResult(outcome: .failed, reason: "keystroke-unavailable", method: "paste", clipboard: restored)

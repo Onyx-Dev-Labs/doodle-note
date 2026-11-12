@@ -69,8 +69,36 @@ enum AX {
     }
 
     static func focusedElement(pid: pid_t) -> AXUIElement? {
-        let app = AXUIElementCreateApplication(pid)
-        return element(attribute(app, kAXFocusedUIElementAttribute as String))
+        // A browser can expose a generic app-level container while the system
+        // query already knows the inner editor. Never accept another process.
+        func owned(_ candidate: AXUIElement?) -> AXUIElement? {
+            guard let candidate else { return nil }
+            var owner: pid_t = 0
+            guard AXUIElementGetPid(candidate, &owner) == .success, owner == pid else { return nil }
+            return candidate
+        }
+        func resolve(_ candidate: AXUIElement?) -> AXUIElement? {
+            guard var focused = owned(candidate) else { return nil }
+            var visited: [AXUIElement] = []
+            // Follow only explicit focus, never search arbitrary editable children.
+            for _ in 0..<8 {
+                let facts = ElementFacts(focused)
+                if !facts.unresolvedContainer { break }
+                visited.append(focused)
+                guard let next = owned(element(attribute(focused, kAXFocusedUIElementAttribute as String))),
+                    !visited.contains(where: { CFEqual($0, next) })
+                else { break }
+                focused = next
+            }
+            return focused
+        }
+        let system = AXUIElementCreateSystemWide()
+        return FocusResolution.preferred(
+            system: resolve(element(attribute(system, kAXFocusedUIElementAttribute as String))),
+            app: {
+                let app = AXUIElementCreateApplication(pid)
+                return resolve(element(attribute(app, kAXFocusedUIElementAttribute as String)))
+            }, facts: ElementFacts.init)
     }
 
     /// Chromium and Electron build their accessibility tree only when an
@@ -99,7 +127,56 @@ struct ElementFacts {
         editable =
             textRoles.contains(role)
             || AX.settable(element, kAXSelectedTextRangeAttribute as String)
+            || AX.settable(element, kAXSelectedTextAttribute as String)
             || AX.settable(element, kAXValueAttribute as String)
+    }
+
+    init(role: String, secure: Bool = false, editable: Bool = false) {
+        self.role = role
+        self.subrole = nil
+        self.secure = secure
+        self.editable = editable
+    }
+
+    var unresolvedContainer: Bool {
+        !secure && !editable
+            && ["", "AXUnknown", "AXApplication", "AXWindow", "AXWebArea", "AXGroup", "AXScrollArea"].contains(role)
+    }
+}
+
+/// A cold web accessibility tree can pass through several generic containers
+/// before reporting its focused editor. Stop on a definite control, and abandon
+/// capture if the user changes apps rather than adopting a new destination.
+enum FocusResolution {
+    static func preferred<Element>(
+        system: Element?, app: () -> Element?, facts: (Element) -> ElementFacts
+    ) -> Element? {
+        if let system, !facts(system).unresolvedContainer { return system }
+        return app() ?? system
+    }
+
+    static func capture<Element>(
+        sameApp: () -> Bool,
+        read: () -> Element?,
+        facts: (Element) -> ElementFacts,
+        requestAccessibility: () -> Void,
+        wait: () -> Void,
+        attempts: Int = 40
+    ) -> Element? {
+        var requested = false
+        for attempt in 0...attempts {
+            guard sameApp() else { return nil }
+            let candidate = read()
+            guard sameApp() else { return nil }
+            if let candidate, !facts(candidate).unresolvedContainer { return candidate }
+            if attempt == attempts { return candidate }
+            if !requested {
+                requestAccessibility()
+                requested = true
+            }
+            wait()
+        }
+        return nil
     }
 }
 
@@ -212,21 +289,12 @@ enum Target {
         else { return nil }
         var element: AXUIElement?
         if AX.trusted {
-            element = AX.focusedElement(pid: pid)
-            if element == nil || ElementFacts(element!).role == "AXWebArea" {
-                // Chromium and Electron build their accessibility tree only
-                // after being asked, and take a moment to do so. Wait briefly
-                // (the user is still speaking); the delivery check re-validates
-                // the element anyway.
-                AX.requestWebAccessibility(pid: pid)
-                for _ in 0..<40 {
-                    Thread.sleep(forTimeInterval: 0.03)
-                    if let found = AX.focusedElement(pid: pid), ElementFacts(found).role != "AXWebArea" {
-                        element = found
-                        break
-                    }
-                }
-            }
+            element = FocusResolution.capture(
+                sameApp: { AX.trusted && AX.frontmostPid() == pid },
+                read: { AX.focusedElement(pid: pid) },
+                facts: ElementFacts.init,
+                requestAccessibility: { AX.requestWebAccessibility(pid: pid) },
+                wait: { Thread.sleep(forTimeInterval: 0.03) })
         }
         return TargetSnapshot(
             id: id, pid: pid, bundleId: app.bundleIdentifier ?? "",
