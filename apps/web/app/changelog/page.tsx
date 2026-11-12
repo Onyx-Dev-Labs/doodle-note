@@ -10,7 +10,7 @@ const RELEASES: Array<{
 }> = [
   {
     version: "1.0.1",
-    date: "Unreleased",
+    date: "November 12, 2026",
     highlights: [
       "Bark inserts your dictated words into the text field selected when dictation finishes, even if you switch fields or apps while speaking",
       "More reliable detection of focused chat boxes, with clearer messages when macOS blocks insertion",
