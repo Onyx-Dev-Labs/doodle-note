@@ -79,8 +79,14 @@ function page(): {
     render(view: object, dark: boolean): void
     copyResult(id: number, success: boolean): void
   }
-  const script = overlayHtml().match(/<script>([\s\S]*)<\/script>/)?.[1]
-  assert.ok(script)
+  // Extract the single, known script block from our generated fixture. This is
+  // not an HTML sanitizer and never receives external HTML.
+  const html = overlayHtml()
+  const start = html.indexOf('<script>')
+  const end = html.indexOf('</script>', start)
+  assert.ok(start >= 0 && end > start)
+  assert.equal(html.indexOf('<script>', start + 1), -1)
+  const script = html.slice(start + '<script>'.length, end)
   runInNewContext(script, {
     window,
     document: {
