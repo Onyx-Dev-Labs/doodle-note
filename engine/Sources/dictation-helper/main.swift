@@ -99,26 +99,23 @@ func handle(_ request: [String: Any]) {
         let guards = DeliveryGuards(
             expectSelection: request["expectSelection"] as? String,
             replace: request["replace"] as? String)
-        let watch = request["watch"] as? Bool ?? false
+        let delivery = DeliveryRequest(
+            text: text, guards: guards,
+            useCurrentFocus: request["useCurrentFocus"] as? Bool ?? false,
+            watch: request["watch"] as? Bool ?? false)
         workQueue.async {
-            guard !text.isEmpty else {
-                Wire.reply(id, DeliveryResult(outcome: .failed, reason: "empty-text").fields)
-                return
-            }
-            guard let snapshot = snapshots.get(snapshotId) else {
-                Wire.reply(id, DeliveryResult(outcome: .refused, reason: "no-target").fields)
-                return
-            }
-            let result = Delivery.deliver(snapshot, text: text, guards: guards)
-            // A snapshot is single-use: a second deliver can never re-insert.
-            snapshots.drop(snapshotId)
-            // Keep the field for read-backs only when asked, only after a confirmed
-            // insertion, and never a secure field.
-            if watch, result.outcome == .delivered, let element = snapshot.element,
-                !(snapshot.facts?.secure ?? false)
-            {
-                watches.start(id: snapshotId, pid: snapshot.pid, element: element)
-            }
+            let result = delivery.run(
+                original: snapshots.get(snapshotId),
+                captureCurrent: { Target.capture(id: snapshotId) },
+                consume: { snapshots.drop(snapshotId) },
+                insert: { Delivery.deliver($0, text: $1, guards: $2) },
+                didDeliver: { target in
+                    // Watch the actual destination, which may differ from where
+                    // recording began. No secure field is retained for read-back.
+                    if let element = target.element, !(target.facts?.secure ?? false) {
+                        watches.start(id: snapshotId, pid: target.pid, element: element)
+                    }
+                })
             Wire.reply(id, result.fields)
         }
     case "watch-read":

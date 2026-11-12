@@ -586,21 +586,34 @@ test('uncertain delivery is kept for recovery and never retried', async () => {
   assert.deepEqual(h.clipboard, ['maybe typed'])
 })
 
-test('missing accessibility goes straight to recovery without calling the helper to type', async () => {
+test('delivery reports the helper’s current Accessibility denial and keeps the words', async () => {
   const h = harness()
   h.helper.target = { ...h.helper.target!, accessibility: false, hasElement: false }
+  h.helper.delivery = {
+    outcome: 'refused',
+    reason: 'accessibility-denied',
+    verified: false,
+    clipboard: 'untouched'
+  }
   await speak(h, 'no permission')
   await tick()
-  assert.deepEqual(h.delivered, [])
+  assert.equal(h.helper.deliverGuards[0]?.useCurrentFocus, true)
+  assert.equal((await h.service.status()).recoveries[0]?.reason, 'accessibility-denied')
   assert.equal(h.service.phase, 'recovery')
 })
 
 test('secure and unsupported targets are retained, not typed', async () => {
   const secure = harness()
   secure.helper.target = { ...secure.helper.target!, secure: true }
+  secure.helper.delivery = {
+    outcome: 'refused',
+    reason: 'secure-field',
+    verified: false,
+    clipboard: 'untouched'
+  }
   await speak(secure, 'password field')
   await tick()
-  assert.deepEqual(secure.delivered, [])
+  assert.equal((await secure.service.status()).recoveries[0]?.reason, 'secure-field')
   assert.equal(secure.service.phase, 'recovery')
 
   const changed = harness()
@@ -614,6 +627,97 @@ test('secure and unsupported targets are retained, not typed', async () => {
   await tick()
   assert.equal(changed.service.phase, 'recovery')
   assert.equal((await changed.service.status()).recoveries[0]?.reason, 'focus-changed')
+})
+
+test('plain dictation follows current focus even when its starting field was unavailable or secure', async () => {
+  for (const initial of [
+    { secure: true },
+    { hasElement: false },
+    { accessibility: false, hasElement: false },
+    { editable: false, role: 'AXButton' }
+  ]) {
+    const h = harness()
+    h.helper.target = { ...h.helper.target!, ...initial }
+    h.helper.deliveryFor = (_text, guards) =>
+      guards.useCurrentFocus
+        ? { outcome: 'delivered', method: 'paste', verified: true, clipboard: 'restored' }
+        : { outcome: 'refused', reason: 'focus-changed', verified: false, clipboard: 'untouched' }
+    await speak(h, 'the newly selected chat box')
+    assert.equal(h.delivered.length, 1)
+    assert.equal(h.helper.deliverGuards[0]?.useCurrentFocus, true)
+    assert.equal(h.service.phase, 'notice')
+    assert.deepEqual((await h.service.status()).recoveries, [])
+    h.service.dispose()
+  }
+})
+
+test('secure keyboard input is reported separately from a password field', async () => {
+  const h = harness()
+  h.helper.delivery = {
+    outcome: 'refused',
+    reason: 'secure-input',
+    verified: false,
+    clipboard: 'untouched'
+  }
+  await speak(h, 'keep these words')
+  assert.equal((await h.service.status()).recoveries[0]?.reason, 'secure-input')
+  assert.match(lastView(h).title, /secure keyboard input/i)
+  assert.doesNotMatch(lastView(h).title, /secure field/i)
+  h.service.dispose()
+})
+
+test('popup copy reports clipboard success and dismissal keeps the transcript available', async () => {
+  const h = harness()
+  h.helper.delivery = {
+    outcome: 'refused',
+    reason: 'no-target',
+    verified: false,
+    clipboard: 'untouched'
+  }
+  await speak(h, 'words to keep')
+  const gen = lastView(h).gen!
+  assert.equal(await h.service.onOverlayAction('copy', gen), true)
+  assert.deepEqual(h.clipboard, ['words to keep'])
+  h.service.onOverlayAction('dismiss', gen)
+  assert.equal(h.service.phase, 'idle')
+  assert.equal((await h.service.status()).recoveries[0]?.text, 'words to keep')
+  assert.equal(await h.service.copyRecovery(gen), true)
+  finish(h)
+  await h.service.pasteLast()
+  assert.equal(h.delivered.at(-1), 'words to keep')
+  h.service.dispose()
+})
+
+test('popup copy reports failed and missing clipboard requests truthfully', async () => {
+  const h = harness({ clipboardFails: true })
+  h.helper.delivery = {
+    outcome: 'refused',
+    reason: 'no-target',
+    verified: false,
+    clipboard: 'untouched'
+  }
+  await speak(h, 'retry these words')
+  assert.equal(await h.service.onOverlayAction('copy', lastView(h).gen), false)
+  assert.equal(await h.service.onOverlayAction('copy', null), false)
+  assert.equal(await h.service.onOverlayAction('copy', -1), false)
+  assert.equal((await h.service.status()).recoveries[0]?.text, 'retry these words')
+  h.service.dispose()
+})
+
+test('notice dismissal waits for the overlay countdown instead of a competing timer', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  const h = harness()
+  try {
+    await speak(h, 'a completed message')
+    assert.equal(h.service.phase, 'notice')
+    mock.timers.tick(30_000)
+    assert.equal(h.service.phase, 'notice', 'hover can keep the popup open beyond ten seconds')
+    h.service.onOverlayAction('dismiss', lastView(h).gen)
+    assert.equal(h.service.phase, 'idle')
+  } finally {
+    h.service.dispose()
+    mock.timers.reset()
+  }
 })
 
 test('helper unavailable: text is kept, nothing is lost', async () => {
@@ -979,8 +1083,9 @@ test('a hidden pill returns when dictation starts from the hotkey', async () => 
     h.service.toggle()
     h.emit({ event: 'final', channel: 'mic', text: 'back' })
     await tick()
-    h.clock.now += 5_000
-    mock.timers.tick(2_000)
+    h.clock.now += 10_000
+    // The real overlay emits this when its hover-aware countdown expires.
+    h.service.onOverlayAction('dismiss', lastView(h).gen)
     assert.equal(lastView(h).mode, 'rest')
     assert.equal(lastView(h).visible, true)
   } finally {

@@ -68,19 +68,31 @@ ${overlayFontCss}
   .side .caption .warn{white-space:normal}
   .caption-state{color:var(--mute);line-height:1.35;overflow-wrap:anywhere}
   /* message card */
-  .card{box-sizing:border-box;flex:1;border-radius:16px 14px 17px 13px/13px 17px 14px 16px;padding:10px 14px;display:flex;flex-direction:column;gap:6px;min-height:0}
-  .card .title{font-weight:700;font-size:14px;line-height:1.3}
+  .card{position:relative;overflow:hidden;transition:opacity .12s ease,transform .12s ease;box-sizing:border-box;flex:none;width:100%;border-radius:16px 14px 17px 13px/13px 17px 14px 16px;padding:10px 14px 14px;display:flex;flex-direction:column;gap:6px;min-height:0}
+  .card.has-diff{flex:1}
+  .card .title{flex:none;font-weight:700;font-size:14px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
   .card.warn{border-color:var(--warn)}.card.error{border-color:var(--err)}
-  .card .detail{flex:1;min-height:0;color:var(--mute);font:12px/1.35 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
+  .card .detail{flex:none;min-height:0;color:var(--mute);font:12px/1.35 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
   .diff{flex:1;min-height:0;overflow:hidden;font:12px/1.45 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;white-space:pre-wrap;word-break:break-word;-webkit-user-select:text;user-select:text;background:var(--wash);border-radius:8px;padding:6px 8px}
   .diff ins{text-decoration:none;color:var(--ok);background:rgba(79,122,74,.16);border-radius:3px}
   .diff del{color:var(--err);background:rgba(179,65,47,.14);border-radius:3px;text-decoration:line-through}
   .btns{display:flex;gap:6px;justify-content:flex-end}
-  .btn{color:var(--ink);background:var(--wash);border:1.4px solid var(--ink);padding:1px 10px;border-radius:9px;text-decoration:none;font-size:13px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;cursor:pointer;transition:transform .12s ease,background .12s ease,box-shadow .12s ease;color:var(--ink);background:var(--wash);border:1.4px solid var(--ink);padding:1px 10px;border-radius:9px;text-decoration:none;font-size:13px}
+  .btn:hover{transform:scale(1.04);box-shadow:0 1px 0 var(--ink);background:var(--paper)}
+  .btn:active,.btn.pressed{transform:scale(.96);box-shadow:none}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .btn[aria-disabled="true"]{cursor:wait}
+  .btn.copied{background:var(--ok);color:#fff}
+  .copy-check{width:13px;height:13px;flex:none}.copy-check path{stroke:currentColor}
+  .card.dismissing{opacity:0;transform:scale(.98);pointer-events:none}
+  .countdown{position:absolute;left:12px;right:12px;bottom:4px;height:3px;border-radius:2px;background:var(--wash);overflow:hidden;pointer-events:none}
+  .countdown-fill{height:100%;width:100%;background:var(--mute);transform-origin:left;border-radius:inherit}
   .btn.primary{background:var(--accent);color:#fff;border-color:var(--ink)}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.primary.copied{background:var(--ok)}
   .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   [hidden]{display:none!important}
-  @media (prefers-reduced-motion:reduce){.rest{transition:none}.rest:hover{transform:none}}
+  @media (prefers-reduced-motion:reduce){.rest,.btn,.card{transition:none}.rest:hover,.btn:hover,.btn:active,.btn.pressed,.card.dismissing{transform:none}}
 </style></head><body>
 <div class="root bottom" id="root">
   <div class="pill rest" id="rest" role="button" aria-label="Start ${FEATURE_NAME}" hidden>
@@ -109,21 +121,112 @@ ${overlayFontCss}
     <div class="title" id="title"></div>
     <div class="detail" id="cardDetail"></div>
     <div class="diff" id="diff" hidden aria-label="Changes: removed words are struck through, added words are highlighted"></div>
-    <div class="btns">
+    <div class="btns" id="btns">
       <a class="btn" id="view" href="doodle-dictation://view" role="button" hidden>View</a>
       <a class="btn primary" id="undo" href="doodle-dictation://undo" role="button" hidden>Undo</a>
-      <a class="btn primary" id="copy" href="doodle-dictation://copy" role="button" hidden>Copy text</a>
+      <a class="btn primary" id="copy" href="doodle-dictation://copy" role="button" hidden><span id="copyCheck" hidden><svg class="copy-check" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.2 L6.5 11.5 L13 4.5"/></svg></span><span id="copyLabel">Copy text</span></a>
       <a class="btn" id="dismiss" href="doodle-dictation://dismiss" role="button" hidden>Dismiss</a>
     </div>
+    <div class="countdown" id="countdown" aria-hidden="true" hidden><div class="countdown-fill" id="countdownFill"></div></div>
   </div>
   <div class="sr" id="live" role="status" aria-live="polite"></div>
 </div>
 <script>
   const $ = (id) => document.getElementById(id)
-  const go = (name) => { location.href = 'doodle-dictation://' + name }
+  const go = (name) => { location.href = 'doodle-dictation://' + name + (view && view.mode === 'message' ? '?message=' + view.messageId : '') }
   const calm = matchMedia('(prefers-reduced-motion: reduce)')
   let view = null
   let target = 0, shown = 0, phase = 0, frame = 0
+
+  const MESSAGE_MS = 10000
+  const COPIED_MS = 450
+  let countdownFrame = 0, remaining = MESSAGE_MS, lastTick = 0
+  let hovering = false, copying = false, copiedText = false, dismissing = false, dismissTimer = 0, copiedTimer = 0
+  function paintCountdown() {
+    $('countdownFill').style.transform = 'scaleX(' + Math.max(0, remaining / MESSAGE_MS) + ')'
+  }
+  function dismissCard() {
+    if (!view || view.mode !== 'message' || dismissing) return
+    dismissing = true
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = 0
+    const id = view.messageId
+    if (countdownFrame) cancelAnimationFrame(countdownFrame)
+    countdownFrame = 0
+    $('card').classList.add('dismissing')
+    dismissTimer = setTimeout(() => {
+      dismissTimer = 0
+      if (view && view.mode === 'message' && view.messageId === id) go('dismiss')
+    }, calm.matches ? 0 : 120)
+  }
+  function countdownTick(now) {
+    countdownFrame = 0
+    if (!view || view.mode !== 'message' || view.tone === 'busy' || !view.visible || dismissing || copiedText) return
+    if (!hovering && !copying) remaining = Math.max(0, remaining - Math.max(0, now - lastTick))
+    lastTick = now
+    paintCountdown()
+    if (remaining <= 0) dismissCard()
+    else countdownFrame = requestAnimationFrame(countdownTick)
+  }
+  function syncCountdown(was, next) {
+    if (was && was.messageId === next.messageId) return
+    if (countdownFrame) cancelAnimationFrame(countdownFrame)
+    if (dismissTimer) clearTimeout(dismissTimer)
+    if (copiedTimer) clearTimeout(copiedTimer)
+    countdownFrame = 0; dismissTimer = 0; copiedTimer = 0
+    remaining = MESSAGE_MS; lastTick = performance.now()
+    copying = false; copiedText = false; dismissing = false
+    hovering = $('card').matches(':hover')
+    $('copyLabel').textContent = 'Copy text'
+    $('copyCheck').hidden = true
+    $('copy').classList.remove('copied', 'pressed')
+    $('copy').removeAttribute('aria-disabled')
+    $('card').classList.remove('dismissing')
+    const timed = next.visible && next.mode === 'message' && next.tone !== 'busy'
+    $('countdown').hidden = !timed
+    paintCountdown()
+    if (timed) countdownFrame = requestAnimationFrame(countdownTick)
+  }
+  $('card').addEventListener('pointerenter', () => {
+    // Charge time before the pointer arrived, then freeze at the exact remainder.
+    if (!hovering && !copying && !dismissing) remaining = Math.max(0, remaining - Math.max(0, performance.now() - lastTick))
+    hovering = true; lastTick = performance.now(); paintCountdown()
+  })
+  $('card').addEventListener('pointerleave', () => { hovering = false; lastTick = performance.now() })
+  $('dismiss').addEventListener('click', (event) => { event.preventDefault(); dismissCard() })
+  for (const name of ['copy', 'view', 'undo']) {
+    $(name).addEventListener('click', (event) => {
+      event.preventDefault()
+      if (dismissing || copiedText || (name === 'copy' && copying)) return
+      if (name === 'copy') {
+        copying = true
+        $('copy').classList.add('pressed')
+        $('copy').setAttribute('aria-disabled', 'true')
+        $('copyLabel').textContent = 'Copying…'
+        $('copyCheck').hidden = true
+      }
+      go(name)
+    })
+  }
+  window.copyResult = (id, copied) => {
+    if (!view || view.mode !== 'message' || view.messageId !== id || !copying) return
+    copying = false; copiedText = copied; lastTick = performance.now()
+    $('copy').classList.remove('pressed')
+    $('copy').classList.toggle('copied', copied)
+    $('copy').removeAttribute('aria-disabled')
+    $('copyLabel').textContent = copied ? 'Copied' : 'Try copying again'
+    $('copyCheck').hidden = !copied
+    $('live').textContent = copied ? 'Text copied to clipboard.' : 'Could not copy the text. Please try again.'
+    if (copied) {
+      if (countdownFrame) cancelAnimationFrame(countdownFrame)
+      countdownFrame = 0
+      // Acknowledge the completed action, then close even while the pointer stays here.
+      copiedTimer = setTimeout(() => {
+        copiedTimer = 0
+        if (view && view.messageId === id) dismissCard()
+      }, COPIED_MS)
+    }
+  }
 
   // A hand-drawn wave: fixed irregularities per point, so the line looks inked,
   // not computed. Amplitude follows the voice; the ends taper to the baseline.
@@ -200,8 +303,8 @@ ${overlayFontCss}
       const into = next.target
       $('into').hidden = !into
       if (into) {
-        $('into').setAttribute('aria-label', 'Typing into ' + into.name)
-        $('into').title = 'Typing into ' + into.name
+        $('into').setAttribute('aria-label', 'Started in ' + into.name)
+        $('into').title = 'Started in ' + into.name
         $('appImg').hidden = !appIcon
         if (appIcon && $('appImg').getAttribute('src') !== appIcon) $('appImg').setAttribute('src', appIcon)
         $('appDot').textContent = appIcon ? '' : [...into.name][0] || ''
@@ -211,7 +314,7 @@ ${overlayFontCss}
       $('caption').hidden = true
     }
     if (next.mode === 'message') {
-      $('card').className = 'card ' + (next.tone === 'ok' ? '' : next.tone)
+      $('card').className = 'card ' + (next.diff ? 'has-diff ' : '') + (next.tone === 'ok' ? '' : next.tone) + (dismissing && was && was.messageId === next.messageId ? ' dismissing' : '')
       $('title').textContent = next.title
       $('cardDetail').textContent = next.detail
       $('cardDetail').hidden = !next.detail
@@ -219,6 +322,7 @@ ${overlayFontCss}
       $('view').hidden = !next.controls.view
       $('undo').hidden = !next.controls.undo
       $('dismiss').hidden = !next.controls.dismiss
+      $('btns').hidden = !next.controls.copy && !next.controls.view && !next.controls.undo && !next.controls.dismiss
       const diff = $('diff')
       diff.hidden = !next.diff
       diff.textContent = ''
@@ -230,13 +334,21 @@ ${overlayFontCss}
         }
       }
     }
+    syncCountdown(was, next)
     // Spoken once per change, never on every level update.
     const into = next.target ? next.target.name : ''
     if (!was || was.title !== next.title || was.mode !== next.mode || was.warning !== next.warning || (was.target ? was.target.name : '') !== into) {
-      $('live').textContent = next.mode === 'rest' ? '' : [next.title, next.warning, into ? 'Typing into ' + into : ''].filter(Boolean).join('. ')
+      $('live').textContent = next.mode === 'rest' ? '' : [next.title, next.warning, into ? 'Started in ' + into : ''].filter(Boolean).join('. ')
     }
     draw()
     if (!frame && !calm.matches && next.visible && next.mode !== 'message') frame = requestAnimationFrame(tick)
+    // Natural card layout measures real wrapping, including the loaded font.
+    // Padding around the card is 6px above + 8px below (the shadow lives there).
+    // Returning the measurement keeps sizing on the existing one-way page bridge.
+    if (next.visible && next.mode === 'message' && !next.diff) {
+      return document.fonts.ready.then(() => $('card').offsetHeight + 14)
+    }
+    return null
   }
 
   // Short tones for start and stop, synthesized here; nothing is loaded.

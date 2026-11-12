@@ -281,18 +281,12 @@ interface SessionContext {
 const MAX_RECOVERIES = 5
 /** An empty result with at least this much silenced speech says "only other voices were heard". */
 const VOICE_DROPPED_NOTICE_MS = 700
-const SUCCESS_NOTICE_MS = 1_200
-const NOTICE_MS = 6_000
 const ESCAPE = 'Escape'
 /** How often the chosen input is checked for a mute or zero volume while recording. */
 const MIC_POLL_MS = 2_000
 /** Let the start tone finish before the sound is muted, or the tone would be cut off. */
 const MUTE_AFTER_TONE_MS = 350
-/** "Changed by Polish. View / Undo" stays this long. */
-const CHANGE_PANEL_MS = 8_000
-const DIFF_PANEL_MS = 60_000
 const APP_INFO_TTL_MS = 10 * 60_000
-const LEARNED_PANEL_MS = 7_000
 /** A transform run by hand gives up after this long. */
 const TRANSFORM_TIMEOUT_MS = { local: 40_000, byok: 25_000 } as const
 /** The device list is re-read at most this often unless the menu asks. */
@@ -317,7 +311,6 @@ export class DictationService {
   private readonly sessions = new Map<number, SessionContext>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
   private cleanupAbort: { gen: number; controller: AbortController } | null = null
-  private restingTimer: NodeJS.Timeout | null = null
   /** The engine session, which can outlive the logical session during drain. */
   private capture: { gen: number; lease: CaptureLease } | null = null
   private micOpen = false
@@ -361,7 +354,6 @@ export class DictationService {
     after: string
   } | null = null
   private panel: OverlayPanel | null = null
-  private panelTimer: NodeJS.Timeout | null = null
   private transforming: AbortController | null = null
   private readonly transformKeys = new Map<
     string,
@@ -457,7 +449,7 @@ export class DictationService {
     // Counts only; the words themselves never go to the log.
     this.deps.log(`dictionary learned ${added.length} correction(s)`)
     if (added.length > 0 && isMessageShown('learned', this.quiet())) {
-      this.setPanel({ kind: 'learned', pairs: added }, LEARNED_PANEL_MS)
+      this.setPanel({ kind: 'learned', pairs: added })
     }
     this.broadcast()
   }
@@ -1054,7 +1046,7 @@ export class DictationService {
     this.helperStatus = null
   }
 
-  onOverlayAction(action: OverlayAction, gen: number | null): void {
+  onOverlayAction(action: OverlayAction, gen: number | null): void | Promise<boolean> {
     switch (action) {
       case 'pill':
         this.begin('pill')
@@ -1076,11 +1068,10 @@ export class DictationService {
         this.dispatch({ type: 'cancel', ...(gen !== null ? { gen } : {}) })
         break
       case 'copy':
-        if (gen !== null) void this.copyRecovery(gen)
-        break
+        return gen !== null ? this.copyRecovery(gen) : Promise.resolve(false)
       case 'dismiss':
         if (this.panel) this.setPanel(null)
-        else this.dispatch({ type: 'dismiss' })
+        this.dispatch({ type: 'dismiss' })
         break
       case 'view':
         this.viewLastChange()
@@ -1549,7 +1540,6 @@ export class DictationService {
     } else if (state.phase !== 'recording' && state.phase !== 'preparing') {
       this.restoreAudio()
     }
-    this.scheduleRestingDismiss()
     this.render()
     this.broadcast()
     const sound = soundForTransition(
@@ -1615,16 +1605,6 @@ export class DictationService {
   private stopMicPoll(): void {
     if (this.micPoll) clearInterval(this.micPoll)
     this.micPoll = null
-  }
-
-  private scheduleRestingDismiss(): void {
-    if (this.restingTimer) clearTimeout(this.restingTimer)
-    this.restingTimer = null
-    const resting = this.state.resting
-    if (this.state.phase !== 'notice' || resting?.kind !== 'notice') return
-    const ms = resting.level === 'success' ? SUCCESS_NOTICE_MS : NOTICE_MS
-    this.restingTimer = setTimeout(() => this.dispatch({ type: 'dismiss' }), ms)
-    this.restingTimer.unref?.()
   }
 
   /** Drop per-session bookkeeping once the logical session is over. */
@@ -1697,14 +1677,9 @@ export class DictationService {
     return !(resting?.kind === 'notice' && resting.level !== 'success')
   }
 
-  private setPanel(panel: OverlayPanel | null, ms = 0): void {
-    if (this.panelTimer) clearTimeout(this.panelTimer)
-    this.panelTimer = null
+  private setPanel(panel: OverlayPanel | null): void {
+    // The overlay owns dismissal so its visible countdown can pause on hover.
     this.panel = panel
-    if (panel && ms > 0) {
-      this.panelTimer = setTimeout(() => this.setPanel(null), ms)
-      this.panelTimer.unref?.()
-    }
     this.render()
   }
 
@@ -1808,8 +1783,6 @@ export class DictationService {
   private clearAllTimers(): void {
     for (const timer of this.timers.values()) clearTimeout(timer)
     this.timers.clear()
-    if (this.restingTimer) clearTimeout(this.restingTimer)
-    this.restingTimer = null
   }
 
   private async runCleanup(
@@ -1872,7 +1845,7 @@ export class DictationService {
       (stage) => {
         if (stage === 'sent') this.mark(gen, 'helperSent')
       },
-      learn ? { watch: true } : undefined
+      { useCurrentFocus: true, ...(learn ? { watch: true } : {}) }
     )
     this.mark(gen, 'deliverEnd')
     if (context?.detail && outcome.helper) context.detail.helper = outcome.helper
@@ -1896,9 +1869,18 @@ export class DictationService {
     if (!context) return { kind: 'recover', reason: 'no-target' }
     const target = await context.target
     if (!target) return { kind: 'recover', reason: 'helper-unavailable' }
-    if (!target.accessibility) return { kind: 'recover', reason: 'accessibility-denied' }
-    if (!target.hasElement) return { kind: 'recover', reason: 'no-target' }
-    if (target.secure) return { kind: 'recover', reason: 'secure-field' }
+    // The recording-start snapshot still supplies style/app context. Plain
+    // dictation resolves its destination in the helper when these words arrive.
+    // Selection rewrites and Undo must continue using their original target.
+    const currentFocus =
+      guards?.useCurrentFocus &&
+      guards.expectSelection === undefined &&
+      guards.replace === undefined
+    if (!currentFocus) {
+      if (!target.accessibility) return { kind: 'recover', reason: 'accessibility-denied' }
+      if (!target.hasElement) return { kind: 'recover', reason: 'no-target' }
+      if (target.secure) return { kind: 'recover', reason: 'secure-field' }
+    }
     onStage?.('sent')
     const result = await this.deps.helper.deliver(context.snapshotId, text, guards)
     this.deps.log(
@@ -2052,7 +2034,7 @@ export class DictationService {
     this.lastChange = { name: change.name, before: change.before, after: change.after }
     // Quiet mode may hide the offer; View and Undo stay in the pill's menu.
     if (isMessageShown('change', this.quiet()))
-      this.setPanel({ kind: 'changed', name: change.name }, CHANGE_PANEL_MS)
+      this.setPanel({ kind: 'changed', name: change.name })
     else this.render()
     this.broadcast()
   }
@@ -2065,14 +2047,11 @@ export class DictationService {
   /** Show the before and after of the last transform. */
   viewLastChange(): void {
     if (!this.lastChange || this.disposed) return
-    this.setPanel(
-      {
-        kind: 'diff',
-        name: this.lastChange.name,
-        segments: diffWords(this.lastChange.before, this.lastChange.after)
-      },
-      DIFF_PANEL_MS
-    )
+    this.setPanel({
+      kind: 'diff',
+      name: this.lastChange.name,
+      segments: diffWords(this.lastChange.before, this.lastChange.after)
+    })
   }
 
   /**
@@ -2437,6 +2416,7 @@ function refusalReason(reason: string | undefined): RecoveryReason {
   switch (reason) {
     case 'focus-changed':
     case 'secure-field':
+    case 'secure-input':
     case 'no-target':
     case 'not-editable':
     case 'accessibility-denied':

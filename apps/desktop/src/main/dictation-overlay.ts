@@ -19,7 +19,7 @@ export type OverlayAction =
 const DRAG_TICK_MS = 16
 /** A drag whose release never arrived (pointer lost) ends by itself. */
 const DRAG_MAX_MS = 20_000
-const FOLLOW_DISPLAY_MS = 1_000
+const FOLLOW_DISPLAY_MS = 150
 
 const sameRect = (a: Rect, b: Rect): boolean =>
   a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
@@ -38,9 +38,13 @@ export class DictationOverlay {
   private loaded = false
   private lastView: OverlayView | null = null
   private lastBounds: Rect | null = null
+  /** Fence late clicks, copy replies and countdowns to the card that created them. */
+  private messageId = 0
+  private messageKey = ''
+  private measuredMessageHeight: number | null = null
   /** The icon image the page currently holds, so it is sent once per change. */
   private sentIcon: string | null = null
-  /** The display a live session stays on, so it does not hop with the cursor. */
+  /** Message controls stay on their opening display while the pointer moves away. */
   private pinned: Display | null = null
   private follow: NodeJS.Timeout | null = null
   private drag: {
@@ -51,16 +55,35 @@ export class DictationOverlay {
   } | null = null
 
   constructor(
-    private readonly onAction: (action: OverlayAction, gen: number | null) => void,
+    private readonly onAction: (
+      action: OverlayAction,
+      gen: number | null
+    ) => void | boolean | Promise<boolean>,
     /** The pill was dropped near this edge. */
     private readonly onEdge: (edge: PillEdge) => void
   ) {}
 
   render(view: OverlayView): void {
+    const key = JSON.stringify([
+      view.visible,
+      view.mode,
+      view.gen,
+      view.title,
+      view.detail,
+      view.tone,
+      view.controls,
+      view.diff
+    ])
+    if (key !== this.messageKey) {
+      this.messageKey = key
+      this.messageId += 1
+      this.measuredMessageHeight = null
+    }
     this.lastView = view
     if (!view.visible) {
       this.pinned = null
       this.stopFollowing()
+      if (this.window && !this.window.isDestroyed()) this.push(this.window, view)
       this.hide()
       return
     }
@@ -68,7 +91,7 @@ export class DictationOverlay {
     if (!this.drag) this.position(window, view)
     this.push(window, view)
     if (!window.isVisible()) window.showInactive()
-    if (view.mode === 'rest') this.startFollowing()
+    if (view.mode !== 'message') this.startFollowing()
     else this.stopFollowing()
   }
 
@@ -103,7 +126,7 @@ export class DictationOverlay {
 
   private displayFor(view: OverlayView): Display {
     const underCursor = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-    if (view.mode === 'rest') {
+    if (view.mode !== 'message') {
       this.pinned = null
       return underCursor
     }
@@ -113,19 +136,24 @@ export class DictationOverlay {
   }
 
   private position(window: BrowserWindow, view: OverlayView): void {
-    const bounds = dockedBounds(view.edge, overlaySize(view), this.displayFor(view).workArea)
+    const bounds = dockedBounds(
+      view.edge,
+      overlaySize(view, this.measuredMessageHeight),
+      this.displayFor(view).workArea
+    )
     if (this.lastBounds && sameRect(this.lastBounds, bounds)) return
     this.lastBounds = bounds
     window.setBounds(bounds)
   }
 
-  /** The resting pill goes to whichever screen the pointer is on. */
+  /** Resting and live pills follow the pointer's monitor, including quiet/busy sessions. */
   private startFollowing(): void {
     if (this.follow) return
     this.follow = setInterval(() => {
       const window = this.window
       const view = this.lastView
-      if (this.drag || !window || window.isDestroyed() || !view || view.mode !== 'rest') return
+      if (this.drag || !window || window.isDestroyed() || !view?.visible || view.mode === 'message')
+        return
       this.position(window, view)
     }, FOLLOW_DISPLAY_MS)
     this.follow.unref?.()
@@ -209,8 +237,8 @@ export class DictationOverlay {
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event, url) => {
       event.preventDefault()
-      const match = /^doodle-dictation:\/\/([a-z-]+)$/.exec(url)
-      if (match) this.handle(match[1] as string)
+      const match = /^doodle-dictation:\/\/([a-z-]+)(?:\?message=(\d+))?$/.exec(url)
+      if (match) this.handle(match[1] as string, match[2] ? Number(match[2]) : null)
     })
     this.loaded = false
     this.sentIcon = null
@@ -227,7 +255,14 @@ export class DictationOverlay {
     return window
   }
 
-  private handle(name: string): void {
+  private handle(name: string, messageId: number | null): void {
+    if (
+      messageId !== null &&
+      (messageId !== this.messageId || !this.lastView?.visible || this.lastView.mode !== 'message')
+    )
+      return
+    // Message actions must carry a card identity; a stale page cannot dismiss a new card.
+    if (['copy', 'dismiss', 'view', 'undo'].includes(name) && messageId === null) return
     switch (name) {
       case 'drag-start':
         this.beginDrag()
@@ -235,9 +270,29 @@ export class DictationOverlay {
       case 'drag-end':
         this.endDrag(true)
         break
+      case 'copy': {
+        const id = this.messageId
+        const gen = this.lastView?.gen ?? null
+        if (!this.lastView?.controls.copy) break
+        void Promise.resolve()
+          .then(() => this.onAction('copy', gen))
+          .then((copied) => {
+            if (id !== this.messageId || !this.window || this.window.isDestroyed() || !this.loaded)
+              return
+            return this.window.webContents.executeJavaScript(
+              `window.copyResult(${id}, ${copied === true})`
+            )
+          })
+          .catch(() => {
+            if (id === this.messageId && this.window && !this.window.isDestroyed() && this.loaded)
+              void this.window.webContents
+                .executeJavaScript(`window.copyResult(${id}, false)`)
+                .catch(() => {})
+          })
+        break
+      }
       case 'stop':
       case 'cancel':
-      case 'copy':
       case 'dismiss':
       case 'pill':
       case 'menu':
@@ -256,11 +311,29 @@ export class DictationOverlay {
     const frame = view.target ? { ...view, target: { name: view.target.name, icon: null } } : view
     const script = [
       icon !== this.sentIcon ? `window.setTargetIcon(${JSON.stringify(icon)})` : '',
-      `window.render(${JSON.stringify(frame)}, ${nativeTheme.shouldUseDarkColors})`
+      `window.render(${JSON.stringify({ ...frame, messageId: this.messageId })}, ${nativeTheme.shouldUseDarkColors})`
     ]
       .filter(Boolean)
       .join(';')
     this.sentIcon = icon
-    void window.webContents.executeJavaScript(script).catch(() => {})
+    const id = this.messageId
+    void window.webContents
+      .executeJavaScript(script)
+      .then((height: unknown) => {
+        if (
+          typeof height !== 'number' ||
+          !Number.isFinite(height) ||
+          id !== this.messageId ||
+          window !== this.window ||
+          window.isDestroyed() ||
+          !this.lastView?.visible ||
+          this.lastView.mode !== 'message' ||
+          this.lastView.diff
+        )
+          return
+        this.measuredMessageHeight = height
+        this.position(window, this.lastView)
+      })
+      .catch(() => {})
   }
 }

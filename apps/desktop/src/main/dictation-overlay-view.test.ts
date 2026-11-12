@@ -317,3 +317,22 @@ test('the learned-word panel names the pair, or counts several, and only offers 
   )
   assert.equal(two.title, 'Added 2 corrections to your dictionary.')
 })
+
+test('message windows use measured content height and bound invalid sizing replies', () => {
+  const view = overlayView(
+    reduce(initialSessionState(), { type: 'notice', level: 'error', message: 'A short notice.' })
+      .state,
+    ctx()
+  )
+  assert.equal(overlaySize(view).height, 108, 'starts compact before the font measurement')
+  assert.deepEqual(overlaySize(view, 104.2), { width: 380, height: 105 })
+  assert.equal(overlaySize(view, 143).height, 143, 'long wrapped text has room')
+  assert.equal(overlaySize(view, -1).height, 64)
+  assert.equal(overlaySize(view, 9000).height, 240)
+  assert.equal(overlaySize(view, NaN).height, 108)
+  assert.equal(overlaySize(view, Infinity).height, 108)
+  assert.deepEqual(
+    overlaySize(overlayView(live(), ctx()), 200),
+    overlaySize(overlayView(live(), ctx()))
+  )
+})

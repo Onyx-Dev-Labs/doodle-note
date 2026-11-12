@@ -69,7 +69,8 @@ const NONE = { stop: false, cancel: false, copy: false, dismiss: false, view: fa
 export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
   'focus-changed': 'You moved to another field, so nothing was typed.',
   'secure-field': 'That is a secure field, so nothing was typed.',
-  'no-target': 'No text field was focused, so nothing was typed.',
+  'secure-input': 'macOS secure keyboard input is blocking paste. Your text is ready to copy.',
+  'no-target': 'Could not identify the focused text field, so nothing was typed.',
   'not-editable': 'That control cannot take text, so nothing was typed.',
   'accessibility-denied': 'Accessibility access is off, so nothing was typed.',
   'insertion-uncertain': 'Could not confirm the text was inserted. Check before pasting again.',
@@ -101,22 +102,30 @@ const WINDOW = {
   sideCaptionWidth: 250,
   warningLine: 26,
   detailBlock: 64,
-  message: { width: 380, height: 132 },
-  diff: { width: 480, height: 300 }
+  message: { width: 380, height: 108 },
+  diff: { width: 480, height: 300, minHeight: 160 }
 } as const
 
 /** Window size the page needs for a view; the overlay docks a window of this size. */
-export function overlaySize(view: OverlayView): Size {
+export function overlaySize(view: OverlayView, measuredMessageHeight?: number | null): Size {
   if (view.mode === 'message' && view.diff) {
     // Room for the words, about 55 to a line, up to a fixed height.
     const chars = view.diff.reduce((total, part) => total + part.text.length, 0)
     const lines = Math.ceil(chars / 55)
     return {
       width: WINDOW.diff.width,
-      height: Math.max(WINDOW.message.height, Math.min(WINDOW.diff.height, 110 + lines * 19))
+      height: Math.max(WINDOW.diff.minHeight, Math.min(WINDOW.diff.height, 110 + lines * 19))
     }
   }
-  if (view.mode === 'message') return { ...WINDOW.message }
+  if (view.mode === 'message') {
+    // The page measures natural wrapping after its font loads. Keep an initial
+    // compact size until that measurement arrives, and bound malformed replies.
+    const measured =
+      typeof measuredMessageHeight === 'number' && Number.isFinite(measuredMessageHeight)
+        ? Math.ceil(measuredMessageHeight)
+        : WINDOW.message.height
+    return { width: WINDOW.message.width, height: Math.max(64, Math.min(240, measured)) }
+  }
   if (view.mode === 'session') {
     if (view.edge !== 'bottom') {
       const status = view.showStatus && !(view.tone === 'active' && view.title === 'Listening')

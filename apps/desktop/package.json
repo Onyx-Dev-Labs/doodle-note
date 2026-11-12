@@ -1,6 +1,6 @@
 {
   "name": "desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Onyx Dev Labs",
   "private": true,
   "description": "DoodleNote desktop app for privacy-first local capture, transcription, and AI meeting notes",

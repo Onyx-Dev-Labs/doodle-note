@@ -33,6 +33,8 @@ export type NoticeLevel = 'success' | 'info' | 'error'
 export type RecoveryReason =
   | 'focus-changed'
   | 'secure-field'
+  /** macOS secure keyboard input can be held by a different application. */
+  | 'secure-input'
   | 'no-target'
   | 'not-editable'
   | 'accessibility-denied'

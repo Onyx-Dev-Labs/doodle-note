@@ -218,6 +218,7 @@ export class DictationHelperClient {
       {
         snapshotId,
         text,
+        ...(guards.useCurrentFocus ? { useCurrentFocus: true } : {}),
         ...(guards.expectSelection !== undefined
           ? { expectSelection: guards.expectSelection }
           : {}),
