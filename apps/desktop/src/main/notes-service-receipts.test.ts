@@ -103,10 +103,16 @@ for (const platform of ['darwin', 'linux', 'win32'] as const) {
           './model-paths': { modelSearchDirectories: () => [dir] },
           'node:fs': fs,
           'node:path': path,
-          'node:os': { freemem: () => 64 * 1024 ** 3 },
+          'node:os': { freemem: () => 64 * 1024 ** 3, totalmem: () => 64 * 1024 ** 3 },
           '@repo/ai': {
             ...ai,
             LOCAL_MODELS: [spec],
+            preloadNotesRuntime: () => {},
+            // This receipt fixture is synthetic bytes, not a GGUF. Keep metadata/native I/O stubbed.
+            estimateNotesWarmupBytes: async (verifiedPath: string) => {
+              assert.equal(verifiedPath, modelPath)
+              return 1024 ** 3
+            },
             totalRamGB: () => 64,
             NotesEngineLog: class {
               log = (event: { event: string; cached: boolean }): void => {

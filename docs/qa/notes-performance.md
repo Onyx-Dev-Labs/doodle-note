@@ -169,3 +169,76 @@ the actual user message instead of 12.3 seconds. With the same Generate timing,
 load and decode rates, roughly 60 seconds total is an estimate versus 69 seconds;
 recordings long enough to finish warm-up before Generate should hide more setup.
 On battery, warm-up is deliberately skipped. No new owner-device timing is claimed.
+
+## Round 7: field J4 memory, context and preparation
+
+Recording warm-up now resolves the verified installed artifact, reads its GGUF
+architecture metadata, and admits fully resident model-file bytes plus f16 KV
+(`2 * layers * KV heads * (key dimension + value dimension) * context tokens`)
+plus **1 GiB** headroom. Capture/ASR is already running when available memory is
+sampled; the extra GiB covers its growth, native graph/work buffers and OS activity.
+Weights are counted in full even with mmap, and GPU memory is not subtracted on
+UMA. Unknown metadata/architectures skip speculative work. Gemma's sliding window
+is conservatively counted as full-context KV in every layer. Existing model RAM
+eligibility, battery, busy, cancellation and CPU-prefill gates remain in effect.
+This is a conservative admission estimate, not an OS memory reservation.
+
+Qwen3-4B's catalog artifact is 2,497,281,120 bytes. Its metadata (36 layers,
+8 KV heads, 128-dimensional keys and values) gives 144 KiB/token: **1.125 GiB**
+at 8K, versus **2.25 GiB** at 16K. The default short-meeting warm-up therefore
+requires about **4.451 GiB / 4,558 MiB**, including headroom, rather than the old
+5.4 GiB gate. A retained larger context is estimated at its actual size. Available
+memory is checked again after asynchronous metadata inspection, before loading.
+`freeMB`, `requiredMB`, `totalMB` and `contextSize` are content-free diagnostics;
+MB fields use MiB. Skips before artifact inspection (battery/cloud/busy/no model)
+omit unknown `requiredMB` rather than inventing an estimate.
+
+Windows `os.freemem()` uses libuv's `GlobalMemoryStatusEx().ullAvailPhys`.
+[Microsoft documents](https://learn.microsoft.com/windows/win32/api/sysinfoapi/ns-sysinfoapi-memorystatusex)
+that this includes standby, free and zero lists, immediately reusable without
+writing to disk. The Dev04 native Node/koffi probe directly compares both calls.
+
+Adaptive foreground allocation counts the actual tokenizer and automatic chat
+wrapper, including system/user/assistant framing, then chooses **4096, 8192 or
+16384**, reserving the existing output cap and 256 safety tokens. Ordinary notes
+retain the 4096-token output ceiling, so even a short meeting needs 8K; 4K serves
+smaller explicitly bounded outputs. Warm-up predicts a typical short meeting
+(roughly 1024 transcript tokens plus the normal system prompt and output budget)
+with 8K. Adaptive requests grow the context only when necessary, retaining larger
+contexts and the common prefix on later shorter requests. Growth discards the old
+KV and naturally re-prefills once. Explicit caller context limits are still honored,
+including smaller dictation budgets. Global Ask keeps its 16K evidence-selection
+budget. Existing 48K-character single-pass/36K-character map chunks/40K-character
+reduce budgets remain capped at the same 16K maximum, and recipes still perform
+exact wrapped-token fit validation against the allocated context. The existing
+long-meeting map-reduce and output-limit behavior is unchanged.
+
+J4's unexplained interval is 7,876 ms minus runtimeMs 2,271 ms = **5,605 ms**.
+The old `prepareModel` awaited the first dynamic `node-llama-cpp` module import
+_before_ `acquireRuntime` started its timer. With a verified local model path,
+resolution performs no download. This identifies the uninstrumented import
+boundary; the old log cannot independently attribute every millisecond of laptop
+scheduling or disk/Defender delay. New `prepare` events time `warm-wait`,
+`model-lookup`, `engine-queue`, `module-import`, `model-resolve` and `footprint`.
+Module import starts alongside integrity lookup, removing that avoidable serial
+ordering. It does not initialize the backend or load weights. The earlier round-4
+claim that runtimeMs covered first import was incorrect and is superseded here.
+
+node-llama-cpp **3.20.0** exposes `experimentalKvCacheKeyType` and
+`experimentalKvCacheValueType` (`Q8_0`), but its public declarations mark them
+experimental/highly unstable and warn of incorrect behavior or process crashes.
+Support depends on the model, backend and flash-attention path. No native
+quality/speed matrix establishes safe Vulkan/Metal/CPU use here, so f16 remains
+unchanged. No model catalog, default model, prompt rules or generation cap changed.
+
+Owner diagnostic v4 lives beside v3 in the QA tools directory. It uses the installed
+app's Node mode and installed GGUF, writes only under the logged-in user's
+LocalApplicationData\Temp, rejects SYSTEM and a running DoodleNote, prints a compact
+partial-results table, and enforces 90 seconds per process and 900 seconds total.
+Eight independent cases cover Vulkan auto/24 and CPU 0 layers with mmap on/off,
+plus CPU 4/8 threads; every case times 4K/8K/16K context creation, an ~800-token
+synthetic prompt and 100 decode tokens. Decode continues through EOG for fixed
+throughput; this is not a note-quality test. A supervisor can terminate only its
+own worker process tree. v3 is retained. Dev04 blocks unsigned PowerShell scripts;
+the v4 execution attempt is recorded as blocked, and no policy/security bypass was
+used. Static PowerShell and worker-JS syntax checks do not substitute for that dry-run.

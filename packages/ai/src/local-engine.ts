@@ -34,9 +34,24 @@ import type {
  */
 type NodeLlamaCpp = typeof import('node-llama-cpp')
 let nodeLlamaCppPromise: Promise<NodeLlamaCpp> | null = null
-function loadNodeLlamaCpp(): Promise<NodeLlamaCpp> {
+export function loadNodeLlamaCpp(): Promise<NodeLlamaCpp> {
   nodeLlamaCppPromise ??= import('node-llama-cpp')
   return nodeLlamaCppPromise
+}
+
+/** Import JS dependencies alongside integrity lookup; never initializes a backend or loads weights. */
+export function preloadNotesRuntime(onDiagnostic: NotesDiagnosticSink): void {
+  const started = Date.now()
+  void loadNodeLlamaCpp().then(
+    () => {
+      try {
+        onDiagnostic({ event: 'prepare', stage: 'module-import', elapsedMs: Date.now() - started })
+      } catch {
+        /* Diagnostics are optional. */
+      }
+    },
+    () => {} // Foreground prepare reports the original import failure.
+  )
 }
 
 /**
@@ -65,6 +80,13 @@ export const DEFAULT_MODELS_DIR = path.join(os.homedir(), '.cache', 'doodle-note
 
 // 64 / the owner's measured 47 tok/s = 1.36 s of non-preemptible work.
 export const WARM_PREFILL_BATCH_TOKENS = 64
+// Keep the existing 4096-token output ceiling plus ~1024 transcript tokens,
+// system/wrapper tokens and a 256-token margin. Smaller bounded tasks use 4K.
+export const NOTES_WARM_CONTEXT_SIZE = 8192
+export function notesContextSize(inputTokens: number, outputTokens: number): number {
+  const required = inputTokens + outputTokens + 256
+  return [4096, 8192, 16384].find((size) => size >= required) ?? 16384
+}
 
 export class LocalNotesEngine implements NotesEngine {
   readonly id: string
@@ -106,6 +128,13 @@ export class LocalNotesEngine implements NotesEngine {
     return this.exclusive(() => this.prepareModel(signal))
   }
 
+  get warmContextSize(): number {
+    return Math.max(
+      this.options.contextSize ?? NOTES_WARM_CONTEXT_SIZE,
+      this.context?.contextSize ?? 0
+    )
+  }
+
   /** No user content is supplied; a fresh session later aligns to the exact request. */
   async warm(systemPrompt: string, signal?: AbortSignal): Promise<void> {
     return this.exclusive(async () => {
@@ -119,7 +148,7 @@ export class LocalNotesEngine implements NotesEngine {
       }
       await withGenerationDeadline(signal, 'writing', async (active) => {
         const { LlamaChatSession, LlamaText } = await loadNodeLlamaCpp()
-        await this.obtainContext(this.options.contextSize ?? 16384, active)
+        await this.obtainContext(this.warmContextSize, active)
         // Context allocation can reload the model on CPU. Check the actual result.
         if (this.llama?.gpu === false || this.model?.gpuLayers === 0) {
           this.diagnostic({ event: 'warmup', reason: 'cpu-prefill' })
@@ -259,7 +288,14 @@ export class LocalNotesEngine implements NotesEngine {
   private async prepareModel(signal?: AbortSignal, defaultFailure?: unknown): Promise<void> {
     signal?.throwIfAborted()
     if (this.model) return
+    const importStarted = Date.now()
     const { resolveModelFile } = await loadNodeLlamaCpp()
+    this.diagnostic({
+      event: 'prepare',
+      stage: 'module-import',
+      elapsedMs: Date.now() - importStarted
+    })
+    const resolveStarted = Date.now()
     this.modelPath =
       this.options.modelPath ??
       (await resolveModelFile(this.options.modelUri, {
@@ -269,6 +305,11 @@ export class LocalNotesEngine implements NotesEngine {
           if (totalSize > 0) this.options.onDownloadProgress?.(downloadedSize / totalSize)
         }
       }))
+    this.diagnostic({
+      event: 'prepare',
+      stage: 'model-resolve',
+      elapsedMs: Date.now() - resolveStarted
+    })
     signal?.throwIfAborted()
     // Staged load: the default compute layer first (Metal on mac, Vulkan on
     // Windows when present), then CPU-only. A default load or context failure
@@ -387,17 +428,42 @@ export class LocalNotesEngine implements NotesEngine {
         control?.phase ?? 'writing',
         async (signal) => {
           signal.throwIfAborted()
-          const { LlamaChatSession } = await loadNodeLlamaCpp()
+          const { LlamaChatSession, resolveChatWrapper } = await loadNodeLlamaCpp()
           const started = Date.now()
-          const contextSize = control?.contextSize ?? this.options.contextSize ?? 16384
-
-          const context = await this.obtainContext(contextSize, signal)
+          const explicitContext = control?.contextSize ?? this.options.contextSize
+          const chatWrapper = resolveChatWrapper(this.model!)
+          const outputTokens = Math.min(
+            control?.maxTokens ?? Infinity,
+            GENERATION_LIMITS[control?.phase ?? 'writing'].maxTokens
+          )
+          // Use exactly the wrapper/history used by the fresh session, before allocating KV.
+          // Global Ask retains its full 16K evidence-selection budget.
+          const inputTokens = globalAskInput
+            ? 0
+            : chatWrapper
+                .generateContextState({
+                  chatHistory: [
+                    ...chatWrapper.generateInitialChatHistory({ systemPrompt }),
+                    { type: 'user', text: userMessage },
+                    { type: 'model', response: [] }
+                  ]
+                })
+                .contextText.tokenize(this.model!.tokenizer).length
+          const contextSize =
+            explicitContext ??
+            (globalAskInput ? 16384 : notesContextSize(inputTokens, outputTokens))
+          const context = await this.obtainContext(
+            contextSize,
+            signal,
+            explicitContext === undefined
+          )
           control?.onPhase?.('reading')
           let activeSession: InstanceType<NodeLlamaCpp['LlamaChatSession']> | undefined
           try {
             signal.throwIfAborted()
             const session = new LlamaChatSession({
               contextSequence: this.sequence!,
+              chatWrapper,
               systemPrompt,
               // Gemma requires explicit admission before folding system rules into its user turn.
               forceAddSystemPrompt: true
@@ -548,10 +614,20 @@ export class LocalNotesEngine implements NotesEngine {
     if (this.idleTimer) clearTimeout(this.idleTimer)
     this.idleTimer = null
     this.pendingOperations++
-    const result = this.operations.then(work).catch((error) => {
-      this.diagnostic({ event: 'failure', error })
-      throw error
-    })
+    const queuedAt = Date.now()
+    const result = this.operations
+      .then(() => {
+        this.diagnostic({
+          event: 'prepare',
+          stage: 'engine-queue',
+          elapsedMs: Date.now() - queuedAt
+        })
+        return work()
+      })
+      .catch((error) => {
+        this.diagnostic({ event: 'failure', error })
+        throw error
+      })
     this.operations = result
       .then(
         () => {},
@@ -574,8 +650,17 @@ export class LocalNotesEngine implements NotesEngine {
     return result
   }
 
-  private async obtainContext(contextSize: number, signal: AbortSignal): Promise<LlamaContext> {
-    if (this.context && this.requestedContextSize === contextSize) return this.context
+  private async obtainContext(
+    contextSize: number,
+    signal: AbortSignal,
+    allowLarger = true
+  ): Promise<LlamaContext> {
+    if (
+      this.context &&
+      (this.requestedContextSize === contextSize ||
+        (allowLarger && this.context.contextSize >= contextSize))
+    )
+      return this.context
     await this.disposeContext()
     const started = Date.now()
     try {

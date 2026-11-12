@@ -164,10 +164,12 @@ function createService(
     './model-paths': { modelSearchDirectories: () => [dir] },
     'node:fs': fs,
     'node:path': path,
-    'node:os': { freemem: () => power.free },
+    'node:os': { freemem: () => power.free, totalmem: () => 64 * 1024 ** 3 },
     '@repo/ai': {
       ...ai,
+      preloadNotesRuntime: () => {},
       totalRamGB: () => 64,
+      estimateNotesWarmupBytes: async () => 4.5 * 1024 ** 3,
       CloudNotesEngine: StubCloudEngine,
       ...(local ? { LocalNotesEngine: StubLocalEngine, LocalModelStore: StubModelStore } : {})
     },
@@ -449,6 +451,7 @@ test('notes warm-up skips cloud, battery, insufficient RAM and busy operations w
       }
       service.askBusy = reason === 'busy'
       service.warmNotesModel('synthetic')
+      if (reason === 'memory') await service.notesWarm?.work
       assert.equal(service.notesWarm, null, reason)
       assert.equal(rig.engines.length, 0, reason)
       await service.dispose()
@@ -1603,3 +1606,50 @@ for (const scenario of ['mic-only-both', 'rewarm'] as const) {
     }
   )
 }
+
+test('warm admission uses footprint below the old 5.4GiB gate and logs the context and memory', async () => {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const { service } = createService(dir, undefined, rig, { battery: false, free: 5 * 1024 ** 3 })
+  service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+  service.warmNotesModel('synthetic')
+  await service.notesWarm?.work
+  assert.equal(rig.engines[0]?.warmed.length, 1)
+  await service.dispose()
+  const rows = fs
+    .readFileSync(path.join(dir, 'notes-engine.log'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+  const start = rows.find((row) => row.event === 'warmup' && row.reason === 'start')
+  assert.equal(start.contextSize, 8192)
+  assert.equal(start.freeMB, 5120)
+  assert.equal(start.requiredMB, 4608)
+  assert.equal(start.totalMB, 65536)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('warm admission rechecks available memory after async footprint inspection', async () => {
+  const dir = sandbox()
+  const spec = ai.LOCAL_MODELS[0]!
+  const rig: LocalRig = { installed: new Set([spec.id]), engines: [] }
+  const power = { battery: false, free: 32 * 1024 ** 3 }
+  const { service } = createService(dir, undefined, rig, power)
+  service.settings = { engineChoice: 'local', activeLocalModelId: spec.id }
+  service.warmNotesModel('synthetic')
+  power.free = 4 * 1024 ** 3
+  await service.notesWarm?.work
+  assert.equal(rig.engines.length, 0)
+  await service.dispose()
+  const rows = fs
+    .readFileSync(path.join(dir, 'notes-engine.log'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+  const skip = rows.find((row) => row.event === 'warmup' && row.why === 'memory')
+  assert.equal(skip.contextSize, 8192)
+  assert.equal(skip.freeMB, 4096)
+  assert.equal(skip.requiredMB, 4608)
+  fs.rmSync(dir, { recursive: true, force: true })
+})

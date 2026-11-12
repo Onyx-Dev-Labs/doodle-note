@@ -138,6 +138,12 @@ function fixture(
     'node:os': os,
     'node:path': path,
     'node-llama-cpp': {
+      resolveChatWrapper: () => ({
+        ...new Session({ systemPrompt: '' } as never).chatWrapper,
+        generateInitialChatHistory: ({ systemPrompt }: { systemPrompt: string }) => [
+          { type: 'system', text: systemPrompt }
+        ]
+      }),
       LlamaChatSession: Session,
       LlamaText: (values: string[]) => ({
         tokenize: () => [...Buffer.from(values.join(''))]
@@ -236,7 +242,7 @@ test('context size change releases the old context; failed evaluation releases p
   const f = fixture()
   await f.engine.runRaw('rules', 'first')
   await f.engine.runRaw('rules', 'second', undefined, { contextSize: 4096 })
-  assert.deepEqual(f.record.contexts, [16384, 4096])
+  assert.deepEqual(f.record.contexts, [8192, 4096])
   assert.equal(f.record.disposed, 1)
   f.fail()
   await assert.rejects(
@@ -363,5 +369,42 @@ test('context creation and fallback precede Reading', async () => {
       if (phase === 'reading') assert.equal(f.record.contexts.length, 2)
     }
   })
+  await f.engine.dispose()
+})
+
+test('adaptive allocation starts at 8K, retains prefix, grows once for a long request and never shrinks', async () => {
+  const f = fixture()
+  await f.engine.warm('fixed rules')
+  await f.engine.runRaw('fixed rules', 'short meeting')
+  assert.deepEqual(f.record.contexts, [8192])
+  assert.ok(f.record.skipped[0]! > 0)
+  await f.engine.runRaw('fixed rules', 'long transcript '.repeat(400))
+  assert.deepEqual(f.record.contexts, [8192, 16384])
+  assert.equal(f.record.disposed, 1)
+  await f.engine.runRaw('fixed rules', 'another short meeting')
+  await f.engine.warm('fixed rules')
+  assert.deepEqual(f.record.contexts, [8192, 16384])
+  assert.equal(f.record.loads, 1)
+  await f.engine.dispose()
+})
+
+test('adaptive bounded output budget fits in 4K and large wrapper/input grows it', async () => {
+  const f = fixture()
+  await f.engine.runRaw('rules', 'small', undefined, { maxTokens: 100 })
+  assert.deepEqual(f.record.contexts, [4096])
+  await f.engine.runRaw('rules', 'x'.repeat(4000), undefined, { maxTokens: 100 })
+  assert.deepEqual(f.record.contexts, [4096, 8192])
+  await f.engine.dispose()
+})
+
+test('startup timing accounts for import, model resolution and serialized engine work', async () => {
+  const events: NotesDiagnostic[] = []
+  const f = fixture(600_000, events)
+  await f.engine.prepare()
+  for (const stage of ['engine-queue', 'module-import', 'model-resolve']) {
+    const event = events.find((event) => event.event === 'prepare' && event.stage === stage)
+    assert.ok(event, stage)
+    assert.ok(event.elapsedMs! >= 0)
+  }
   await f.engine.dispose()
 })

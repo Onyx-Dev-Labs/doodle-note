@@ -10,11 +10,14 @@ import { libraryIpc } from './library-ipc'
 import { fetchCloudModels } from './cloud-models'
 import { app, ipcMain, safeStorage, powerMonitor } from 'electron'
 import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { freemem } from 'node:os'
+import { freemem, totalmem } from 'node:os'
 import { join } from 'node:path'
 import { escapeHtml, markdownToHtml } from '../shared/markdown-html'
 import {
   buildMergeSystemPrompt,
+  estimateNotesWarmupBytes,
+  NOTES_WARM_CONTEXT_SIZE,
+  preloadNotesRuntime,
   GenerationError,
   GlobalAskBudgetError,
   globalAskCoverageNotice,
@@ -86,8 +89,6 @@ type GlobalAskMeeting = GlobalAskInput['meetings'][number]
 /** Newest meetings considered for cross-meeting context; the prompt builder
  *  reduces further to its selected model request budget. */
 export const NOTES_WARMUP_ENABLED = true
-// Model weights + 16K KV cache, with at least 3 GiB left for capture/ASR and the OS.
-const WARMUP_RESERVE_BYTES = 3 * 1024 ** 3
 const MAX_GLOBAL_MEETINGS = 30
 /** Fallback transcript excerpt length for meetings with no notes at all. */
 const TRANSCRIPT_EXCERPT_CHARS = 1500
@@ -444,6 +445,7 @@ export class NotesService {
               'preparing',
               async (preparingSignal) => {
                 this.clearNotesPrediction()
+                const waitStarted = Date.now()
                 const warm = this.notesWarm
                 if (warm) {
                   const cancel = (): void => warm.controller.abort(preparingSignal.reason)
@@ -455,6 +457,11 @@ export class NotesService {
                   }
                   preparingSignal.throwIfAborted()
                 }
+                this.engineLog.log({
+                  event: 'prepare',
+                  stage: 'warm-wait',
+                  elapsedMs: Date.now() - waitStarted
+                })
                 const engine = await this.pickEngine(request.automaticAfterStop === true)
                 preparingSignal.throwIfAborted()
                 if (engine instanceof LocalNotesEngine) await engine.prepare(preparingSignal)
@@ -709,10 +716,18 @@ export class NotesService {
     if (!localOnly && requireSelectedProvider && engineChoice === 'cloud' && !cloud) {
       throw new Error('Set up the selected provider in Settings, then generate notes manually.')
     }
+    preloadNotesRuntime(this.engineLog.log)
     const selected = LOCAL_MODELS.find((m) => m.id === this.settings.activeLocalModelId)
     for (const spec of selected ? [selected] : LOCAL_MODELS) {
       if (spec.minRamGB > totalRamGB()) continue
+      const lookupStarted = Date.now()
       const modelPath = await this.modelStore.find(spec)
+      this.engineLog.log({
+        event: 'prepare',
+        stage: 'model-lookup',
+        elapsedMs: Date.now() - lookupStarted,
+        modelId: spec.id
+      })
       if (modelPath) return this.obtainLocalEngine(spec, modelPath)
     }
     throw new Error(
@@ -991,11 +1006,30 @@ export class NotesService {
     { system, predictedSpeakers }: { system: string; predictedSpeakers: number },
     reason: 'start' | 'rewarm'
   ): void {
+    let requiredMB: number | undefined
+    let contextSize = NOTES_WARM_CONTEXT_SIZE
+    const memory = (): {
+      freeMB: number
+      requiredMB?: number
+      totalMB: number
+      contextSize: number
+    } => ({
+      freeMB: Math.floor(freemem() / 1024 ** 2),
+      requiredMB,
+      totalMB: Math.floor(totalmem() / 1024 ** 2),
+      contextSize
+    })
     const skip = (
       reason: 'disabled' | 'cloud' | 'busy' | 'battery' | 'memory' | 'no-model' | 'no-meeting',
       onBatteryPower?: boolean
     ): void =>
-      this.engineLog.log({ event: 'warmup', reason: 'skipped', why: reason, onBatteryPower })
+      this.engineLog.log({
+        event: 'warmup',
+        reason: 'skipped',
+        why: reason,
+        onBatteryPower,
+        ...memory()
+      })
     if (!NOTES_WARMUP_ENABLED) return skip('disabled')
     if (this.settings.engineChoice !== 'local') return skip('cloud')
     if (
@@ -1011,19 +1045,7 @@ export class NotesService {
     if (onBatteryPower) return skip('battery', onBatteryPower)
     const selected = LOCAL_MODELS.find((spec) => spec.id === this.settings.activeLocalModelId)
     if (!selected) return skip('no-model')
-    if (
-      selected.minRamGB > totalRamGB() ||
-      freemem() < selected.sizeGB * 1024 ** 3 + WARMUP_RESERVE_BYTES
-    )
-      return skip('memory')
     if (!this.meetings.get(meetingId)) return skip('no-meeting')
-    this.engineLog.log({
-      event: 'warmup',
-      reason,
-      predictedSpeakers,
-      modelId: selected.id,
-      onBatteryPower
-    })
     const controller = new AbortController()
     const job = { meetingId, controller, work: Promise.resolve() }
     this.notesWarm = job
@@ -1031,9 +1053,44 @@ export class NotesService {
     job.work = Promise.resolve()
       .then(async () => {
         controller.signal.throwIfAborted()
-        const engine = await this.pickEngine(true)
+        preloadNotesRuntime(this.engineLog.log)
+        const lookupStarted = Date.now()
+        const modelPath = await this.modelStore.find(selected)
+        this.engineLog.log({
+          event: 'prepare',
+          stage: 'model-lookup',
+          elapsedMs: Date.now() - lookupStarted,
+          modelId: selected.id
+        })
         controller.signal.throwIfAborted()
-        if (engine instanceof LocalNotesEngine) await engine.warm(system, controller.signal)
+        if (!modelPath) return skip('no-model')
+        if (this.localEngineModelId === selected.id && this.localEnginePath === modelPath)
+          contextSize = this.localEngine?.warmContextSize ?? NOTES_WARM_CONTEXT_SIZE
+        const estimateStarted = Date.now()
+        const required = await estimateNotesWarmupBytes(modelPath, contextSize)
+        this.engineLog.log({
+          event: 'prepare',
+          stage: 'footprint',
+          elapsedMs: Date.now() - estimateStarted,
+          modelId: selected.id
+        })
+        controller.signal.throwIfAborted()
+        requiredMB = required === null ? undefined : Math.ceil(required / 1024 ** 2)
+        if (required === null || selected.minRamGB > totalRamGB() || freemem() < required)
+          return skip('memory')
+        // Settings/power can change while metadata is being read. Cancellation owns settings changes.
+        if (powerMonitor.isOnBatteryPower()) return skip('battery', true)
+        this.engineLog.log({
+          event: 'warmup',
+          reason,
+          predictedSpeakers,
+          modelId: selected.id,
+          onBatteryPower,
+          ...memory()
+        })
+        const engine = this.obtainLocalEngine(selected, modelPath)
+        controller.signal.throwIfAborted()
+        await engine.warm(system, controller.signal)
         this.engineLog.log({ event: 'warmup', reason: 'complete', modelId: selected.id })
       })
       .catch((error) => {

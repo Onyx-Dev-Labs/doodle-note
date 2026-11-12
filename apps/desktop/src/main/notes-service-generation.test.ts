@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { tmpdir, freemem } from 'node:os'
+import { tmpdir, freemem, totalmem } from 'node:os'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import * as ai from '@repo/ai'
@@ -42,7 +42,7 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
     './model-paths': { modelSearchDirectories: () => [dir] },
     'node:fs': fs,
     'node:path': path,
-    'node:os': { freemem },
+    'node:os': { freemem, totalmem },
     '@repo/ai': ai,
     '@repo/meetings-store': meetings,
     '../shared/notes-api': api,

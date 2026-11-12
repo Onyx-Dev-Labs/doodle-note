@@ -46,6 +46,12 @@ function engineWith(record: {
     './global-ask-prompt': globalAsk,
     './map-reduce': mapReduce,
     'node-llama-cpp': {
+      resolveChatWrapper: () => ({
+        ...new Session({ systemPrompt: '' } as never).chatWrapper,
+        generateInitialChatHistory: ({ systemPrompt }: { systemPrompt: string }) => [
+          { type: 'system', text: systemPrompt }
+        ]
+      }),
       getLlama: async () => ({
         loadModel: async () => ({
           tokenizer,
@@ -95,14 +101,14 @@ test('a short request gets the small context, token cap and temperature it asked
   assert.deepEqual(record.prompts, [{ maxTokens: 256, temperature: 0.1 }])
 })
 
-test('without those options the meeting-sized defaults are unchanged', async () => {
+test('without those options the output cap is unchanged and the short request uses 8K', async () => {
   const record = {
     contexts: [] as number[],
     prompts: [] as Array<{ maxTokens: number; temperature: number }>
   }
   const engine = engineWith(record)
   await engine.runBounded!('Tidy this.', 'hello')
-  assert.deepEqual(record.contexts, [16384])
+  assert.deepEqual(record.contexts, [8192])
   assert.deepEqual(record.prompts, [{ maxTokens: 4096, temperature: 0.3 }])
 })
 

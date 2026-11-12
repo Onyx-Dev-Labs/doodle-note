@@ -3,6 +3,7 @@ import { dirname } from 'node:path'
 
 export interface NotesDiagnostic {
   event:
+    | 'prepare'
     | 'runtime'
     | 'load'
     | 'hash'
@@ -15,7 +16,20 @@ export interface NotesDiagnostic {
     | 'idle-dispose'
   modelId?: string
   backend?: 'vulkan' | 'metal' | 'cpu' | 'cuda' | 'unknown'
-  stage?: 'runtime' | 'load' | 'context' | 'generation' | 'condensing' | 'settings' | 'global-chat'
+  stage?:
+    | 'module-import'
+    | 'model-resolve'
+    | 'engine-queue'
+    | 'warm-wait'
+    | 'model-lookup'
+    | 'footprint'
+    | 'runtime'
+    | 'load'
+    | 'context'
+    | 'generation'
+    | 'condensing'
+    | 'settings'
+    | 'global-chat'
   reason?:
     | 'skipped'
     | 'start'
@@ -33,6 +47,10 @@ export interface NotesDiagnostic {
   why?: 'disabled' | 'cloud' | 'busy' | 'battery' | 'memory' | 'no-model' | 'no-meeting'
   onBatteryPower?: boolean
   predictedSpeakers?: number
+  elapsedMs?: number
+  freeMB?: number
+  requiredMB?: number
+  totalMB?: number
   runtimeMs?: number
   cached?: boolean
   prefixReused?: boolean
@@ -109,6 +127,10 @@ export class NotesEngineLog {
     for (const key of [
       'predictedSpeakers',
       'runtimeMs',
+      'elapsedMs',
+      'freeMB',
+      'requiredMB',
+      'totalMB',
       'gpuLayers',
       'loadMs',
       'hashMs',

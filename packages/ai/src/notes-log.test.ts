@@ -131,3 +131,40 @@ test('runtime duration and boolean battery observations persist without arbitrar
   assert.equal(lines[3].predictedSpeakers, undefined)
   assert.equal(lines[3].onBatteryPower, undefined)
 })
+
+test('content-free preparation and memory metrics persist, excluding nonfinite and arbitrary fields', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'notes-log-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const file = join(dir, 'log')
+  const log = new NotesEngineLog(file)
+  log.log({ event: 'prepare', stage: 'module-import', elapsedMs: 5600 })
+  log.log({
+    event: 'warmup',
+    reason: 'skipped',
+    why: 'memory',
+    freeMB: 4000,
+    requiredMB: 4600,
+    totalMB: 14200,
+    contextSize: 8192
+  })
+  log.log({
+    event: 'warmup',
+    freeMB: NaN,
+    requiredMB: Infinity,
+    totalMB: -Infinity,
+    privateText: 'SECRET'
+  } as NotesDiagnostic)
+  await log.flush()
+  const text = await readFile(file, 'utf8')
+  const rows = text
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+  assert.equal(rows[0].elapsedMs, 5600)
+  assert.equal(rows[1].requiredMB, 4600)
+  assert.equal(rows[1].freeMB, 4000)
+  assert.equal(rows[1].totalMB, 14200)
+  assert.equal(rows[2].freeMB, undefined)
+  assert.equal(rows[2].requiredMB, undefined)
+  assert.doesNotMatch(text, /SECRET|privateText/)
+})

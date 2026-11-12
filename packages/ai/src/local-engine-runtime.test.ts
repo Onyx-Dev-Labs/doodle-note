@@ -109,6 +109,10 @@ function fixture(
           }
         }
       },
+      resolveChatWrapper: () => ({
+        generateInitialChatHistory: () => [],
+        generateContextState: () => ({ contextText: { tokenize: () => [] } })
+      }),
       LlamaChatSession: class {
         dispose() {}
         async promptWithMeta(

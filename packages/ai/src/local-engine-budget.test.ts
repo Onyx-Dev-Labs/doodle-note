@@ -72,6 +72,12 @@ test('local adapter counts the actual wrapper/allocation, enforces reserve and d
     './global-ask-prompt': globalAsk,
     './map-reduce': mapReduce,
     'node-llama-cpp': {
+      resolveChatWrapper: () => ({
+        ...new Session({ systemPrompt: '' } as never).chatWrapper,
+        generateInitialChatHistory: ({ systemPrompt }: { systemPrompt: string }) => [
+          { type: 'system', text: systemPrompt }
+        ]
+      }),
       getLlama: async () => ({
         loadModel: async () => ({
           tokenizer,

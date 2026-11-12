@@ -120,6 +120,7 @@ function fixture(wrapper: any, window = 8192) {
     './global-ask-prompt': globalAsk,
     './map-reduce': mapReduce,
     'node-llama-cpp': {
+      resolveChatWrapper: () => wrapper,
       LlamaChatSession: Session,
       resolveModelFile: () => assert.fail('No downloads'),
       getLlama: async () => ({
