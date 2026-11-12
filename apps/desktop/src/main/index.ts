@@ -702,11 +702,25 @@ app.whenReady().then(async () => {
   meetingsService.registerIpc()
   let captureMeetingId: string | undefined
   let pendingCaptureMeetingId: string | undefined
+  let captureSource: 'mic' | 'system' | 'both' = 'both'
+  let pendingCaptureSource: 'mic' | 'system' | 'both' = 'both'
   let captureBase: import('@repo/meetings-store/types').MeetingTranscriptSegment[] = []
   let captureBaseEcho = 0
   let captureId: string | undefined
   const session = new TranscriptSession(
-    broadcastEngineEvent,
+    (event) => {
+      if ((event.event === 'capture-finalized' || event.event === 'error') && captureMeetingId)
+        notesService?.endNotesPrediction(captureMeetingId)
+      broadcastEngineEvent(event)
+      if (event.event === 'segments' && captureMeetingId) {
+        const snapshot = session.snapshot(captureMeetingId)
+        if (snapshot && snapshot.phase !== 'ended')
+          notesService?.observeNotesTranscript(captureMeetingId, [
+            ...captureBase,
+            ...snapshot.segments
+          ])
+      }
+    },
     () => join(libraryRoot(), 'sessions'),
     assertLibrary,
     (segments, ended, savedAudioFailures) => {
@@ -777,6 +791,7 @@ app.whenReady().then(async () => {
       // Preparing a start must not reroute the previous capture's checkpoints.
       // Commit the destination/base together with the session's new ownership.
       captureMeetingId = rawEvent.command === 'live' ? pendingCaptureMeetingId : undefined
+      captureSource = pendingCaptureSource
       const captureMeeting = captureMeetingId ? meetingsService.get(captureMeetingId) : null
       captureBase = captureMeeting?.segments ?? []
       captureBaseEcho = captureMeeting?.echoSuppressed ?? 0
@@ -785,11 +800,23 @@ app.whenReady().then(async () => {
     // for snapshot/renderer ownership, and never send filesystem diagnostics to UI.
     const event = captureEventForSession(rawEvent, captureId)
     if (!event) return
+    // Invalidate deferred re-warming before terminal handling can flush segments.
+    // Active warm work remains available for a subsequent Generate to join.
+    if (
+      captureMeetingId &&
+      (event.event === 'done' ||
+        event.event === 'exit' ||
+        event.event === 'error' ||
+        event.event === 'spawn-error')
+    )
+      notesService?.endNotesPrediction(captureMeetingId)
     broadcastEngineEvent(event)
     session.handle(event)
     if (event.event === 'audio') audioService.onAudioSaved(event)
     logEngineEvent(event)
     recording.handle(event)
+    if (event.event === 'ready' && captureMeetingId && recording.snapshot().phase === 'recording')
+      notesService?.warmNotesModel(captureMeetingId, captureSource)
     if (!recording.busy) micWatcher.setSuppressed(false)
   })
 
@@ -842,6 +869,7 @@ app.whenReady().then(async () => {
       opts.audioDir = audioService.beginSession(opts.meetingId) ?? undefined
     }
     pendingCaptureMeetingId = request.command === 'live' ? opts.meetingId : undefined
+    pendingCaptureSource = opts.source ?? 'both'
     session.bindMeeting(pendingCaptureMeetingId)
     engine.start(request.command, request.filePath, opts)
   })
@@ -942,8 +970,10 @@ app.whenReady().then(async () => {
     meetingBusy: () => recording.busy || libraryActivity.moving,
     setMicHeld: (held) => {
       // Our own capture must not look like a Zoom call to the meeting detector.
-      if (held) micWatcher.setSuppressed(true)
-      else if (!recording.busy) micWatcher.setSuppressed(false)
+      if (held) {
+        void notesService?.cancelNotesWarmup()
+        micWatcher.setSuppressed(true)
+      } else if (!recording.busy) micWatcher.setSuppressed(false)
     },
     showMainWindow: focusMainWindow,
     isTrustedSender: (sender) => sender === mainWindow?.webContents,
@@ -1115,6 +1145,7 @@ app.whenReady().then(async () => {
     createBeforeQuitHandler({
       acquire: () => libraryActivity.tryBeginShutdown(),
       cleanup: async () => {
+        void notesService?.cancelNotesWarmup()
         quitting = true
         // Windows keeps the tray (showing "Saving recording…") until the wait below.
         if (process.platform !== 'win32') recordingTray?.dispose()
@@ -1298,6 +1329,7 @@ app.whenReady().then(async () => {
   // Store writes fan out to cloud sync and local recording cleanup.
   meetingsService.onDidWrite = (change) => {
     lastLibraryWriteAt = Date.now()
+    if (change.deletedId) void notesService?.cancelNotesWarmup(change.deletedId)
     sourceIndex.invalidate()
     syncService.onMeetingsChanged(change.deletedId)
     // A deleted meeting takes its recordings with it.

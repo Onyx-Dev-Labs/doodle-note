@@ -19,6 +19,7 @@ function engineWith(record: {
 }): NotesEngine {
   const tokenizer = (text: string): number[] => Array.from(new TextEncoder().encode(text))
   class Session {
+    dispose() {}
     constructor(private readonly options: { systemPrompt: string }) {}
     getChatHistory() {
       return [{ type: 'system', text: this.options.systemPrompt }]
@@ -45,6 +46,12 @@ function engineWith(record: {
     './global-ask-prompt': globalAsk,
     './map-reduce': mapReduce,
     'node-llama-cpp': {
+      resolveChatWrapper: () => ({
+        ...new Session({ systemPrompt: '' } as never).chatWrapper,
+        generateInitialChatHistory: ({ systemPrompt }: { systemPrompt: string }) => [
+          { type: 'system', text: systemPrompt }
+        ]
+      }),
       getLlama: async () => ({
         loadModel: async () => ({
           tokenizer,
@@ -71,6 +78,8 @@ function engineWith(record: {
       assert.ok(name in deps, `unexpected dependency ${name}`)
       return deps[name]
     },
+    setTimeout,
+    clearTimeout,
     console,
     Date
   })
@@ -78,7 +87,10 @@ function engineWith(record: {
 }
 
 test('a short request gets the small context, token cap and temperature it asked for', async () => {
-  const record = { contexts: [] as number[], prompts: [] as Array<{ maxTokens: number; temperature: number }> }
+  const record = {
+    contexts: [] as number[],
+    prompts: [] as Array<{ maxTokens: number; temperature: number }>
+  }
   const engine = engineWith(record)
   await engine.runBounded!('Tidy this.', 'um so hello there', {
     contextSize: 1024,
@@ -89,16 +101,22 @@ test('a short request gets the small context, token cap and temperature it asked
   assert.deepEqual(record.prompts, [{ maxTokens: 256, temperature: 0.1 }])
 })
 
-test('without those options the meeting-sized defaults are unchanged', async () => {
-  const record = { contexts: [] as number[], prompts: [] as Array<{ maxTokens: number; temperature: number }> }
+test('without those options the output cap is unchanged and the short request uses 8K', async () => {
+  const record = {
+    contexts: [] as number[],
+    prompts: [] as Array<{ maxTokens: number; temperature: number }>
+  }
   const engine = engineWith(record)
   await engine.runBounded!('Tidy this.', 'hello')
-  assert.deepEqual(record.contexts, [16384])
+  assert.deepEqual(record.contexts, [8192])
   assert.deepEqual(record.prompts, [{ maxTokens: 4096, temperature: 0.3 }])
 })
 
 test('a request too big for the small context is refused before any generation', async () => {
-  const record = { contexts: [] as number[], prompts: [] as Array<{ maxTokens: number; temperature: number }> }
+  const record = {
+    contexts: [] as number[],
+    prompts: [] as Array<{ maxTokens: number; temperature: number }>
+  }
   const engine = engineWith(record)
   await assert.rejects(
     engine.runBounded!('Tidy this.', 'x'.repeat(2000), { contextSize: 1024, maxTokens: 256 }),

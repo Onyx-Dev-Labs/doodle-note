@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { tmpdir } from 'node:os'
+import { tmpdir, freemem, totalmem } from 'node:os'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import * as ai from '@repo/ai'
@@ -42,6 +42,7 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
     './model-paths': { modelSearchDirectories: () => [dir] },
     'node:fs': fs,
     'node:path': path,
+    'node:os': { freemem, totalmem },
     '@repo/ai': ai,
     '@repo/meetings-store': meetings,
     '../shared/notes-api': api,
@@ -148,9 +149,23 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
       )
     )
     service.pickEngine = async () => ({
-      generateNotes: async () => ({ markdown: 'complete', engine: 'fixture', elapsedMs: 1 })
+      generateNotes: async (
+        _input: unknown,
+        _tokens: unknown,
+        progress: (event: ai.NotesProgress) => void
+      ) => {
+        progress({ phase: 'reading' })
+        progress({ phase: 'writing' })
+        return { markdown: 'complete', engine: 'fixture', elapsedMs: 1 }
+      }
     })
     assert.equal((await enhance({ ...request, runId: 'retry' })).markdown, 'complete')
+    assert.deepEqual(
+      broadcasts
+        .filter(({ payload }) => payload.runId === 'retry')
+        .map(({ payload }) => payload.phase),
+      ['preparing', 'reading', 'writing']
+    )
     assert.equal(request.rawNotesMarkdown, 'Keep this')
     assert.deepEqual(request.segments, [])
     // Recipe-only engine access shares busy ownership with existing summaries and Ask.

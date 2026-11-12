@@ -44,3 +44,8 @@ export type {
 export { NOTE_TEMPLATES, templateById, type NoteTemplate } from './templates'
 
 export { GenerationError, GENERATION_LIMITS, withGenerationDeadline } from './generation-control'
+export { NotesEngineLog } from './notes-log'
+export type { NotesDiagnostic, NotesDiagnosticSink } from './notes-log'
+
+export { estimateNotesWarmupBytes, NOTES_WARM_HEADROOM_BYTES } from './local-memory'
+export { NOTES_WARM_CONTEXT_SIZE, preloadNotesRuntime } from './local-engine'

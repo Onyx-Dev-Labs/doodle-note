@@ -6,7 +6,8 @@ import * as libraryPath from './library-path'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import * as fs from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, freemem, totalmem } from 'node:os'
+import { NotesEngineLog } from '@repo/ai'
 import { join } from 'node:path'
 import * as path from 'node:path'
 import { test } from 'node:test'
@@ -53,7 +54,9 @@ test('retired settings survive reload, block requests, and never migrate keys to
     './dictation-model': dictationModel,
     'node:fs': fs,
     'node:path': path,
+    'node:os': { freemem, totalmem },
     '@repo/ai': {
+      NotesEngineLog,
       LOCAL_MODELS: [],
       DEFAULT_MODELS_DIR: dir,
       LocalModelStore: class {},

@@ -1,3 +1,4 @@
+import { notesProgressLabel } from '../../shared/notes-progress'
 import RecipePanel from './RecipePanel'
 import { watchMeetingAudio } from './lib/meeting-audio'
 import { useMeetingAudioPlayer } from './lib/use-meeting-audio-player'
@@ -719,14 +720,7 @@ export default function MeetingView({
           progress.meetingId !== job.meetingId
         )
           return
-        const phase =
-          progress.phase === 'condensing'
-            ? `Condensing part ${progress.current} of ${progress.total}`
-            : progress.phase === 'writing'
-              ? 'Writing notes'
-              : progress.phase === 'canceling'
-                ? 'Stopping model'
-                : 'Preparing model'
+        const phase = notesProgressLabel(progress)
         const elapsed = Math.floor(progress.elapsedMs / 1000)
         const activity =
           progress.lastActivityMs !== undefined

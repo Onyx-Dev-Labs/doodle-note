@@ -109,11 +109,17 @@ function fixture(
           }
         }
       },
+      resolveChatWrapper: () => ({
+        generateInitialChatHistory: () => [],
+        generateContextState: () => ({ contextText: { tokenize: () => [] } })
+      }),
       LlamaChatSession: class {
+        dispose() {}
         async promptWithMeta(
           _prompt: string,
-          settings: { onTextChunk: (text: string) => void }
+          settings: { onTextChunk: (text: string) => void; onToken?: () => void }
         ): Promise<{ responseText: string; stopReason: string }> {
+          settings.onToken?.()
           settings.onTextChunk('Synthetic answer')
           return { responseText: 'Synthetic answer', stopReason: 'eogToken' }
         }
@@ -137,6 +143,8 @@ function fixture(
       },
       Error,
       AggregateError,
+      setTimeout,
+      clearTimeout,
       console: { error: () => {} },
       Date
     }
@@ -244,8 +252,9 @@ for (const stage of ['load', 'context'] as const) {
     assert.equal((await f.run()).markdown, 'Synthetic answer')
     assert.deepEqual(f.selected, ['default', 'cpu'])
     assert.deepEqual(f.tokens, ['Synthetic answer'])
-    assert.deepEqual(f.contextsDisposed, ['cpu'])
+    assert.deepEqual(f.contextsDisposed, [])
     await f.engine.dispose()
+    assert.deepEqual(f.contextsDisposed, ['cpu'])
     assert.deepEqual(f.disposed, stage === 'context' ? ['default', 'cpu'] : ['cpu'])
   })
 }
@@ -336,3 +345,13 @@ for (const stage of ['load', 'context'] as const) {
     })
   }
 }
+
+test('local adapter reports reading before inference and writing exactly once at the first token', async () => {
+  const f = fixture()
+  const phases: string[] = []
+  await f.engine.runRaw('system', 'prompt', () => assert.equal(phases.at(-1), 'writing'), {
+    onPhase: (phase) => phases.push(phase)
+  })
+  assert.deepEqual(phases, ['reading', 'writing'])
+  await f.engine.dispose()
+})

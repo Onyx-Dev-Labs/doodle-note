@@ -177,6 +177,7 @@ function quitHook(
       quitting: false,
       recordingTray: null,
       calendarService: null,
+      notesService: null,
       micWatcher: {
         dispose() {
           /* No mic watcher is launched in this host fixture. */

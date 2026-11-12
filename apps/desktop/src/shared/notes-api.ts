@@ -224,7 +224,7 @@ export interface EnhanceProgressEvent extends EnhanceIdentity {
   elapsedMs: number
   responseChunks: number
   lastActivityMs?: number
-  phase: 'preparing' | 'canceling' | 'condensing' | 'writing'
+  phase: 'preparing' | 'canceling' | 'reading' | 'condensing' | 'writing'
   current?: number
   total?: number
 }

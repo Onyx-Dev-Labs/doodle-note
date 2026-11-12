@@ -216,3 +216,28 @@ it('deadline/output-limit errors cannot degrade into a successful summary with g
     assert.equal(calls, 1)
   }
 })
+
+it('local prefill stays reading until the engine reports its first generated token', async () => {
+  const engine = new FakeEngine() as FakeEngine & { reportsPrefillProgress: boolean }
+  engine.reportsPrefillProgress = true
+  const phases: string[] = []
+  const original = engine.runRaw.bind(engine)
+  ;(engine as NotesEngine).runRaw = async (system, prompt, token, control) => {
+    assert.notEqual(phases.at(-1), 'writing', 'no premature writing phase')
+    control?.onPhase?.('reading')
+    assert.equal(phases.at(-1), 'reading')
+    control?.onPhase?.('writing')
+    assert.equal(phases.at(-1), control?.phase === 'condensing' ? 'condensing' : 'writing')
+    return original(system, prompt, token)
+  }
+  await engine.generateNotes(baseInput(makeSegments(10)), undefined, (update) =>
+    phases.push(update.phase)
+  )
+  assert.deepEqual(phases, ['reading', 'writing'])
+  phases.length = 0
+  await engine.generateNotes(baseInput(makeSegments(300)), undefined, (update) =>
+    phases.push(update.phase)
+  )
+  assert.equal(phases.at(-2), 'reading')
+  assert.equal(phases.at(-1), 'writing')
+})

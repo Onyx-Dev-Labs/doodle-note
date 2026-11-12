@@ -125,7 +125,7 @@ export async function generateMeetingNotes(
   if (transcriptChars <= threshold) {
     // The message budget follows the engine's threshold — a cloud engine's
     // 100K-char meeting must not get the local 48K head+tail truncation.
-    onProgress?.({ phase: 'writing' })
+    if (!engine.reportsPrefillProgress) onProgress?.({ phase: 'writing' })
     const result = await engine.runRaw(
       buildMergeSystemPrompt(input.templateId, input.speakers),
       buildMergeUserMessage(input, threshold),
@@ -133,6 +133,7 @@ export async function generateMeetingNotes(
       {
         ...control,
         phase: 'writing',
+        onPhase: (phase) => onProgress?.({ phase }),
         onActivity: () => onProgress?.({ phase: 'writing', activity: true })
       }
     )
@@ -155,6 +156,12 @@ export async function generateMeetingNotes(
         {
           ...control,
           phase: 'condensing',
+          onPhase: (phase) =>
+            onProgress?.({
+              phase: phase === 'reading' ? 'reading' : 'condensing',
+              current: i + 1,
+              total: chunks.length
+            }),
           onActivity: () =>
             onProgress?.({
               phase: 'condensing',
@@ -170,6 +177,7 @@ export async function generateMeetingNotes(
       control?.signal?.throwIfAborted()
       if (err instanceof GenerationError) throw err
       console.error(`[notes] condensing part ${i + 1}/${chunks.length} failed:`, err)
+      control?.onDiagnostic?.({ event: 'failure', stage: 'condensing', error: err })
       failures += 1
       parts.push(
         `--- Part ${i + 1} of ${chunks.length}: condensation failed — treat this stretch of the meeting as unavailable, do not guess its contents ---`
@@ -192,7 +200,7 @@ export async function generateMeetingNotes(
       condensed.slice(-half)
   }
 
-  onProgress?.({ phase: 'writing' })
+  if (!engine.reportsPrefillProgress) onProgress?.({ phase: 'writing' })
   const result = await engine.runRaw(
     buildMergeSystemPrompt(input.templateId, input.speakers),
     buildReduceUserMessage(input, condensed, chunks.length),
@@ -200,6 +208,7 @@ export async function generateMeetingNotes(
     {
       ...control,
       phase: 'writing',
+      onPhase: (phase) => onProgress?.({ phase }),
       onActivity: () => onProgress?.({ phase: 'writing', activity: true })
     }
   )
