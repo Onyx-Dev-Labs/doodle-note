@@ -109,6 +109,7 @@ struct LibraryView: View {
     @State private var showModels = false
     @State private var showCalendars = false
     @State private var showCloud = false
+    @State private var showAsk = false
 
     private var visibleNotes: [NoteRecord] {
         library.visibleNotes.filter { note in
@@ -132,6 +133,7 @@ struct LibraryView: View {
                         ForEach(library.folders) { Text($0.name).tag(Optional($0.id)) }
                     }
                 }
+                Button("Ask this library", systemImage: "questionmark.bubble") { showAsk = true }.accessibilityIdentifier("askLibrary")
                 if let calendar { UpcomingMeetingsSection(calendar: calendar, libraryID: library.selectedLibraryID) }
                 if !search.isEmpty {
                     NoteSearchSection(library: library, query: search) { selection = $0 }
@@ -183,6 +185,7 @@ struct LibraryView: View {
                     description: Text("Your notes stay on this device. No account is required."))
             }
         }
+        .sheet(isPresented: $showAsk) { AskView(library: library, recording: recording, noteID: nil) }
         .sheet(isPresented: $showCloud) {
             if let cloud { CloudSyncView(cloud: cloud, library: library, recording: recording) }
             else { ContentUnavailableView("Cloud sync unavailable", systemImage: "icloud.slash", description: Text("Cloud settings could not be opened. Your notes remain on this device.")) }
