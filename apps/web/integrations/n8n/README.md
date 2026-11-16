@@ -45,6 +45,50 @@ n8n 15-minute run ──► POST /api/integrations/download-leads/claim (lease)
 - A create that MailCheap refuses for the address itself (typo domain, spam
   trap, undeliverable) is acked as `skipped` / `mailcheap_rejected_address`.
 
+## Native workflow contract tests
+
+The [Download-lead native contract](../../../../.github/workflows/download-lead-native.yml)
+Action runs this exported graph in **n8n 2.46.6**, with `Config` replaced by
+synthetic fixture settings and all eight HTTP nodes redirected to loopback
+mocks. The production export, embedded functions, HTTP methods/body expressions,
+and existing website/PGlite emulator tests stay unchanged.
+
+The saved [paying/trial batch](tests/paying-trial-batch.case.json) takes its
+answers from the [three-customer test](../../tests/download-lead-sync-e2e.test.ts)
+and `CONTRACT.md`'s claim/ack identity and lifecycle rules. It requires one claim
+request with three events, three distinct ack requests, and 15 total HTTP requests: paid and trial contacts
+keep their lifecycle values; the new account holder gets
+`created_without_lifecycle`, with no `free_download` field written. Each request
+body is checked independently of its mocked response. The mock-only ack URL
+`/ack/{{ $json.ack.eventId }}` and tag URL ending in the contact ID give each
+identity its own exact body/count check, with no cross-branch arrival-order
+contract. The [empty-claim control](tests/empty-claim.case.json) requires one
+claim request and zero downstream items or HTTP requests.
+
+To run both cases, open **Actions → Download-lead native contract → Run
+workflow**. The same cases run on relevant pull requests and pushes to `main`;
+the job summary and `download-lead-native-contract` artifact contain actual
+request records, JSON checks, and JUnit results. Reuse these saved cases after
+changing the source and rebuilding the export. This fixed test runtime covers
+the isolated graph; live auth, Neon/MailCheap state, and production activation
+keep their existing launch checks.
+
+For an already installed local n8n 2.46.6, set `N8N_BIN` to its executable and
+run from the repository root (Node.js 24+):
+
+```sh
+for case in paying-trial-batch empty-claim; do
+  npx --yes --package @blucca/n8n-check@0.1.9 n8n-check \
+    apps/web/integrations/n8n/download-lead-sync.workflow.json \
+    "apps/web/integrations/n8n/tests/$case.case.json" \
+    --n8n "$N8N_BIN" --allow-network --out "results/download-lead-native/$case" || exit $?
+done
+```
+
+The local CLI uses host networking for its loopback mock server; the Action
+runs with Docker networking disabled. Exit `0` passes, `1` is a contract
+regression, and `2` is a setup error.
+
 ## Launch steps
 
 Do these in order. None of them sends email by itself. The first send happens

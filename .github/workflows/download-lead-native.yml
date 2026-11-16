@@ -1,0 +1,62 @@
+name: Download-lead native contract
+
+on:
+  pull_request:
+    paths:
+      - 'apps/web/integrations/n8n/**'
+      - 'apps/web/scripts/build-download-lead-workflow.mjs'
+      - 'apps/web/tests/download-lead-sync-e2e.test.ts'
+      - '.github/workflows/download-lead-native.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/integrations/n8n/**'
+      - 'apps/web/scripts/build-download-lead-workflow.mjs'
+      - 'apps/web/tests/download-lead-sync-e2e.test.ts'
+      - '.github/workflows/download-lead-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: download-lead-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Preserve paying, trial, and new-account identities
+        uses: blucca/n8n-check@de6ac28896b82eb2206392838cabcb81be17d2e1 # v0.1.8
+        with:
+          workflow: apps/web/integrations/n8n/download-lead-sync.workflow.json
+          case: apps/web/integrations/n8n/tests/paying-trial-batch.case.json
+          out: results/download-lead-native/paying-trial-batch
+          n8n-version: '2.46.6'
+
+      - name: An empty claim performs zero downstream work
+        if: always()
+        uses: blucca/n8n-check@de6ac28896b82eb2206392838cabcb81be17d2e1 # v0.1.8
+        with:
+          workflow: apps/web/integrations/n8n/download-lead-sync.workflow.json
+          case: apps/web/integrations/n8n/tests/empty-claim.case.json
+          out: results/download-lead-native/empty-claim
+          n8n-version: '2.46.6'
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.1
+        if: always()
+        with:
+          name: download-lead-native-contract
+          path: |
+            results/download-lead-native/**/report.json
+            results/download-lead-native/**/junit.xml
