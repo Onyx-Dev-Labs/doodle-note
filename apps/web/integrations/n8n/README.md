@@ -52,6 +52,9 @@ Action runs this exported graph in **n8n 2.46.6**, with `Config` replaced by
 synthetic fixture settings and all eight HTTP nodes redirected to loopback
 mocks. The production export, embedded functions, HTTP methods/body expressions,
 and existing website/PGlite emulator tests stay unchanged.
+For the organization's Actions policy, CI uses full-SHA GitHub Actions and
+installs `@blucca/n8n-check@0.1.8` as its test dependency, invoking the same
+Docker wrapper.
 
 The saved [paying/trial batch](tests/paying-trial-batch.case.json) takes its
 answers from the [three-customer test](../../tests/download-lead-sync-e2e.test.ts)

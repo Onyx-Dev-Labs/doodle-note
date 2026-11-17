@@ -27,6 +27,9 @@ jobs:
   native-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CHECK_WORKFLOW: apps/web/integrations/n8n/download-lead-sync.workflow.json
+      CHECK_N8N_VERSION: '2.46.6'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,22 +39,26 @@ jobs:
         with:
           node-version: 24
 
+      - name: Install pinned n8n-check test dependency
+        shell: bash
+        run: npm install --prefix "$RUNNER_TEMP/n8n-check-tool" --ignore-scripts --no-audit --no-fund @blucca/n8n-check@0.1.8
+
       - name: Preserve paying, trial, and new-account identities
-        uses: blucca/n8n-check@de6ac28896b82eb2206392838cabcb81be17d2e1 # v0.1.8
-        with:
-          workflow: apps/web/integrations/n8n/download-lead-sync.workflow.json
-          case: apps/web/integrations/n8n/tests/paying-trial-batch.case.json
-          out: results/download-lead-native/paying-trial-batch
-          n8n-version: '2.46.6'
+        shell: bash
+        env:
+          ACTION_ROOT: ${{ runner.temp }}/n8n-check-tool/node_modules/@blucca/n8n-check
+          CHECK_CASE: apps/web/integrations/n8n/tests/paying-trial-batch.case.json
+          CHECK_OUT: results/download-lead-native/paying-trial-batch
+        run: node "$ACTION_ROOT/src/action.mjs"
 
       - name: An empty claim performs zero downstream work
         if: always()
-        uses: blucca/n8n-check@de6ac28896b82eb2206392838cabcb81be17d2e1 # v0.1.8
-        with:
-          workflow: apps/web/integrations/n8n/download-lead-sync.workflow.json
-          case: apps/web/integrations/n8n/tests/empty-claim.case.json
-          out: results/download-lead-native/empty-claim
-          n8n-version: '2.46.6'
+        shell: bash
+        env:
+          ACTION_ROOT: ${{ runner.temp }}/n8n-check-tool/node_modules/@blucca/n8n-check
+          CHECK_CASE: apps/web/integrations/n8n/tests/empty-claim.case.json
+          CHECK_OUT: results/download-lead-native/empty-claim
+        run: node "$ACTION_ROOT/src/action.mjs"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.1
         if: always()
