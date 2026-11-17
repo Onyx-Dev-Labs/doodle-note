@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "name": "DoodleNote download leads: empty claim is complete with zero work",
+  "input": {
+    "node": "Config",
+    "items": [
+      {
+        "doodlenoteBaseUrl": "https://doodle.fixture.invalid",
+        "mailcheapBaseUrl": "https://mailcheap.fixture.invalid",
+        "newsletter": "doodlenote",
+        "lifecycleField": "doodlenote_lifecycle",
+        "firstDownloadField": "doodlenote_first_download",
+        "platformField": "doodlenote_download_platform",
+        "sourceTag": "website-download",
+        "claimLimit": 25
+      }
+    ]
+  },
+  "mocks": [
+    {
+      "node": "Claim download events",
+      "url": "/api/integrations/download-leads/claim",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/integrations/download-leads/claim",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "events": []
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "limit": 25,
+                "eventTypes": [
+                  "free_download_requested"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "node": "Find MailCheap contact",
+      "url": "/unused",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/unused",
+          "responses": [
+            {
+              "status": 200,
+              "json": {}
+            }
+          ],
+          "expect": {
+            "count": 0,
+            "bodies": []
+          }
+        }
+      ]
+    },
+    {
+      "node": "Create MailCheap contact",
+      "url": "/unused",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/unused",
+          "responses": [
+            {
+              "status": 200,
+              "json": {}
+            }
+          ],
+          "expect": {
+            "count": 0,
+            "bodies": []
+          }
+        }
+      ]
+    },
+    {
+      "node": "Verify created contact",
+      "url": "/unused",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/unused",
+          "responses": [
+            {
+              "status": 200,
+              "json": {}
+            }
+          ],
+          "expect": {
+            "count": 0,
+            "bodies": []
+          }
+        }
+      ]
+    },
+    {
+      "node": "Update MailCheap fields",
+      "url": "/unused",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/unused",
+          "responses": [
+            {
+              "status": 200,
+              "json": {}
+            }
+          ],
+          "expect": {
+            "count": 0,
+            "bodies": []
+          }
+        }
+      ]
+    },
+    {
+      "node": "Tag MailCheap contact",
+      "url": "/unused",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/unused",
+          "responses": [
+            {
+              "status": 200,
+              "json": {}
+            }
+          ],
+          "expect": {
+            "count": 0,
+            "bodies": []
+          }
+        }
+      ]
+    },
+    {
+      "node": "Verify updated contact",
+      "url": "/unused",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/unused",
+          "responses": [
+            {
+              "status": 200,
+              "json": {}
+            }
+          ],
+          "expect": {
+            "count": 0,
+            "bodies": []
+          }
+        }
+      ]
+    },
+    {
+      "node": "Report result to DoodleNote",
+      "url": "/unused",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/unused",
+          "responses": [
+            {
+              "status": 200,
+              "json": {}
+            }
+          ],
+          "expect": {
+            "count": 0,
+            "bodies": []
+          }
+        }
+      ]
+    }
+  ],
+  "assertions": [
+    {
+      "node": "Split events",
+      "count": 0
+    },
+    {
+      "node": "Plan MailCheap change",
+      "count": 0
+    },
+    {
+      "node": "Check created contact",
+      "count": 0
+    },
+    {
+      "node": "Check updated contact",
+      "count": 0
+    },
+    {
+      "node": "Report result to DoodleNote",
+      "count": 0
+    }
+  ],
+  "timeoutMs": 60000,
+  "maxRequests": 5
+}

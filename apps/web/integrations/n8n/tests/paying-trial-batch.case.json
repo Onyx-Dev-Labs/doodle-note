@@ -1,0 +1,614 @@
+{
+  "version": 1,
+  "name": "DoodleNote download leads: paying, trial, and new-account batch",
+  "input": {
+    "node": "Config",
+    "items": [
+      {
+        "doodlenoteBaseUrl": "https://doodle.fixture.invalid",
+        "mailcheapBaseUrl": "https://mailcheap.fixture.invalid",
+        "newsletter": "doodlenote",
+        "lifecycleField": "doodlenote_lifecycle",
+        "firstDownloadField": "doodlenote_first_download",
+        "platformField": "doodlenote_download_platform",
+        "sourceTag": "website-download",
+        "claimLimit": 25
+      }
+    ]
+  },
+  "mocks": [
+    {
+      "node": "Claim download events",
+      "url": "/api/integrations/download-leads/claim",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/integrations/download-leads/claim",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "events": [
+                  {
+                    "eventId": "00000000-0000-4000-8000-000000000001",
+                    "claimToken": "00000000-0000-4000-8000-000000000011",
+                    "eventType": "free_download_requested",
+                    "attempt": 1,
+                    "leadId": "00000000-0000-4000-8000-000000000021",
+                    "email": "paid@example.com",
+                    "source": "website_download",
+                    "platform": "mac",
+                    "requestedAt": "2026-10-28T15:04:05.000Z",
+                    "firstRequestedAt": "2026-10-28T15:04:05.000Z",
+                    "latestRequestedAt": "2026-10-28T15:04:05.000Z",
+                    "requestCount": 1,
+                    "marketingConsent": {
+                      "granted": true,
+                      "grantedAt": "2026-10-28T15:04:05.000Z",
+                      "version": "download-marketing-2026-10-29"
+                    },
+                    "account": {
+                      "exists": true,
+                      "userId": "paid-1",
+                      "stripeCustomerId": null,
+                      "cloudSyncStatus": "active"
+                    },
+                    "freeDownloadLifecycleEligible": false,
+                    "accountLinkUrl": "https://doodle.fixture.invalid/download/connect?token=fixture-paid"
+                  },
+                  {
+                    "eventId": "00000000-0000-4000-8000-000000000002",
+                    "claimToken": "00000000-0000-4000-8000-000000000012",
+                    "eventType": "free_download_requested",
+                    "attempt": 1,
+                    "leadId": "00000000-0000-4000-8000-000000000022",
+                    "email": "trial@example.com",
+                    "source": "website_download",
+                    "platform": "win",
+                    "requestedAt": "2026-10-28T15:04:05.000Z",
+                    "firstRequestedAt": "2026-10-28T15:04:05.000Z",
+                    "latestRequestedAt": "2026-10-28T15:04:05.000Z",
+                    "requestCount": 1,
+                    "marketingConsent": {
+                      "granted": true,
+                      "grantedAt": "2026-10-28T15:04:05.000Z",
+                      "version": "download-marketing-2026-10-29"
+                    },
+                    "account": {
+                      "exists": true,
+                      "userId": "trial-1",
+                      "stripeCustomerId": null,
+                      "cloudSyncStatus": "trialing"
+                    },
+                    "freeDownloadLifecycleEligible": false,
+                    "accountLinkUrl": "https://doodle.fixture.invalid/download/connect?token=fixture-trial"
+                  },
+                  {
+                    "eventId": "00000000-0000-4000-8000-000000000003",
+                    "claimToken": "00000000-0000-4000-8000-000000000013",
+                    "eventType": "free_download_requested",
+                    "attempt": 1,
+                    "leadId": "00000000-0000-4000-8000-000000000023",
+                    "email": "trial-new@example.com",
+                    "source": "website_download",
+                    "platform": "mac",
+                    "requestedAt": "2026-10-28T15:04:05.000Z",
+                    "firstRequestedAt": "2026-10-28T15:04:05.000Z",
+                    "latestRequestedAt": "2026-10-28T15:04:05.000Z",
+                    "requestCount": 1,
+                    "marketingConsent": {
+                      "granted": true,
+                      "grantedAt": "2026-10-28T15:04:05.000Z",
+                      "version": "download-marketing-2026-10-29"
+                    },
+                    "account": {
+                      "exists": true,
+                      "userId": "trial-2",
+                      "stripeCustomerId": null,
+                      "cloudSyncStatus": "trialing"
+                    },
+                    "freeDownloadLifecycleEligible": false,
+                    "accountLinkUrl": "https://doodle.fixture.invalid/download/connect?token=fixture-trial-new"
+                  }
+                ]
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "limit": 25,
+                "eventTypes": [
+                  "free_download_requested"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "node": "Find MailCheap contact",
+      "url": "/api/v1/contacts/{{ encodeURIComponent($json.email) }}?newsletter={{ encodeURIComponent($('Config').first().json.newsletter) }}",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/v1/contacts/paid%40example.com?newsletter=doodlenote",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "id": "mc_paid",
+                "email": "paid@example.com",
+                "status": "active",
+                "fields": {
+                  "doodlenote_lifecycle": "paying_customer"
+                },
+                "tags": [
+                  "customer"
+                ]
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              null
+            ]
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/contacts/trial%40example.com?newsletter=doodlenote",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "id": "mc_trial",
+                "email": "trial@example.com",
+                "status": "active",
+                "fields": {
+                  "doodlenote_lifecycle": "trial_active"
+                },
+                "tags": []
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              null
+            ]
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/contacts/trial-new%40example.com?newsletter=doodlenote",
+          "responses": [
+            {
+              "status": 404,
+              "json": {
+                "error": {
+                  "code": "not_found",
+                  "message": "Contact not found"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              null
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "node": "Create MailCheap contact",
+      "url": "/api/v1/contacts",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/v1/contacts",
+          "responses": [
+            {
+              "status": 201,
+              "json": {
+                "id": "mc_new",
+                "email": "trial-new@example.com",
+                "status": "active",
+                "created": true
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "newsletter": "doodlenote",
+                "email": "trial-new@example.com",
+                "source": "website_download",
+                "tags": [
+                  "website-download",
+                  "download-mac"
+                ],
+                "fields": {
+                  "doodlenote_first_download": "2026-10-28",
+                  "doodlenote_download_platform": "mac"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "node": "Verify created contact",
+      "url": "/api/v1/contacts/{{ encodeURIComponent($('Plan MailCheap change').item.json.event.email) }}?newsletter={{ encodeURIComponent($('Config').first().json.newsletter) }}",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/v1/contacts/trial-new%40example.com?newsletter=doodlenote",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "id": "mc_new",
+                "email": "trial-new@example.com",
+                "status": "active",
+                "source": "website_download",
+                "fields": {
+                  "doodlenote_first_download": "2026-10-28",
+                  "doodlenote_download_platform": "mac"
+                },
+                "tags": [
+                  "website-download",
+                  "download-mac"
+                ]
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              null
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "node": "Update MailCheap fields",
+      "url": "/api/v1/contacts/{{ $json.contactId }}/details",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/api/v1/contacts/mc_paid/details",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "id": "mc_paid",
+                "email": "paid@example.com",
+                "status": "active",
+                "fields": {
+                  "doodlenote_lifecycle": "paying_customer",
+                  "doodlenote_first_download": "2026-10-28",
+                  "doodlenote_download_platform": "mac"
+                },
+                "tags": [
+                  "customer"
+                ]
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "newsletter": "doodlenote",
+                "fields": {
+                  "doodlenote_first_download": "2026-10-28",
+                  "doodlenote_download_platform": "mac"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/v1/contacts/mc_trial/details",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "id": "mc_trial",
+                "email": "trial@example.com",
+                "status": "active",
+                "fields": {
+                  "doodlenote_lifecycle": "trial_active",
+                  "doodlenote_first_download": "2026-10-28",
+                  "doodlenote_download_platform": "win"
+                },
+                "tags": []
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "newsletter": "doodlenote",
+                "fields": {
+                  "doodlenote_first_download": "2026-10-28",
+                  "doodlenote_download_platform": "win"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "node": "Tag MailCheap contact",
+      "url": "/api/v1/contacts/tag/{{ $('Plan MailCheap change').item.json.contactId }}",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/v1/contacts/tag/mc_paid",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "matched": 1,
+                "changed": 1
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "newsletter": "doodlenote",
+                "contacts": [
+                  "mc_paid"
+                ],
+                "tags": [
+                  "website-download",
+                  "download-mac"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/contacts/tag/mc_trial",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "matched": 1,
+                "changed": 1
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "newsletter": "doodlenote",
+                "contacts": [
+                  "mc_trial"
+                ],
+                "tags": [
+                  "website-download",
+                  "download-win"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "node": "Verify updated contact",
+      "url": "/api/v1/contacts/{{ encodeURIComponent($('Plan MailCheap change').item.json.event.email) }}?newsletter={{ encodeURIComponent($('Config').first().json.newsletter) }}",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/v1/contacts/paid%40example.com?newsletter=doodlenote",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "id": "mc_paid",
+                "email": "paid@example.com",
+                "status": "active",
+                "fields": {
+                  "doodlenote_lifecycle": "paying_customer",
+                  "doodlenote_first_download": "2026-10-28",
+                  "doodlenote_download_platform": "mac"
+                },
+                "tags": [
+                  "customer",
+                  "website-download",
+                  "download-mac"
+                ]
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              null
+            ]
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/contacts/trial%40example.com?newsletter=doodlenote",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "id": "mc_trial",
+                "email": "trial@example.com",
+                "status": "active",
+                "fields": {
+                  "doodlenote_lifecycle": "trial_active",
+                  "doodlenote_first_download": "2026-10-28",
+                  "doodlenote_download_platform": "win"
+                },
+                "tags": [
+                  "website-download",
+                  "download-win"
+                ]
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              null
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "node": "Report result to DoodleNote",
+      "url": "/ack/{{ $json.ack.eventId }}",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/ack/00000000-0000-4000-8000-000000000001",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "acknowledged": [
+                  "00000000-0000-4000-8000-000000000001"
+                ],
+                "stale": []
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "results": [
+                  {
+                    "eventId": "00000000-0000-4000-8000-000000000001",
+                    "claimToken": "00000000-0000-4000-8000-000000000011",
+                    "result": "synced",
+                    "outcome": "updated_download_details",
+                    "mailcheapContactId": "mc_paid"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/ack/00000000-0000-4000-8000-000000000002",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "acknowledged": [
+                  "00000000-0000-4000-8000-000000000002"
+                ],
+                "stale": []
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "results": [
+                  {
+                    "eventId": "00000000-0000-4000-8000-000000000002",
+                    "claimToken": "00000000-0000-4000-8000-000000000012",
+                    "result": "synced",
+                    "outcome": "updated_download_details",
+                    "mailcheapContactId": "mc_trial"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/ack/00000000-0000-4000-8000-000000000003",
+          "responses": [
+            {
+              "status": 200,
+              "json": {
+                "acknowledged": [
+                  "00000000-0000-4000-8000-000000000003"
+                ],
+                "stale": []
+              }
+            }
+          ],
+          "expect": {
+            "count": 1,
+            "bodies": [
+              {
+                "results": [
+                  {
+                    "eventId": "00000000-0000-4000-8000-000000000003",
+                    "claimToken": "00000000-0000-4000-8000-000000000013",
+                    "result": "synced",
+                    "outcome": "created_without_lifecycle",
+                    "mailcheapContactId": "mc_new"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "assertions": [
+    {
+      "node": "Split events",
+      "count": 3
+    },
+    {
+      "node": "Plan MailCheap change",
+      "count": 3
+    },
+    {
+      "node": "Check created contact",
+      "count": 1,
+      "pluck": "json.ack.outcome",
+      "equals": [
+        "created_without_lifecycle"
+      ]
+    },
+    {
+      "node": "Check updated contact",
+      "count": 2,
+      "pluck": "json.ack.outcome",
+      "equals": [
+        "updated_download_details",
+        "updated_download_details"
+      ]
+    },
+    {
+      "node": "Report result to DoodleNote",
+      "count": 3
+    }
+  ],
+  "timeoutMs": 60000,
+  "maxRequests": 25
+}
