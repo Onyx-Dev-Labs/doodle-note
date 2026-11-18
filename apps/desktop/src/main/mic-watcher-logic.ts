@@ -63,7 +63,9 @@ export function meetingAppLabel(bundles: readonly string[]): string | null {
 }
 
 export interface MeetingPromptSignals {
+  /** macOS default-device activity; may be false while another input is in use. */
   inputRunning: boolean
+  /** Processes actively capturing input, across all devices. */
   inputBundles: readonly string[]
   outputBundles: readonly string[]
 }
@@ -75,7 +77,8 @@ export interface MeetingPromptSignals {
  * clips, Discord streams, and ordinary playback must never prompt alone.
  */
 export function meetingPromptLabel(signals: MeetingPromptSignals): string | null {
-  if (!signals.inputRunning) return null
+  // Attribution already proves active input. The macOS running flag only
+  // describes the default device, which the meeting app may not be using.
   return meetingAppLabel(signals.inputBundles)
 }
 
