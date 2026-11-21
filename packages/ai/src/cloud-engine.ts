@@ -3,6 +3,7 @@ import { withGenerationDeadline } from './generation-control'
 import { hostedGlobalAskBudget, ollamaGlobalAskBudget } from './global-ask-model-budget'
 import { requireCompleteOutput } from './generation-control'
 import { createAnthropic } from '@ai-sdk/anthropic'
+import { resolveOpenAIBaseURL, type OpenAIRegion } from './openai-region'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { buildAskSystemPrompt, buildAskUserMessage } from './ask-prompt'
@@ -29,6 +30,7 @@ export type CloudProviderId = 'anthropic' | 'openai' | 'grok' | 'gemini' | 'olla
 
 export interface CloudEngineOptions {
   provider: CloudProviderId
+  openaiRegion?: OpenAIRegion
   apiKey: string
   /** Explicit confirmation for this provider/key: no training; Gemini billing enabled. */
   dataPolicyConfirmed?: boolean
@@ -171,7 +173,10 @@ export class CloudNotesEngine implements NotesEngine {
         ? undefined
         : createOpenAI({
             apiKey: this.options.apiKey || 'ollama',
-            ...(preset.baseURL ? { baseURL: preset.baseURL } : {})
+            baseURL:
+              this.options.provider === 'openai'
+                ? resolveOpenAIBaseURL(this.options.openaiRegion)
+                : preset.baseURL
           })
     const model =
       this.options.provider === 'anthropic'

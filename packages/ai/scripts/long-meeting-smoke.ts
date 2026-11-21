@@ -8,6 +8,7 @@
  * Point at existing models: DOODLE_MODELS_DIR=... (defaults to the app's dir)
  */
 import assert from 'node:assert/strict'
+import { parseArgs } from 'node:util'
 import { existsSync } from 'node:fs'
 import { GenerationError } from '../src/generation-control'
 import os from 'node:os'
@@ -34,6 +35,18 @@ const PLANTED = {
   late: 'Final action item: Miguel sends the revised rollout plan to everyone by next Friday.'
 }
 
+const { values } = parseArgs({
+  options: {
+    fixture: { type: 'string', default: 'marathon' },
+    describe: { type: 'boolean', default: false },
+    model: { type: 'string', default: 'qwen3-4b-instruct' }
+  }
+})
+const fixture = values.fixture
+assert.ok(fixture === 'short' || fixture === '61m' || fixture === 'marathon', 'Unknown fixture')
+const spec = LOCAL_MODELS.find((entry) => entry.id === values.model)
+assert.ok(spec, 'Choose a model ID from the local model catalog')
+
 function buildSegments(): MergeSegment[] {
   const segments: MergeSegment[] = []
   const push = (text: string): void => {
@@ -48,20 +61,26 @@ function buildSegments(): MergeSegment[] {
   }
   fillerBlock(5)
   push(PLANTED.early)
-  fillerBlock(190) // ~first half
+  fillerBlock(fixture === 'short' ? 5 : 190) // ~first half
   push(PLANTED.middleDate)
   fillerBlock(10)
   push(PLANTED.middleOwner)
-  fillerBlock(190) // ~second half
+  fillerBlock(fixture === 'short' ? 5 : 190) // ~second half
   push(PLANTED.late)
   fillerBlock(5)
   return segments
 }
 
 const segments = buildSegments()
+const durationMs = fixture === '61m' ? 61 * 60_000 : segments.length * 20_000
+if (fixture === '61m') {
+  segments.forEach((segment, index) => {
+    segment.startMs = Math.floor((index * durationMs) / segments.length)
+  })
+}
 const input: MergeInput = {
   title: 'Northwind program review (marathon)',
-  durationMs: segments.length * 20_000,
+  durationMs,
   rawNotesMarkdown: '- launch date?? \n- who owns datacore renewal',
   segments
 }
@@ -70,18 +89,22 @@ const transcriptChars = formatTranscript(segments).length
 const chunks = chunkSegments(segments).length
 console.log(`transcript: ${segments.length} segments, ${transcriptChars} chars → ${chunks} chunks`)
 
+console.log(`fixture: ${fixture}, duration ${durationMs}ms, model ${spec.id}`)
+if (values.describe) process.exit(0)
 const modelsDir =
   process.env.DOODLE_MODELS_DIR ??
   path.join(os.homedir(), 'Library', 'Application Support', 'desktop', 'models')
 const modelPath =
   process.env.DOODLE_MODEL_PATH ??
-  path.join(modelsDir, 'hf_unsloth_Qwen3-4B-Instruct-2507.Q4_K_M.gguf')
-if (!existsSync(modelPath))
+  (spec.id === 'qwen3-4b-instruct'
+    ? path.join(modelsDir, 'hf_unsloth_Qwen3-4B-Instruct-2507.Q4_K_M.gguf')
+    : undefined)
+if (!modelPath || !existsSync(modelPath))
   throw new Error(
-    'Set DOODLE_MODEL_PATH to an existing cached Qwen model. This smoke never downloads.'
+    'Set DOODLE_MODEL_PATH to the cached GGUF for the selected model. This smoke never downloads.'
   )
 const engine = new LocalNotesEngine({
-  modelUri: LOCAL_MODELS[0]!.uri,
+  modelUri: spec.uri,
   modelPath
 })
 // This is an isolated test process, never the installed app. Bound even native teardown.
@@ -106,6 +129,29 @@ console.log(
   `PASS: real native cancellation and context cleanup (${Date.now() - cancelStarted}ms including load/prefill); retrying long meeting`
 )
 
+const runRaw = engine.runRaw.bind(engine)
+engine.runRaw = async (system, user, onToken, control) => {
+  const start = Date.now()
+  let firstTextMs: number | undefined
+  try {
+    return await runRaw(system, user, onToken, {
+      ...control,
+      onActivity: () => {
+        firstTextMs ??= Date.now() - start
+        control?.onActivity?.()
+      }
+    })
+  } finally {
+    console.log(
+      JSON.stringify({
+        phase: control?.phase,
+        userChars: user.length,
+        firstTextMs,
+        elapsedMs: Date.now() - start
+      })
+    )
+  }
+}
 const started = Date.now()
 const result = await engine.generateNotes(input, undefined, (progress) => {
   if (progress.activity) return

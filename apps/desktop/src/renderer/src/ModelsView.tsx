@@ -23,6 +23,7 @@ import './assets/settings-redesign.css'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
 import {
   CLOUD_PROVIDERS,
+  type OpenAIRegion,
   type CloudProvider,
   type EngineChoice,
   type DownloadProgressEvent,
@@ -270,6 +271,7 @@ export default function ModelsView({
   const profileSeeded = useRef(false)
 
   const [provider, setProvider] = useState<CloudProvider>('anthropic')
+  const [openaiRegion, setOpenAIRegion] = useState<OpenAIRegion>('global')
   const [cloudModel, setCloudModel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
@@ -557,6 +559,7 @@ export default function ModelsView({
         if (!cloudFormSeeded.current && view.cloud) {
           cloudFormSeeded.current = true
           setProvider(view.cloud.provider)
+          setOpenAIRegion(view.cloud.openaiRegion ?? 'global')
           setCloudModel(view.cloud.model ?? '')
           setDataPolicyConfirmed(view.cloud.dataPolicyConfirmed === true)
         }
@@ -634,6 +637,7 @@ export default function ModelsView({
     const view = await window.notes.setSettings({
       cloud: {
         provider,
+        ...(provider === 'openai' ? { openaiRegion } : {}),
         dataPolicyConfirmed,
         ...(cloudModel.trim() ? { model: cloudModel.trim() } : {}),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
@@ -2004,6 +2008,21 @@ export default function ModelsView({
                   </label>
                 )}
 
+                {provider === 'openai' && (
+                  <label>
+                    OpenAI endpoint
+                    <select
+                      value={openaiRegion}
+                      onChange={(event) => setOpenAIRegion(event.target.value as OpenAIRegion)}
+                    >
+                      <option value="global">Global (api.openai.com)</option>
+                      <option value="us">US (us.api.openai.com)</option>
+                      <option value="eu">Europe (eu.api.openai.com)</option>
+                    </select>
+                    Save to apply this destination to generation and model discovery. Regional
+                    access depends on your project and model.
+                  </label>
+                )}
                 <div className="key-form">
                   <select
                     value={provider}
@@ -2061,11 +2080,13 @@ export default function ModelsView({
                 </div>
                 {provider !== 'groq' && provider !== 'openrouter' && (
                   <CloudModelPicker
-                    key={provider}
+                    key={provider === 'openai' ? provider + openaiRegion : provider}
                     provider={provider}
                     saved={
                       settings?.cloud?.provider === provider &&
                       settings.cloud.hasKey &&
+                      (provider !== 'openai' ||
+                        openaiRegion === (settings.cloud.openaiRegion ?? 'global')) &&
                       !apiKey.trim()
                     }
                     revision={catalogRevision}

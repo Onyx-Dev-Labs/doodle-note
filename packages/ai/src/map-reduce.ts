@@ -24,8 +24,8 @@ import type {
  * the meeting (head+tail truncation); now the transcript is chunked at
  * segment boundaries, each chunk is condensed into dense factual bullet
  * notes, and the final pass writes the polished notes from the condensed
- * material plus the user's rough notes. A failed chunk degrades to a marked
- * gap instead of sinking the run; the run fails only if every chunk fails.
+ * material plus the user's rough notes. Local generation requires complete
+ * sections; hosted engines retain their marked-gap fallback.
  */
 
 /** Default single-pass transcript budget (chars) — sized to the local
@@ -98,13 +98,34 @@ export function chunkSegments(
   return chunks
 }
 
-function chunkUserMessage(index: number, total: number, segments: MergeSegment[]): string {
+/** Keep the timeline and attribution while avoiding repeated prefill of identical utterances. */
+function referenceRepeatedText(segments: MergeSegment[]): MergeSegment[] {
+  // Line references are unambiguous only when every segment occupies one line.
+  if (segments.some((segment) => /[\r\n]/.test(segment.text))) return segments
+  const firstLine = new Map<string, number>()
+  return segments.map((segment, index) => {
+    const previous = firstLine.get(segment.text)
+    if (previous === undefined) {
+      firstLine.set(segment.text, index + 1)
+      return segment
+    }
+    const reference = `[same words as line ${previous}]`
+    return reference.length < segment.text.length ? { ...segment, text: reference } : segment
+  })
+}
+
+function chunkUserMessage(
+  index: number,
+  total: number,
+  segments: MergeSegment[],
+  half?: 1 | 2
+): string {
   return `This is part ${index + 1} of ${total} of the meeting transcript.
 
 === TRANSCRIPT SLICE ===
-${formatTranscript(segments)}
+${formatTranscript(half ? referenceRepeatedText(segments) : segments)}
 
-Write the dense factual notes for this slice now.`
+${half ? `This is half ${half} of this section. Repeat references count from the first transcript line above. List distinct decisions, amounts, deadlines and named owners first, even when mentioned only once. Omit conversational filler. ` : ''}Write the dense factual notes for this slice now.`
 }
 
 /**
@@ -133,6 +154,7 @@ export async function generateMeetingNotes(
       {
         ...control,
         phase: 'writing',
+        requireFullContext: engine.subdivideOnLimit,
         onActivity: () => onProgress?.({ phase: 'writing', activity: true })
       }
     )
@@ -147,14 +169,16 @@ export async function generateMeetingNotes(
   for (let i = 0; i < chunks.length; i++) {
     control?.signal?.throwIfAborted()
     onProgress?.({ phase: 'condensing', current: i + 1, total: chunks.length })
-    try {
-      const result = await engine.runRaw(
+    const condense = (segments: MergeSegment[], half?: 1 | 2): Promise<MergedNotes> =>
+      engine.runRaw(
         buildChunkSystemPrompt(input.speakers),
-        chunkUserMessage(i, chunks.length, chunks[i]!),
+        chunkUserMessage(i, chunks.length, segments, half),
         undefined,
         {
           ...control,
           phase: 'condensing',
+          ...(half ? { temperature: 0 } : {}),
+          requireFullContext: engine.subdivideOnLimit,
           onActivity: () =>
             onProgress?.({
               phase: 'condensing',
@@ -164,11 +188,33 @@ export async function generateMeetingNotes(
             })
         }
       )
+    try {
+      const chunk = chunks[i]!
+      let markdown: string
+      try {
+        markdown = (await condense(chunk)).markdown
+      } catch (error) {
+        control?.signal?.throwIfAborted()
+        if (
+          !engine.subdivideOnLimit ||
+          chunk.length < 2 ||
+          !(error instanceof GenerationError) ||
+          (error.code !== 'timeout' && error.code !== 'output-limit')
+        )
+          throw error
+        // The native producer has settled. Retry each half once, in order, and
+        // only use their results when both finish. Never retain truncated text.
+        const middle = Math.ceil(chunk.length / 2)
+        const left = await condense(chunk.slice(0, middle), 1)
+        control?.signal?.throwIfAborted()
+        const right = await condense(chunk.slice(middle), 2)
+        markdown = left.markdown + '\n' + right.markdown
+      }
       control?.signal?.throwIfAborted()
-      parts.push(`--- Part ${i + 1} of ${chunks.length} ---\n${result.markdown}`)
+      parts.push(`--- Part ${i + 1} of ${chunks.length} ---\n${markdown}`)
     } catch (err) {
       control?.signal?.throwIfAborted()
-      if (err instanceof GenerationError) throw err
+      if (engine.subdivideOnLimit || err instanceof GenerationError) throw err
       console.error(`[notes] condensing part ${i + 1}/${chunks.length} failed:`, err)
       failures += 1
       parts.push(
@@ -181,7 +227,7 @@ export async function generateMeetingNotes(
   }
 
   let condensed = parts.join('\n\n')
-  if (condensed.length > MAX_CONDENSED_CHARS) {
+  if (!engine.subdivideOnLimit && condensed.length > MAX_CONDENSED_CHARS) {
     // Even the condensed notes overflow (marathon meeting). Keep head + tail
     // and say so — identical spirit to the old fallback, but now operating
     // on condensed notes instead of raw transcript, so far less is lost.
@@ -200,6 +246,7 @@ export async function generateMeetingNotes(
     {
       ...control,
       phase: 'writing',
+      requireFullContext: engine.subdivideOnLimit,
       onActivity: () => onProgress?.({ phase: 'writing', activity: true })
     }
   )

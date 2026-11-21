@@ -9,6 +9,14 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "1.0.2",
+    date: "Unreleased",
+    highlights: [
+      "Local meeting notes retry a section in smaller parts when it reaches a time or output limit, while keeping your existing notes safe if generation cannot finish",
+      "Choose Global, US, or Europe for OpenAI note generation and model discovery in Settings; regional access requires an eligible OpenAI project and model",
+    ],
+  },
+  {
     version: "1.0.1",
     date: "November 12, 2026",
     highlights: [

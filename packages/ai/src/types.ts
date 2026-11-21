@@ -67,6 +67,8 @@ export interface AskAnswer extends MergedNotes {
 export interface GenerationControl {
   signal?: AbortSignal
   phase?: 'condensing' | 'writing'
+  /** Check the entire local meeting prompt and output reserve against the actual context. */
+  requireFullContext?: boolean
   /** Activity counts only; intermediate text never leaves the engine. */
   onActivity?: () => void
   /**
@@ -102,6 +104,8 @@ export interface NotesEngine {
    * are condensed first (map-reduce.ts). Unset = the local-context default.
    */
   readonly singlePassThresholdChars?: number
+  /** Allow one bounded subdivision after local condensation hits a time or output limit. */
+  readonly subdivideOnLimit?: boolean
   /** Complete bounded request, used by versioned recipes. No input truncation. */
   runBounded?(
     system: string,
