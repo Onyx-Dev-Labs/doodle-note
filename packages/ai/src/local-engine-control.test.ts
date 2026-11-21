@@ -106,3 +106,19 @@ test('a request too big for the small context is refused before any generation',
   )
   assert.equal(record.prompts.length, 0)
 })
+
+test('single-pass meeting notes reject tokenizer overflow before generating partial notes', async () => {
+  for (const oversizedField of ['transcript', 'rough notes']) {
+    const record = { contexts: [] as number[], prompts: [] as Array<{ maxTokens: number; temperature: number }> }
+    const engine = engineWith(record)
+    await assert.rejects(
+      engine.generateNotes({
+        title: 'Synthetic context boundary',
+        rawNotesMarkdown: oversizedField === 'rough notes' ? 'budget '.repeat(3000) : '',
+        segments: [{ speaker: 'You', startMs: 0, text: oversizedField === 'transcript' ? '決定'.repeat(3000) : 'A short meeting.' }]
+      }),
+      /exceed the local model context/
+    )
+    assert.equal(record.prompts.length, 0)
+  }
+})

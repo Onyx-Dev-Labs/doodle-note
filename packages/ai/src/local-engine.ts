@@ -1,6 +1,7 @@
 import { assertRequestFits } from './bounded-request'
 import {
   GENERATION_LIMITS,
+  GenerationError,
   requireCompleteOutput,
   withGenerationDeadline
 } from './generation-control'
@@ -60,6 +61,7 @@ export const DEFAULT_MODELS_DIR = path.join(os.homedir(), '.cache', 'doodle-note
 
 export class LocalNotesEngine implements NotesEngine {
   readonly id: string
+  readonly subdivideOnLimit = true
   readonly label: string
 
   private llama: Llama | null = null
@@ -266,18 +268,37 @@ export class LocalNotesEngine implements NotesEngine {
                   .contextText.tokenize(this.model!.tokenizer).length
             })
           : undefined
-        if (bounded) assertRequestFits(systemPrompt, userMessage, {
-          contextWindowTokens: context.contextSize,
-          outputReserveTokens: Math.min(
-            control?.maxTokens ?? Infinity,
-            GENERATION_LIMITS.writing.maxTokens
-          ),
-          safetyMarginTokens: 256,
-          accounting: 'model-tokenizer',
-          countInputTokens: (_system, user) => session.chatWrapper.generateContextState({
-            chatHistory: [...session.getChatHistory(), { type: 'user', text: user }, { type: 'model', response: [] }]
-          }).contextText.tokenize(this.model!.tokenizer).length
-        })
+        if (bounded || control?.requireFullContext)
+          assertRequestFits(
+            systemPrompt,
+            userMessage,
+            {
+              contextWindowTokens: context.contextSize,
+              outputReserveTokens: Math.min(
+                control?.maxTokens ?? Infinity,
+                GENERATION_LIMITS[control?.phase ?? 'writing'].maxTokens
+              ),
+              safetyMarginTokens: 256,
+              accounting: 'model-tokenizer',
+              countInputTokens: (_system, user) =>
+                session.chatWrapper
+                  .generateContextState({
+                    chatHistory: [
+                      ...session.getChatHistory(),
+                      { type: 'user', text: user },
+                      { type: 'model', response: [] }
+                    ]
+                  })
+                  .contextText.tokenize(this.model!.tokenizer).length
+            },
+            control?.requireFullContext
+              ? () =>
+                  new GenerationError(
+                    'output-limit',
+                    'These meeting notes exceed the local model context. Your existing notes are unchanged.'
+                  )
+              : undefined
+          )
         signal.throwIfAborted()
         const result = await session.promptWithMeta(prompt?.user ?? userMessage, {
           signal,

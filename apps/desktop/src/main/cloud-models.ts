@@ -1,7 +1,7 @@
+import { resolveOpenAIBaseURL, type OpenAIRegion } from '@repo/ai'
 import type { CloudProvider, CloudModelsResult } from '../shared/notes-api'
 
 const endpoints: Partial<Record<CloudProvider, string>> = {
-  openai: 'https://api.openai.com/v1/models',
   anthropic: 'https://api.anthropic.com/v1/models?limit=100',
   grok: 'https://api.x.ai/v1/language-models',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',
@@ -12,9 +12,11 @@ const endpoints: Partial<Record<CloudProvider, string>> = {
 export async function fetchCloudModels(
   provider: CloudProvider,
   apiKey: string,
-  request: typeof fetch = fetch
+  request: typeof fetch = fetch,
+  openaiRegion: OpenAIRegion = 'global'
 ): Promise<CloudModelsResult> {
-  const endpoint = endpoints[provider]
+  const endpoint =
+    provider === 'openai' ? resolveOpenAIBaseURL(openaiRegion) + '/models' : endpoints[provider]
   if (!endpoint) return { models: [], error: 'Select a supported provider.' }
   if (provider !== 'ollama' && !apiKey) return { models: [], error: 'Save an API key first.' }
   const headers: Record<string, string> =

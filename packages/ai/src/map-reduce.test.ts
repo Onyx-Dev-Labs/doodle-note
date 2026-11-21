@@ -216,3 +216,91 @@ it('deadline/output-limit errors cannot degrade into a successful summary with g
     assert.equal(calls, 1)
   }
 })
+
+for (const code of ['timeout', 'output-limit'] as const) {
+  it(`recovers a local ${code} by condensing both halves before writing`, async () => {
+    const { GenerationError } = await import('./generation-control')
+    const engine = Object.assign(new FakeEngine(), { subdivideOnLimit: true })
+    const segments = makeSegments(150)
+    let first = true
+    const seen = new Set<number>()
+    engine.runRaw = async (system, user) => {
+      if (system === CHUNK_SYSTEM_PROMPT) {
+        if (first) {
+          first = false
+          throw new GenerationError(code, 'synthetic limit')
+        }
+        for (const match of user.matchAll(/segment (\d+) /g)) seen.add(Number(match[1]))
+      } else {
+        assert.equal(seen.size, segments.length)
+      }
+      return { markdown: 'complete', elapsedMs: 1, engine: 'local fixture' }
+    }
+    assert.equal((await engine.generateNotes(baseInput(segments))).markdown, 'complete')
+  })
+}
+
+it('stops after one local subdivision if a smaller section still exceeds its limit', async () => {
+  const { GenerationError } = await import('./generation-control')
+  const engine = Object.assign(new FakeEngine(), { subdivideOnLimit: true })
+  let calls = 0
+  engine.runRaw = async () => {
+    calls++
+    throw new GenerationError('timeout', 'synthetic timeout')
+  }
+  await assert.rejects(engine.generateNotes(baseInput(makeSegments(150))), /synthetic timeout/)
+  assert.equal(calls, 2)
+})
+
+it('retains every local summary for exact tokenizer validation before final writing', async () => {
+  const engine = Object.assign(new FakeEngine(), { subdivideOnLimit: true })
+  const segments = makeSegments(150)
+  const chunks = chunkSegments(segments)
+  let index = 0
+  engine.runRaw = async (system, user) => {
+    if (system === CHUNK_SYSTEM_PROMPT) {
+      index++
+      return { markdown: 'x'.repeat(45000) + ' marker-' + index, elapsedMs: 1, engine: 'fixture' }
+    }
+    for (let i = 1; i <= chunks.length; i++) assert.ok(user.includes('marker-' + i))
+    return { markdown: 'complete', elapsedMs: 1, engine: 'fixture' }
+  }
+  await engine.generateNotes(baseInput(segments))
+})
+
+it('keeps the speaker and timestamp of repeated words when retrying a smaller section', async () => {
+  const { GenerationError } = await import('./generation-control')
+  const engine = Object.assign(new FakeEngine(), { subdivideOnLimit: true })
+  const segments = makeSegments(150)
+  segments[1]!.text = segments[0]!.text
+  let calls = 0
+  engine.runRaw = async (_system, user) => {
+    calls++
+    if (calls === 1) throw new GenerationError('timeout', 'synthetic timeout')
+    if (calls === 2) {
+      assert.ok(user.includes(formatTranscript([segments[0]!])))
+      assert.ok(user.includes(formatTranscript([{ ...segments[1]!, text: '[same words as line 1]' }])))
+    }
+    return { markdown: 'complete', elapsedMs: 1, engine: 'fixture' }
+  }
+  await engine.generateNotes(baseInput(segments))
+})
+
+it('retains literal repeated words in multiline retry slices', async () => {
+  const { GenerationError } = await import('./generation-control')
+  const engine = Object.assign(new FakeEngine(), { subdivideOnLimit: true })
+  const segments = makeSegments(150)
+  segments[0]!.text = 'First line\nSecond line'
+  segments[2]!.text = segments[1]!.text
+  let calls = 0
+  engine.runRaw = async (_system, user) => {
+    calls++
+    if (calls === 1) throw new GenerationError('timeout', 'synthetic timeout')
+    if (calls === 2) {
+      assert.ok(user.includes(formatTranscript([segments[2]!])))
+      assert.ok(!user.includes('[same words as line'))
+    }
+    return { markdown: 'complete', elapsedMs: 1, engine: 'fixture' }
+  }
+  await engine.generateNotes(baseInput(segments))
+})

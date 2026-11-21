@@ -19,7 +19,7 @@ import { LibraryActivity } from './library-activity'
 import { NotesGenerationJobs } from './notes-generation-job'
 
 /** Run the real IPC/service code, replacing only native runtime and filesystem selection. */
-test('service IPC owns preparation, scopes cancel/progress, preserves sources and allows retry after cleanup', async () => {
+test('service IPC owns preparation, scopes cancel/progress, preserves sources and allows retry after cleanup', async (t) => {
   const dir = fs.mkdtempSync(path.join(tmpdir(), 'dn-generation-test-'))
   type Handler = (...args: unknown[]) => unknown
   const handlers = new Map<string, Handler>()
@@ -196,6 +196,40 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
       (await enhance({ ...request, runId: 'after-recipe' })).markdown,
       'after recipe failure'
     )
+
+    await t.test('saved OpenAI destinations survive restart and invalid IPC updates', () => {
+      const settingsFile = path.join(dir, 'settings.json')
+      fs.writeFileSync(
+        settingsFile,
+        JSON.stringify({
+          engineChoice: 'cloud',
+          cloud: { provider: 'openai', apiKeyEncrypted: 'fixture' }
+        })
+      )
+      const restart = (): void => new exports.NotesService!(dir, () => {}, {}).registerIpc()
+      const read = (): api.NotesSettingsView =>
+        handlers.get(api.NOTES_GET_SETTINGS_CHANNEL)!() as api.NotesSettingsView
+      const save = (openaiRegion: string): api.NotesSettingsView =>
+        handlers.get(api.NOTES_SET_SETTINGS_CHANNEL)!(
+          {},
+          {
+            cloud: { provider: 'openai', openaiRegion }
+          }
+        ) as api.NotesSettingsView
+      restart()
+      assert.equal(read().cloud?.openaiRegion, 'global')
+      assert.equal(save('eu').cloud?.openaiRegion, 'eu')
+      restart()
+      assert.equal(read().cloud?.openaiRegion, 'eu')
+      assert.match(save('invalid').error!, /region/)
+      assert.equal(read().cloud?.openaiRegion, 'eu')
+      const stored = JSON.parse(fs.readFileSync(settingsFile, 'utf8'))
+      assert.equal(stored.cloud.apiKeyEncrypted, 'fixture')
+      stored.cloud.openaiRegion = 'invalid'
+      fs.writeFileSync(settingsFile, JSON.stringify(stored))
+      restart()
+      assert.equal(read().cloud, undefined)
+    })
   } finally {
     await service.dispose()
     fs.rmSync(dir, { recursive: true, force: true })

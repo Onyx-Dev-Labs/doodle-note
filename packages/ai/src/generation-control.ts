@@ -34,7 +34,7 @@ export async function withGenerationDeadline<T>(
       controller.abort(
         new GenerationError(
           'timeout',
-          `Notes ${phase} timed out. Your existing notes are unchanged. Retry or choose another local model in Settings.`
+          `Notes ${phase} timed out. Your existing notes are unchanged. You can retry when the Mac is less busy.`
         )
       ),
     timeoutMs
@@ -56,7 +56,7 @@ export function requireCompleteOutput(stopReason: string, phase: GenerationPhase
   if (stopReason === 'maxTokens' || stopReason === 'length') {
     throw new GenerationError(
       'output-limit',
-      `Notes ${phase} reached its output limit. No incomplete notes were saved. Retry or choose another local model in Settings.`
+      `Notes ${phase} reached its output limit. Your existing notes are unchanged.`
     )
   }
   if (stopReason === 'abort') throw new GenerationError('canceled', 'Notes generation canceled.')

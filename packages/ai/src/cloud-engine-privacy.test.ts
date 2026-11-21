@@ -87,7 +87,9 @@ test('all hosted providers fail before transmitting without data policy confirma
 test('OpenAI disables response storage without claiming account-wide ZDR', async () => {
   const previous = globalThis.fetch
   let body: Record<string, unknown> | undefined
-  globalThis.fetch = async (_url, init) => {
+  const urls: string[] = []
+  globalThis.fetch = async (url, init) => {
+    urls.push(String(url))
     body = JSON.parse(String(init?.body))
     return Response.json(
       {
@@ -100,14 +102,22 @@ test('OpenAI disables response storage without claiming account-wide ZDR', async
     )
   }
   try {
-    await assert.rejects(
-      new CloudNotesEngine({
-        provider: 'openai',
-        apiKey: 'fixture',
-        dataPolicyConfirmed: true
-      }).runRaw('system', 'fixture')
-    )
-    assert.equal(body?.store, false)
+    for (const [region, host] of [
+      [undefined, 'api.openai.com'],
+      ['us', 'us.api.openai.com'],
+      ['eu', 'eu.api.openai.com']
+    ] as const) {
+      await assert.rejects(
+        new CloudNotesEngine({
+          provider: 'openai',
+          apiKey: 'fixture',
+          openaiRegion: region,
+          dataPolicyConfirmed: true
+        }).runRaw('system', 'fixture')
+      )
+      assert.deepEqual(urls.splice(0), [`https://${host}/v1/responses`])
+      assert.equal(body?.store, false)
+    }
   } finally {
     globalThis.fetch = previous
   }

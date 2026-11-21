@@ -40,6 +40,8 @@ export const NOTES_ASK_TOKEN_CHANNEL = 'notes:ask-token'
 export const NOTES_ASK_GLOBAL_TOKEN_CHANNEL = 'notes:ask-global-token'
 
 // Retired IDs remain readable so an update preserves existing encrypted settings.
+export type OpenAIRegion = 'global' | 'us' | 'eu'
+
 export type CloudProvider =
   'anthropic' | 'openai' | 'grok' | 'gemini' | 'groq' | 'openrouter' | 'ollama'
 
@@ -93,6 +95,7 @@ export interface NotesSettingsView {
   profileName?: string
   cloud?: {
     provider: CloudProvider
+    openaiRegion?: OpenAIRegion
     model?: string
     dataPolicyConfirmed?: boolean
     hasKey: boolean
@@ -114,6 +117,7 @@ export interface NotesSettingsUpdate {
    */
   cloud?: {
     provider: CloudProvider
+    openaiRegion?: OpenAIRegion
     model?: string
     dataPolicyConfirmed?: boolean
     apiKey?: string

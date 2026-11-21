@@ -13,6 +13,8 @@ import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:
 import { join } from 'node:path'
 import { escapeHtml, markdownToHtml } from '../shared/markdown-html'
 import {
+  isOpenAIRegion,
+  type OpenAIRegion,
   GenerationError,
   GlobalAskBudgetError,
   globalAskCoverageNotice,
@@ -81,6 +83,7 @@ const TRANSCRIPT_EXCERPT_CHARS = 1500
 
 /** What actually lands in userData/settings.json. */
 interface StoredCloudSettings {
+  openaiRegion?: OpenAIRegion
   dataPolicyConfirmed?: boolean
   provider: CloudProvider
   model?: string
@@ -175,7 +178,7 @@ export class NotesService {
         if (cloud.provider === 'groq' || cloud.provider === 'openrouter')
           return { models: [], error: 'Select a supported provider.' }
         const key = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
-        return fetchCloudModels(cloud.provider, key ?? '')
+        return fetchCloudModels(cloud.provider, key ?? '', fetch, cloud.openaiRegion)
       }
     )
     libraryIpc.handle(NOTES_MODELS_CHANNEL, () => this.modelsResponse())
@@ -634,6 +637,7 @@ export class NotesService {
       const apiKey = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
       if (apiKey || cloud.provider === 'ollama') {
         return new CloudNotesEngine({
+          openaiRegion: cloud.openaiRegion,
           provider: cloud.provider,
           dataPolicyConfirmed: cloud.dataPolicyConfirmed === true,
           apiKey: apiKey ?? '',
@@ -776,6 +780,7 @@ export class NotesService {
       if (!apiKey && cloud.provider !== 'ollama')
         throw new DictationCleanupError('no-provider', 'The provider key is unavailable.')
       return new CloudNotesEngine({
+        openaiRegion: cloud.openaiRegion,
         provider: cloud.provider,
         dataPolicyConfirmed: true,
         apiKey: apiKey ?? '',
@@ -894,6 +899,9 @@ export class NotesService {
       ...(cloud
         ? {
             cloud: {
+              ...(cloud.provider === 'openai'
+                ? { openaiRegion: cloud.openaiRegion ?? 'global' }
+                : {}),
               provider: cloud.provider,
               dataPolicyConfirmed: cloud.dataPolicyConfirmed === true,
               ...(cloud.model ? { model: cloud.model } : {}),
@@ -906,6 +914,8 @@ export class NotesService {
   }
 
   private applySettings(update: NotesSettingsUpdate): NotesSettingsView {
+    if (update.cloud?.openaiRegion !== undefined && !isOpenAIRegion(update.cloud.openaiRegion))
+      return { ...this.settingsView(), error: 'Select a supported OpenAI region.' }
     let error: string | undefined
     const previousSettings = { ...this.settings }
     if (update.batchTranscription)
@@ -950,6 +960,9 @@ export class NotesService {
 
       if (!error && (apiKeyEncrypted || provider === 'ollama')) {
         this.settings.cloud = {
+          ...(provider === 'openai'
+            ? { openaiRegion: update.cloud.openaiRegion ?? previous?.openaiRegion ?? 'global' }
+            : {}),
           provider,
           dataPolicyConfirmed: update.cloud.dataPolicyConfirmed === true,
           ...(model ? { model } : {}),
@@ -1006,10 +1019,14 @@ export class NotesService {
       if (
         cloud &&
         isStoredCloudProvider(cloud.provider) &&
+        (cloud.provider !== 'openai' ||
+          cloud.openaiRegion === undefined ||
+          isOpenAIRegion(cloud.openaiRegion)) &&
         (cloud.provider === 'ollama' ||
           (typeof cloud.apiKeyEncrypted === 'string' && cloud.apiKeyEncrypted.length > 0))
       ) {
         settings.cloud = {
+          ...(cloud.provider === 'openai' ? { openaiRegion: cloud.openaiRegion ?? 'global' } : {}),
           provider: cloud.provider,
           dataPolicyConfirmed: cloud.dataPolicyConfirmed === true,
           ...(typeof cloud.model === 'string' && cloud.model ? { model: cloud.model } : {}),

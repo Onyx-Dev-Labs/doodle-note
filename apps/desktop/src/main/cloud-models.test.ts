@@ -92,3 +92,22 @@ test('catalog failures never expose provider response bodies or thrown secrets',
   await fetchCloudModels('openrouter', 'fixture', never)
   assert.equal(calls, 0)
 })
+
+for (const region of ['us', 'eu'] as const) {
+  test(`OpenAI keeps catalog errors on the saved ${region} endpoint`, async () => {
+    for (const status of [401, 403, 429]) {
+      const urls: string[] = []
+      const result = await fetchCloudModels(
+        'openai',
+        'fixture',
+        async (url) => {
+          urls.push(String(url))
+          return new Response(null, { status })
+        },
+        region
+      )
+      assert.deepEqual(urls, [`https://${region}.api.openai.com/v1/models`])
+      assert.ok(result.error)
+    }
+  })
+}
